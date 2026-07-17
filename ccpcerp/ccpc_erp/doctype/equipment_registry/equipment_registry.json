@@ -1,0 +1,155 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "autoname": "field:equipment_number",
+ "creation": "2026-07-17 14:32:51.270351",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "equipment_number",
+  "equipment_description",
+  "department",
+  "area",
+  "column_break_7soh",
+  "manufacturer",
+  "model",
+  "serial_number",
+  "criticality",
+  "motor_info_section",
+  "motor_power",
+  "motor_fla",
+  "motor_rpm",
+  "equipment_rpm",
+  "capacity",
+  "capacity_unit",
+  "physical_location",
+  "voltage"
+ ],
+ "fields": [
+  {
+   "fieldname": "equipment_number",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Equipment Number",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "equipment_description",
+   "fieldtype": "Data",
+   "label": "Equipment Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "manufacturer",
+   "fieldtype": "Data",
+   "label": "Manufacturer "
+  },
+  {
+   "fieldname": "model",
+   "fieldtype": "Data",
+   "label": "Model"
+  },
+  {
+   "fieldname": "serial_number",
+   "fieldtype": "Data",
+   "label": "Serial Number"
+  },
+  {
+   "fieldname": "criticality",
+   "fieldtype": "Select",
+   "label": "Criticality",
+   "options": "Critical\nMajor\nMinor"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Department"
+  },
+  {
+   "fieldname": "area",
+   "fieldtype": "Data",
+   "label": "Area"
+  },
+  {
+   "fieldname": "motor_power",
+   "fieldtype": "Float",
+   "label": "Motor Power (KW)"
+  },
+  {
+   "fieldname": "motor_rpm",
+   "fieldtype": "Int",
+   "label": "Motor RPM"
+  },
+  {
+   "fieldname": "equipment_rpm",
+   "fieldtype": "Int",
+   "label": "Equipment RPM"
+  },
+  {
+   "fieldname": "capacity",
+   "fieldtype": "Float",
+   "label": "Capacity"
+  },
+  {
+   "fieldname": "capacity_unit",
+   "fieldtype": "Select",
+   "label": "Capacity Unit",
+   "options": "\nTPH\nkg/hr\nm\u00b3/hr\nL/min\nGPM\nCFM"
+  },
+  {
+   "fieldname": "physical_location",
+   "fieldtype": "Data",
+   "label": "Physical Location"
+  },
+  {
+   "fieldname": "motor_info_section",
+   "fieldtype": "Section Break",
+   "label": "MOTOR INFO"
+  },
+  {
+   "fieldname": "motor_fla",
+   "fieldtype": "Float",
+   "label": "Motor FLA"
+  },
+  {
+   "fieldname": "voltage",
+   "fieldtype": "Data",
+   "label": "Voltage"
+  },
+  {
+   "fieldname": "column_break_7soh",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-17 15:22:27.381372",
+ "modified_by": "Administrator",
+ "module": "CCPC ERP",
+ "name": "Equipment Registry",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
