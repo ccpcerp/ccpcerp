@@ -1,0 +1,168 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "allow_rename": 1,
+ "autoname": "Naming_Series:WR-.##",
+ "creation": "2026-07-17 16:21:23.821165",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_agr4",
+  "request_type",
+  "equipment",
+  "equipment_description",
+  "asset_location",
+  "department",
+  "column_break_eejk",
+  "date_reported",
+  "requested_by",
+  "maintenance_section",
+  "section_break_vin5",
+  "problem_description",
+  "priority",
+  "section_break_nfdu",
+  "status",
+  "problem_details_section",
+  "naming_series",
+  "job_order"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_agr4",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "Now",
+   "fieldname": "date_reported",
+   "fieldtype": "Datetime",
+   "label": "Date Reported",
+   "read_only": 1
+  },
+  {
+   "default": "__user",
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested by",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Select",
+   "label": "Department",
+   "options": "\nWet Mill Plant\nCogen Plant\nGlucose Plant\nOil Refinery Plant\nDry Mill Plant\nQA/QC Department\nAdmin Department\nMaintenance Department\nFeed Mill Plant",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_vin5",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "equipment",
+   "fieldtype": "Link",
+   "label": "Equipment No.",
+   "options": "Equipment Registry"
+  },
+  {
+   "fieldname": "problem_description",
+   "fieldtype": "Small Text",
+   "in_list_view": 1,
+   "label": "Trouble or Task Description",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_nfdu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "Open",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Open\nConverted to Job Order\nIn Progress\nClosed\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "label": "Priority #",
+   "options": "\n1\n2\n3\n4"
+  },
+  {
+   "fieldname": "asset_location",
+   "fieldtype": "Data",
+   "label": "Asset / Location Description"
+  },
+  {
+   "default": "Equipment",
+   "fieldname": "request_type",
+   "fieldtype": "Select",
+   "label": "Request Type",
+   "options": "\nEquipment\nFacility\nFurniture\nVehicle\nOther"
+  },
+  {
+   "fieldname": "problem_details_section",
+   "fieldtype": "Section Break",
+   "label": "PROBLEM DETAILS"
+  },
+  {
+   "fieldname": "column_break_eejk",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "equipment_description",
+   "fieldtype": "Data",
+   "label": "Equipment Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "maintenance_section",
+   "fieldtype": "Select",
+   "label": "Maintence Section",
+   "options": "\nElectrical\nMechanical\nInstrumentation\nCivil\nMaintenance Welder\nProject Welder",
+   "reqd": 1
+  },
+  {
+   "fieldname": "naming_series",
+   "fieldtype": "Select",
+   "label": "ID",
+   "options": "WR-.##"
+  },
+  {
+   "fieldname": "job_order",
+   "fieldtype": "Link",
+   "label": "Job Order",
+   "options": "Job Order",
+   "read_only": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-20 17:26:02.181524",
+ "modified_by": "Administrator",
+ "module": "CCPC ERP",
+ "name": "Work Request",
+ "naming_rule": "By \"Naming Series\" field",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

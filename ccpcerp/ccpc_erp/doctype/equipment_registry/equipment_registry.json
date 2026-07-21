@@ -64,9 +64,10 @@
   },
   {
    "fieldname": "department",
-   "fieldtype": "Link",
+   "fieldtype": "Select",
    "label": "Department",
-   "options": "Department"
+   "options": "\nWet Mill Plant\nCogen Plant\nGlucose Plant\nOil Refinery Plant\nDry Mill Plant\nQA/QC Department\nAdmin Department\nMaintenance Department\nFeed Mill Plant",
+   "reqd": 1
   },
   {
    "fieldname": "area",
@@ -127,7 +128,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-17 15:22:27.381372",
+ "modified": "2026-07-18 13:42:17.217094",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Equipment Registry",

@@ -1,0 +1,236 @@
+{
+ "actions": [],
+ "allow_bulk_edit": 1,
+ "autoname": "autoincrement",
+ "creation": "2026-07-18 14:47:30.842024",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_break_j7hk",
+  "amended_from",
+  "work_request",
+  "equipment",
+  "equipment_description",
+  "problem_description",
+  "column_break_63wu",
+  "asset_location",
+  "department",
+  "status",
+  "priority",
+  "equipment_information_section",
+  "assignment_section",
+  "maintenance_section",
+  "assigned_to",
+  "column_break_vcla",
+  "date_assigned",
+  "planned_start",
+  "planned_finish",
+  "work_details_section",
+  "findings",
+  "root_cause",
+  "corrective_action",
+  "completion_section",
+  "actual_start",
+  "actual_finish",
+  "labor_hours",
+  "verified_by",
+  "closed_by",
+  "requested_by"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_break_j7hk",
+   "fieldtype": "Section Break",
+   "label": "Job Information"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Job Order",
+   "print_hide": 1,
+   "read_only": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "work_request",
+   "fieldtype": "Link",
+   "label": "Work Request",
+   "options": "Work Request"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "\nOpen\nAssigned\nIn Progress\nCompleted\nClosed\nCancelled"
+  },
+  {
+   "fieldname": "priority",
+   "fieldtype": "Select",
+   "label": "Priority No.",
+   "options": "\n1\n2\n3\n4"
+  },
+  {
+   "fieldname": "equipment_information_section",
+   "fieldtype": "Section Break",
+   "label": "Equipment Information"
+  },
+  {
+   "fieldname": "equipment",
+   "fieldtype": "Link",
+   "label": "Equipment No.",
+   "options": "Equipment Registry"
+  },
+  {
+   "fieldname": "equipment_description",
+   "fieldtype": "Data",
+   "label": "Equipment Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Select",
+   "label": "Department",
+   "read_only": 1
+  },
+  {
+   "fieldname": "assignment_section",
+   "fieldtype": "Section Break",
+   "label": "Assignment"
+  },
+  {
+   "fieldname": "assigned_to",
+   "fieldtype": "Select",
+   "label": "Assigned To",
+   "options": "\nArnold Padernal\nBaron Zosimo\nBienvenedo Dumpa\nCresanto Genelazo\nCyril Catiil\nDarwin Cuay\nDecart Sasil\nDexter Amores\nDolfer Angus\nEarl Jay Sesaldo\nEdgar Laurete\nElbert Perocho\nEleazar Lagat\nElgene Demegillo\nEmerald Lapinig\nFlorante Bacunga\nFrancis Ca\u00f1ada\nFrenel Bentazal\nGerwin Pabiano\nGilbert Tidlos\nGiovanni Babarin\nGlen Mark Neri\nGuelmer Guinita\nHarvey Delos Reyes\nHomer Aguanta\nIan Hamile\nIvan Ray Ablon\nJames Daniel Mansulay\nJanrey Gomonkig\nJan Paolo Lumapay\nJayson Maglana\nJayson Oculam\nJeffrey Suson\nJeoffriy Maamo\nJerry Oliverio\nJeson Altamarino\nJheno Miano\nJhon Carlo Batutay\nJobert Felias\nJohn Martos\nJhon Ernest Cailing\nJulius Lazo\nJuly Tajores\nJun Zedrick Violon\nJun Mugot\nJunmar Sevilla\nJury Jay Jaime\nJustine Jalandoon\nKen Balahay\nKen Timothy Balahay\nKevin Sudaria\nKier Mangmang\nKyle Wahiman\nLarry Caballero\nLeonardo Amora Jr.\nLoel Lumbab\nMaico Jauculan\nMario Tinoy\nMark Dumay\nMark Lumacang\nMarken Mapalo\nMark Panerio\nMarvin Maestrado\nMechael Cagas\nNelson Imbat\nNelson Gerez Jr.\nNicasio Toston\nNoel Lumbab\nOliver Macarulay\nPeter Jaraula\nRavil Villardo\nReynaldo Cabalida\nRic Pahapay\nRoger Patindol\nRomel Talon\nRomeo Palaka\nRonald Caubanan\nRony Arioja\nRoy Toralde\nSaturnino Bedro\nShem Galindo\nSteve Esid\nVince Ave\nWilmar Liponhay"
+  },
+  {
+   "fieldname": "date_assigned",
+   "fieldtype": "Datetime",
+   "label": "Date Assigned"
+  },
+  {
+   "fieldname": "planned_start",
+   "fieldtype": "Datetime",
+   "label": "Planned Start"
+  },
+  {
+   "fieldname": "planned_finish",
+   "fieldtype": "Datetime",
+   "label": "Planned Finish"
+  },
+  {
+   "fieldname": "work_details_section",
+   "fieldtype": "Section Break",
+   "label": "Work Details"
+  },
+  {
+   "fieldname": "findings",
+   "fieldtype": "Small Text",
+   "label": "Findings"
+  },
+  {
+   "fieldname": "root_cause",
+   "fieldtype": "Small Text",
+   "label": "Root Cause"
+  },
+  {
+   "fieldname": "corrective_action",
+   "fieldtype": "Small Text",
+   "label": "Corrective Action"
+  },
+  {
+   "fieldname": "completion_section",
+   "fieldtype": "Section Break",
+   "label": "Completion"
+  },
+  {
+   "fieldname": "actual_start",
+   "fieldtype": "Datetime",
+   "label": "Actual Start"
+  },
+  {
+   "fieldname": "actual_finish",
+   "fieldtype": "Datetime",
+   "label": "Actual Finish"
+  },
+  {
+   "fieldname": "labor_hours",
+   "fieldtype": "Float",
+   "label": "Labor Hours"
+  },
+  {
+   "fieldname": "verified_by",
+   "fieldtype": "Link",
+   "label": "Verified By",
+   "options": "User"
+  },
+  {
+   "fieldname": "closed_by",
+   "fieldtype": "Link",
+   "label": "Closed By",
+   "options": "User"
+  },
+  {
+   "fieldname": "asset_location",
+   "fieldtype": "Data",
+   "label": "Asset / Location Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "maintenance_section",
+   "fieldtype": "Select",
+   "label": "Maintenance Section",
+   "read_only": 1
+  },
+  {
+   "fieldname": "problem_description",
+   "fieldtype": "Small Text",
+   "label": "Trouble or Task Description",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_63wu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Select",
+   "label": "Requested by",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_vcla",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-20 14:59:06.965728",
+ "modified_by": "Administrator",
+ "module": "CCPC ERP",
+ "name": "Job Order",
+ "naming_rule": "Autoincrement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}
