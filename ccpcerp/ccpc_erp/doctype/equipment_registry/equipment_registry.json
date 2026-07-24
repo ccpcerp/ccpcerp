@@ -20,11 +20,12 @@
   "motor_power",
   "motor_fla",
   "motor_rpm",
+  "voltage",
+  "equipment_info_section",
   "equipment_rpm",
   "capacity",
   "capacity_unit",
-  "physical_location",
-  "voltage"
+  "physical_location"
  ],
  "fields": [
   {
@@ -123,12 +124,17 @@
   {
    "fieldname": "column_break_7soh",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "equipment_info_section",
+   "fieldtype": "Section Break",
+   "label": "EQUIPMENT INFO"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-18 13:42:17.217094",
+ "modified": "2026-07-24 07:49:07.526489",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Equipment Registry",

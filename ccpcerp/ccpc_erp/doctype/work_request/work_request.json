@@ -118,7 +118,7 @@
   {
    "fieldname": "maintenance_section",
    "fieldtype": "Select",
-   "label": "Maintence Section",
+   "label": "Maintenace Section",
    "options": "\nElectrical\nMechanical\nInstrumentation\nCivil\nMaintenance Welder\nProject Welder",
    "reqd": 1
   },
@@ -139,7 +139,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-20 17:26:02.181524",
+ "modified": "2026-07-24 07:47:23.321142",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Work Request",
