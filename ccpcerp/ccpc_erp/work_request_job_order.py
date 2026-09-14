@@ -1,4 +1,8 @@
 import frappe
+from frappe import _
+
+
+JOB_ORDER_CREATION_STATUS = "Open"
 
 
 STATUS_MAP = {
@@ -11,6 +15,33 @@ STATUS_MAP = {
 	"Closed": "Closed",
 	"Cancelled": "Cancelled",
 }
+
+
+def validate_new_job_order_relationship(work_request, job_order_name=None):
+	"""Validate the authoritative relationship only while a new Job Order is established."""
+	if work_request.status != JOB_ORDER_CREATION_STATUS:
+		frappe.throw(
+			_("Job Order can only be created from an Open Work Request. Work Request {0} is {1}.").format(
+				frappe.bold(work_request.name), frappe.bold(work_request.status or _("blank"))
+			)
+		)
+	if work_request.job_order:
+		frappe.throw(
+			_("Work Request {0} has an existing or inconsistent Job Order backlink {1}.").format(
+				frappe.bold(work_request.name), frappe.bold(work_request.job_order)
+			)
+		)
+
+	filters = {"work_request": work_request.name}
+	if job_order_name:
+		filters["name"] = ["!=", job_order_name]
+	existing = frappe.db.exists("Job Order", filters)
+	if existing:
+		frappe.throw(
+			_("A Job Order ({0}) already exists for Work Request {1}.").format(
+				frappe.bold(existing), frappe.bold(work_request.name)
+			)
+		)
 
 
 def sync_work_request(job_order):

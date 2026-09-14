@@ -10,7 +10,11 @@ from ccpcerp.ccpc_erp.equipment_costing import (
 	validate_department_company,
 	validate_equipment,
 )
-from ccpcerp.ccpc_erp.work_request_job_order import clear_work_request, sync_work_request
+from ccpcerp.ccpc_erp.work_request_job_order import (
+	clear_work_request,
+	sync_work_request,
+	validate_new_job_order_relationship,
+)
 
 
 class JobOrder(Document):
@@ -50,6 +54,7 @@ class JobOrder(Document):
 			"company",
 			"equipment",
 			"equipment_description",
+			"asset_location",
 			"department",
 			"problem_description",
 			"priority",
@@ -89,6 +94,8 @@ class JobOrder(Document):
 		if not self.work_request:
 			return
 		work_request = frappe.get_doc("Work Request", self.work_request)
+		if self.is_new():
+			validate_new_job_order_relationship(work_request, self.name)
 		if self.company != work_request.company:
 			frappe.throw(_("Job Order Company must match Work Request Company."))
 		if self.equipment != work_request.equipment:

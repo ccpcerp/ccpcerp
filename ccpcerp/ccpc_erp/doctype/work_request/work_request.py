@@ -11,6 +11,7 @@ from ccpcerp.ccpc_erp.equipment_costing import (
 	validate_department_company,
 	validate_equipment,
 )
+from ccpcerp.ccpc_erp.work_request_job_order import validate_new_job_order_relationship
 
 
 MATERIAL_REQUEST_ALLOWED_STATUSES = frozenset(
@@ -48,6 +49,32 @@ def validate_material_request_eligibility(work_request):
 		require_eligible=True,
 	)
 	work_request.validate_derived_job_order()
+
+
+def validate_job_order_creation_eligibility(work_request):
+	validate_new_job_order_relationship(work_request)
+	if not work_request.company or not frappe.get_cached_value(
+		"Company", work_request.company, "name"
+	):
+		frappe.throw(
+			_("Work Request {0} must have a valid Company before creating a Job Order.").format(
+				frappe.bold(work_request.name)
+			)
+		)
+	if work_request.request_type == "Equipment" and not work_request.equipment:
+		frappe.throw(_("Equipment is required for an Equipment Work Request."))
+	validate_equipment(
+		work_request.equipment,
+		work_request.company,
+		require_active=True,
+		context=_("Work Request"),
+	)
+	validate_department_company(
+		work_request.department,
+		work_request.company,
+		_("Work Request"),
+		require_eligible=True,
+	)
 
 
 class WorkRequest(Document):
@@ -118,4 +145,35 @@ def make_material_request(source_name, target_doc=None):
 		},
 		target_doc,
 		set_missing_values,
+	)
+
+
+@frappe.whitelist()
+def make_job_order(source_name, target_doc=None):
+	source = frappe.get_doc("Work Request", source_name)
+	source.check_permission("read")
+	validate_job_order_creation_eligibility(source)
+
+	return get_mapped_doc(
+		"Work Request",
+		source_name,
+		{
+			"Work Request": {
+				"doctype": "Job Order",
+				"field_no_map": ["status", "naming_series", "job_order"],
+				"field_map": {
+					"name": "work_request",
+					"company": "company",
+					"equipment": "equipment",
+					"equipment_description": "equipment_description",
+					"asset_location": "asset_location",
+					"department": "department",
+					"maintenance_section": "maintenance_section",
+					"problem_description": "problem_description",
+					"priority": "priority",
+					"requested_by": "requested_by",
+				},
+			}
+		},
+		target_doc,
 	)
