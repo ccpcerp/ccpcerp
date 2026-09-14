@@ -83,6 +83,7 @@ class WorkRequest(Document):
 			set_department_from_equipment(self)
 
 	def validate(self):
+		self.validate_priority()
 		if self.request_type == "Equipment" and not self.equipment:
 			frappe.throw(_("Equipment is required for an Equipment Work Request."))
 		validate_equipment(self.equipment, self.company, require_active=self._requires_active_equipment())
@@ -93,6 +94,15 @@ class WorkRequest(Document):
 			require_eligible=self._requires_eligible_department(),
 		)
 		self.validate_derived_job_order()
+
+	def validate_priority(self):
+		if self.is_new():
+			if not self.priority:
+				frappe.throw(_("Priority is required for a new Work Request."))
+			return
+		before = self.get_doc_before_save()
+		if before and before.priority and not self.priority:
+			frappe.throw(_("Priority cannot be cleared after it has been saved on a Work Request."))
 
 	def _requires_active_equipment(self):
 		if not self.equipment:

@@ -13,14 +13,15 @@ global.frappe = {
 	model: { open_mapped_doc() {} },
 };
 
-const { can_create_job_order } = require("./work_request.js");
+const { can_create_job_order, set_work_request_priority_requirement } = require("./work_request.js");
 
 function form({ isNew = false, status = "Open", jobOrder = null } = {}) {
 	return {
-		doc: { name: "WR-04", status, job_order: jobOrder },
+		doc: { name: "WR-04", status, job_order: jobOrder, priority: null },
 		is_new: () => isNew,
 		buttons: [],
-		set_df_property() {},
+		properties: {},
+		set_df_property(fieldname, property, value) { this.properties[`${fieldname}.${property}`] = value; },
 		add_custom_button(label, action, group) { this.buttons.push({ label, group }); },
 	};
 }
@@ -38,3 +39,18 @@ assert.deepEqual(
 	eligible.buttons.map((button) => [button.label, button.group]),
 	[["Material Request", "Create"], ["Job Order", "Create"]]
 );
+
+const newWorkRequest = form({ isNew: true });
+set_work_request_priority_requirement(newWorkRequest);
+assert.equal(newWorkRequest.properties["priority.reqd"], 1);
+
+const historicalBlank = form();
+set_work_request_priority_requirement(historicalBlank);
+assert.equal(historicalBlank.properties["priority.reqd"], 0);
+
+const populated = form();
+populated.doc.priority = "2";
+set_work_request_priority_requirement(populated);
+populated.doc.priority = null;
+set_work_request_priority_requirement(populated);
+assert.equal(populated.properties["priority.reqd"], 1);

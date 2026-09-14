@@ -1,8 +1,15 @@
 // Copyright (c) 2026, CCPC and contributors
 // For license information, please see license.txt
 
+function set_job_order_priority_requirement(frm) {
+	if (frm.is_new() || frm.doc.priority) frm.__priority_required = true;
+	if (frm.__priority_required === undefined) frm.__priority_required = false;
+	frm.set_df_property("priority", "reqd", frm.__priority_required ? 1 : 0);
+}
+
 frappe.ui.form.on("Job Order", {
 	refresh(frm) {
+		set_job_order_priority_requirement(frm);
 		ccpcerp.equipment_department.initialize_row(frm, frm.doctype, frm.doc.name);
 	},
 
@@ -56,3 +63,7 @@ frappe.ui.form.on("Job Order", {
 		);
 	},
 });
+
+if (typeof module !== "undefined") {
+	module.exports = { set_job_order_priority_requirement };
+}

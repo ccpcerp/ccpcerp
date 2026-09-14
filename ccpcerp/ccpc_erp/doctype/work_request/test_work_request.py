@@ -27,6 +27,41 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestWorkRequestMapper(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request._", side_effect=lambda value: value)
+	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.frappe.throw", side_effect=frappe.ValidationError)
+	def test_new_work_request_requires_priority_for_every_request_type(self, throw, translate):
+		for request_type in ("Equipment", "Facility", "Furniture", "Vehicle", "Other"):
+			with self.subTest(request_type=request_type):
+				for priority in ("1", "2", "3", "4"):
+					doc = Mock(spec=WorkRequest, priority=priority, request_type=request_type)
+					doc.is_new.return_value = True
+					WorkRequest.validate_priority(doc)
+				doc = Mock(spec=WorkRequest, priority=None, request_type=request_type)
+				doc.is_new.return_value = True
+				with self.assertRaises(frappe.ValidationError):
+					WorkRequest.validate_priority(doc)
+
+	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request._", side_effect=lambda value: value)
+	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.frappe.throw", side_effect=frappe.ValidationError)
+	def test_existing_work_request_priority_is_grandfathered_but_cannot_be_cleared(
+		self, throw, translate
+	):
+		for previous, current, allowed in (
+			(None, None, True),
+			(None, "2", True),
+			("1", None, False),
+			("1", "4", True),
+		):
+			with self.subTest(previous=previous, current=current):
+				doc = Mock(spec=WorkRequest, priority=current)
+				doc.is_new.return_value = False
+				doc.get_doc_before_save.return_value = frappe._dict(priority=previous)
+				if allowed:
+					WorkRequest.validate_priority(doc)
+				else:
+					with self.assertRaises(frappe.ValidationError):
+						WorkRequest.validate_priority(doc)
+
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.get_mapped_doc")
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_job_order_creation_eligibility")
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.frappe.get_doc")
@@ -363,13 +398,13 @@ class IntegrationTestWorkRequest(IntegrationTestCase):
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_department_company")
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_equipment")
 	def test_equipment_request_requires_equipment(self, validate_equipment, validate_department):
-		doc = WorkRequest({"doctype": "Work Request", "request_type": "Equipment"})
+		doc = WorkRequest({"doctype": "Work Request", "request_type": "Equipment", "priority": "1"})
 		with self.assertRaises(frappe.ValidationError):
 			doc.validate()
 
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_department_company")
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_equipment")
 	def test_facility_request_allows_blank_equipment(self, validate_equipment, validate_department):
-		doc = WorkRequest({"doctype": "Work Request", "request_type": "Facility"})
+		doc = WorkRequest({"doctype": "Work Request", "request_type": "Facility", "priority": "1"})
 		doc.validate()
 		validate_equipment.assert_called_once_with(None, None, require_active=False)
