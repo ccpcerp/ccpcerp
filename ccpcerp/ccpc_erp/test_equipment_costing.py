@@ -576,6 +576,7 @@ class TestDepartmentClientFilters(TestCase):
 		self.assertIn("ccpcerp.equipment_department.default_from_equipment", work_request)
 		self.assertIn("ccpcerp.equipment_department.default_from_equipment", job_order)
 		self.assertIn("if (frm.doc.work_request) return;", job_order)
+		self.assertIn('"asset_location",', job_order)
 
 	def test_work_request_material_request_button_uses_status_policy(self):
 		app_root = Path(__file__).parents[1]

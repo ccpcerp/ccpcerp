@@ -8,7 +8,10 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from ccpcerp.ccpc_erp.doctype.job_order.job_order import JobOrder
-from ccpcerp.ccpc_erp.work_request_job_order import clear_work_request
+from ccpcerp.ccpc_erp.work_request_job_order import (
+	clear_work_request,
+	validate_new_job_order_relationship,
+)
 
 
 # On IntegrationTestCase, the doctype test records and all
@@ -19,6 +22,92 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestJobOrderDeleteRules(TestCase):
+	@patch("ccpcerp.ccpc_erp.work_request_job_order._", side_effect=lambda value: value)
+	@patch("ccpcerp.ccpc_erp.work_request_job_order.frappe")
+	def test_new_relationship_requires_open_blank_unlinked_work_request(
+		self, patch_frappe, translate
+	):
+		patch_frappe.db.exists.return_value = None
+		patch_frappe.bold.side_effect = lambda value: value
+		patch_frappe.throw.side_effect = frappe.ValidationError
+		eligible = frappe._dict(name="WR-04", status="Open", job_order=None)
+		validate_new_job_order_relationship(eligible)
+
+		for status in ("Converted to Job Order", "In Progress", "Closed", "Cancelled", "", None):
+			with self.subTest(status=status), self.assertRaises(frappe.ValidationError):
+				validate_new_job_order_relationship(
+					frappe._dict(name="WR-04", status=status, job_order=None)
+				)
+
+		with self.assertRaises(frappe.ValidationError):
+			validate_new_job_order_relationship(
+				frappe._dict(name="WR-04", status="Open", job_order="6")
+			)
+
+	@patch("ccpcerp.ccpc_erp.work_request_job_order._", side_effect=lambda value: value)
+	@patch("ccpcerp.ccpc_erp.work_request_job_order.frappe")
+	def test_authoritative_job_order_blocks_new_relationship(
+		self, patch_frappe, translate
+	):
+		patch_frappe.db.exists.return_value = 7
+		patch_frappe.bold.side_effect = lambda value: value
+		patch_frappe.throw.side_effect = frappe.ValidationError
+		with self.assertRaises(frappe.ValidationError):
+			validate_new_job_order_relationship(
+				frappe._dict(name="WR-04", status="Open", job_order=None)
+			)
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.validate_new_job_order_relationship")
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.frappe.get_doc")
+	def test_creation_policy_applies_only_to_new_linked_job_orders(
+		self, get_doc, validate_relationship
+	):
+		work_request = frappe._dict(
+			name="WR-05",
+			status="Converted to Job Order",
+			company="Cagayan Corn Products Corporation",
+			equipment="WP-401A",
+		)
+		get_doc.return_value = work_request
+		new = MagicMock(spec=JobOrder)
+		new.work_request = "WR-05"
+		new.name = None
+		new.company = work_request.company
+		new.equipment = work_request.equipment
+		new.is_new.return_value = True
+		JobOrder.validate_work_request_context(new)
+		validate_relationship.assert_called_once_with(work_request, None)
+
+		validate_relationship.reset_mock()
+		existing = MagicMock(spec=JobOrder)
+		existing.work_request = "WR-05"
+		existing.company = work_request.company
+		existing.equipment = work_request.equipment
+		existing.is_new.return_value = False
+		JobOrder.validate_work_request_context(existing)
+		validate_relationship.assert_not_called()
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.frappe.get_doc")
+	def test_server_context_copy_includes_facility_asset_location(self, get_doc):
+		work_request = frappe._dict(
+			company="Cagayan Corn Products Corporation",
+			equipment=None,
+			equipment_description=None,
+			asset_location="Boiler House",
+			department="Wet Mill Plant - CCPC",
+			problem_description="Repair piping support",
+			priority="2",
+			maintenance_section="Civil",
+			requested_by="Administrator",
+		)
+		get_doc.return_value = work_request
+		doc = MagicMock(spec=JobOrder)
+		doc.is_new.return_value = True
+		doc.work_request = "WR-04"
+		doc.get.side_effect = lambda fieldname: None
+		JobOrder.copy_work_request_context(doc)
+		doc.set.assert_any_call("asset_location", "Boiler House")
+
 	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.set_department_from_equipment")
 	def test_standalone_job_order_uses_shared_defaulting_but_linked_job_order_does_not(
 		self, set_department

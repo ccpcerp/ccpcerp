@@ -1,3 +1,9 @@
+const MATERIAL_REQUEST_ALLOWED_STATUSES = ["Open", "Converted to Job Order", "In Progress"];
+
+function can_create_job_order(frm) {
+	return !frm.is_new() && frm.doc.status === "Open" && !frm.doc.job_order;
+}
+
 frappe.ui.form.on("Work Request", {
     refresh(frm) {
         toggle_fields(frm);
@@ -6,6 +12,14 @@ frappe.ui.form.on("Work Request", {
 			frm.add_custom_button(__("Material Request"), () => {
 				frappe.model.open_mapped_doc({
 					method: "ccpcerp.ccpc_erp.doctype.work_request.work_request.make_material_request",
+					frm,
+				});
+			}, __("Create"));
+		}
+		if (can_create_job_order(frm)) {
+			frm.add_custom_button(__("Job Order"), () => {
+				frappe.model.open_mapped_doc({
+					method: "ccpcerp.ccpc_erp.doctype.work_request.work_request.make_job_order",
 					frm,
 				});
 			}, __("Create"));
@@ -46,7 +60,9 @@ frappe.ui.form.on("Work Request", {
 
 });
 
-const MATERIAL_REQUEST_ALLOWED_STATUSES = ["Open", "Converted to Job Order", "In Progress"];
+if (typeof module !== "undefined") {
+	module.exports = { can_create_job_order };
+}
 
 function toggle_fields(frm) {
     if (frm.doc.request_type === "Equipment") {

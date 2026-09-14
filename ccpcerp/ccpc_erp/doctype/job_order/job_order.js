@@ -24,6 +24,7 @@ frappe.ui.form.on("Job Order", {
 				"company",
 				"equipment",
 				"equipment_description",
+				"asset_location",
 				"department",
 				"problem_description",
 				"priority",
