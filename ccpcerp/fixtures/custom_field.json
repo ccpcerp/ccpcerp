@@ -1,0 +1,33 @@
+[
+ {
+  "doctype": "Custom Field",
+  "dt": "Material Request",
+  "fieldname": "equipment",
+  "fieldtype": "Link",
+  "insert_after": "company",
+  "label": "Equipment",
+  "name": "Material Request-equipment",
+  "options": "Equipment Registry"
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Material Request",
+  "fieldname": "department",
+  "fieldtype": "Link",
+  "insert_after": "equipment",
+  "label": "Department",
+		"name": "Material Request-department",
+		"options": "Department"
+	},
+	{
+		"doctype": "Custom Field",
+		"dt": "Material Request",
+		"fieldname": "work_request",
+		"fieldtype": "Link",
+		"insert_after": "department",
+		"label": "Work Request",
+		"name": "Material Request-work_request",
+		"options": "Work Request",
+		"read_only": 1
+	}
+]

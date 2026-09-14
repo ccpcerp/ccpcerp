@@ -9,7 +9,9 @@
  "field_order": [
   "equipment_number",
   "equipment_description",
+  "company",
   "department",
+  "status",
   "area",
   "column_break_7soh",
   "manufacturer",
@@ -43,6 +45,13 @@
    "reqd": 1
   },
   {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
    "fieldname": "manufacturer",
    "fieldtype": "Data",
    "label": "Manufacturer "
@@ -61,13 +70,21 @@
    "fieldname": "criticality",
    "fieldtype": "Select",
    "label": "Criticality",
-   "options": "Critical\nMajor\nMinor"
+   "options": "\nCritical\nMajor\nMinor"
   },
   {
    "fieldname": "department",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "label": "Department",
-   "options": "\nWet Mill Plant\nCogen Plant\nGlucose Plant\nOil Refinery Plant\nDry Mill Plant\nQA/QC Department\nAdmin Department\nMaintenance Department\nFeed Mill Plant",
+   "options": "Department",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "options": "Active\nInactive\nDecommissioned",
    "reqd": 1
   },
   {
@@ -134,7 +151,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-07-24 07:49:07.526489",
+ "modified": "2026-09-12 12:31:34.024533",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Equipment Registry",

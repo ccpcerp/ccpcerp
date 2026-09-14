@@ -9,6 +9,7 @@
   "section_break_j7hk",
   "amended_from",
   "work_request",
+  "company",
   "equipment",
   "equipment_description",
   "problem_description",
@@ -57,7 +58,15 @@
    "fieldname": "work_request",
    "fieldtype": "Link",
    "label": "Work Request",
-   "options": "Work Request"
+   "options": "Work Request",
+   "unique": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
   },
   {
    "fieldname": "status",
@@ -90,9 +99,9 @@
   },
   {
    "fieldname": "department",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "label": "Department",
-   "read_only": 1
+   "options": "Department"
   },
   {
    "fieldname": "assignment_section",
