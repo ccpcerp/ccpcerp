@@ -42,6 +42,12 @@ def validate_new_job_order_relationship(work_request, job_order_name=None):
 				frappe.bold(existing), frappe.bold(work_request.name)
 			)
 		)
+	if not work_request.priority:
+		frappe.throw(
+			_("Priority is required on Work Request {0} before creating a Job Order.").format(
+				frappe.bold(work_request.name)
+			)
+		)
 
 
 def sync_work_request(job_order):

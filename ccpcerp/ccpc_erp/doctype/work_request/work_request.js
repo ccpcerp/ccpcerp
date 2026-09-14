@@ -4,9 +4,16 @@ function can_create_job_order(frm) {
 	return !frm.is_new() && frm.doc.status === "Open" && !frm.doc.job_order;
 }
 
+function set_work_request_priority_requirement(frm) {
+	if (frm.is_new() || frm.doc.priority) frm.__priority_required = true;
+	if (frm.__priority_required === undefined) frm.__priority_required = false;
+	frm.set_df_property("priority", "reqd", frm.__priority_required ? 1 : 0);
+}
+
 frappe.ui.form.on("Work Request", {
     refresh(frm) {
         toggle_fields(frm);
+		set_work_request_priority_requirement(frm);
 		ccpcerp.equipment_department.initialize_row(frm, frm.doctype, frm.doc.name);
 		if (!frm.is_new() && MATERIAL_REQUEST_ALLOWED_STATUSES.includes(frm.doc.status)) {
 			frm.add_custom_button(__("Material Request"), () => {
@@ -61,7 +68,7 @@ frappe.ui.form.on("Work Request", {
 });
 
 if (typeof module !== "undefined") {
-	module.exports = { can_create_job_order };
+	module.exports = { can_create_job_order, set_work_request_priority_requirement };
 }
 
 function toggle_fields(frm) {

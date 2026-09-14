@@ -24,6 +24,7 @@ class JobOrder(Document):
 			set_department_from_equipment(self)
 
 	def validate(self):
+		self.validate_priority()
 		self.validate_work_request_immutable()
 		self.validate_duplicate_work_request()
 		self.validate_work_request_context()
@@ -34,6 +35,15 @@ class JobOrder(Document):
 			_("Job Order"),
 			require_eligible=self._requires_eligible_department(),
 		)
+
+	def validate_priority(self):
+		if self.is_new():
+			if not self.priority:
+				frappe.throw(_("Priority is required for a new Job Order."))
+			return
+		before = self.get_doc_before_save()
+		if before and before.priority and not self.priority:
+			frappe.throw(_("Priority cannot be cleared after it has been saved on a Job Order."))
 
 	def after_insert(self):
 		sync_work_request(self)
@@ -96,6 +106,8 @@ class JobOrder(Document):
 		work_request = frappe.get_doc("Work Request", self.work_request)
 		if self.is_new():
 			validate_new_job_order_relationship(work_request, self.name)
+			if self.priority != work_request.priority:
+				frappe.throw(_("Job Order Priority must match Work Request Priority when the relationship is created."))
 		if self.company != work_request.company:
 			frappe.throw(_("Job Order Company must match Work Request Company."))
 		if self.equipment != work_request.equipment:
