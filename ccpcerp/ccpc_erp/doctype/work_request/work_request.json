@@ -9,6 +9,7 @@
  "field_order": [
   "section_break_agr4",
   "request_type",
+  "company",
   "equipment",
   "equipment_description",
   "asset_location",
@@ -47,10 +48,17 @@
    "read_only": 1
   },
   {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
    "fieldname": "department",
-   "fieldtype": "Select",
+   "fieldtype": "Link",
    "label": "Department",
-   "options": "\nWet Mill Plant\nCogen Plant\nGlucose Plant\nOil Refinery Plant\nDry Mill Plant\nQA/QC Department\nAdmin Department\nMaintenance Department\nFeed Mill Plant",
+   "options": "Department",
    "reqd": 1
   },
   {

@@ -1,8 +1,14 @@
 # Copyright (c) 2026, CCPC and Contributors
 # See license.txt
 
-# import frappe
+from unittest import TestCase
+from unittest.mock import MagicMock, Mock, patch
+
+import frappe
 from frappe.tests import IntegrationTestCase
+
+from ccpcerp.ccpc_erp.doctype.job_order.job_order import JobOrder
+from ccpcerp.ccpc_erp.work_request_job_order import clear_work_request
 
 
 # On IntegrationTestCase, the doctype test records and all
@@ -12,6 +18,128 @@ EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
+class TestJobOrderDeleteRules(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.set_department_from_equipment")
+	def test_standalone_job_order_uses_shared_defaulting_but_linked_job_order_does_not(
+		self, set_department
+	):
+		standalone = MagicMock(spec=JobOrder)
+		standalone.is_new.return_value = True
+		standalone.work_request = None
+		JobOrder.before_validate(standalone)
+		set_department.assert_called_once_with(standalone)
+
+		set_department.reset_mock()
+		linked = MagicMock(spec=JobOrder)
+		linked.is_new.return_value = True
+		linked.work_request = "WR-05"
+		JobOrder.before_validate(linked)
+		set_department.assert_not_called()
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order._", side_effect=lambda value: value)
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.validate_department_company")
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.validate_equipment")
+	def test_validation_requests_full_eligibility_for_new_job_order(
+		self, validate_equipment, validate_department, translate
+	):
+		doc = MagicMock(spec=JobOrder)
+		doc.equipment = "WP-401A"
+		doc.company = "Cagayan Corn Products Corporation"
+		doc.department = "Wet Mill Plant - CCPC"
+		doc._requires_active_equipment.return_value = True
+		doc._requires_eligible_department.return_value = True
+
+		JobOrder.validate(doc)
+
+		validate_department.assert_called_once_with(
+			doc.department, doc.company, "Job Order", require_eligible=True
+		)
+
+	def test_department_reassignment_and_operational_status_transition_require_eligibility(self):
+		doc = MagicMock(spec=JobOrder)
+		doc.is_new.return_value = False
+		doc.company = "Cagayan Corn Products Corporation"
+		doc.department = "Wet Mill Plant - CCPC"
+		doc.status = "Assigned"
+		doc.get_doc_before_save.return_value = frappe._dict(
+			company=doc.company, department=doc.department, status="Open"
+		)
+		self.assertTrue(JobOrder._requires_eligible_department(doc))
+
+		doc.get_doc_before_save.return_value.status = "Assigned"
+		self.assertFalse(JobOrder._requires_eligible_department(doc))
+
+		doc.department = "Dry Mill Plant - CCPC"
+		self.assertTrue(JobOrder._requires_eligible_department(doc))
+
+	@patch("ccpcerp.ccpc_erp.work_request_job_order.frappe.get_doc")
+	def test_numeric_job_order_name_matches_and_clears_link_backlink(self, get_doc):
+		work_request = frappe._dict(
+			job_order="4",
+			status="Converted to Job Order",
+			flags=frappe._dict(),
+			save=Mock(),
+		)
+		get_doc.return_value = work_request
+
+		clear_work_request(frappe._dict(name=4, work_request="WR-05"))
+
+		self.assertIsNone(work_request.job_order)
+		self.assertEqual(work_request.status, "Open")
+		self.assertTrue(work_request.flags.syncing_job_order)
+		work_request.save.assert_called_once_with(ignore_permissions=True)
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.clear_work_request")
+	def test_blank_and_open_linked_job_order_deletion_runs_cleanup(self, cleanup):
+		for status in (None, "", "Open"):
+			with self.subTest(status=status):
+				doc = MagicMock(spec=JobOrder)
+				doc.status = status
+				JobOrder.on_trash(doc)
+				cleanup.assert_called_once_with(doc)
+				cleanup.reset_mock()
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.clear_work_request")
+	def test_progressed_job_order_deletion_is_blocked(self, cleanup):
+		with (
+			patch("ccpcerp.ccpc_erp.doctype.job_order.job_order._", side_effect=lambda value: value),
+			patch(
+				"ccpcerp.ccpc_erp.doctype.job_order.job_order.frappe.throw",
+				side_effect=frappe.ValidationError,
+			),
+		):
+			for status in ("Assigned", "In Progress", "Completed", "Closed", "Cancelled"):
+				with self.subTest(status=status), self.assertRaises(frappe.ValidationError):
+					doc = MagicMock(spec=JobOrder)
+					doc.status = status
+					JobOrder.on_trash(doc)
+		cleanup.assert_not_called()
+
+	@patch("ccpcerp.ccpc_erp.work_request_job_order.frappe.get_doc")
+	def test_standalone_blank_and_open_job_orders_need_no_work_request_cleanup(self, get_doc):
+		for status in (None, "", "Open"):
+			with self.subTest(status=status):
+				doc = frappe._dict(name=4, work_request=None, status=status)
+				JobOrder.on_trash(doc)
+		get_doc.assert_not_called()
+
+	@patch("ccpcerp.ccpc_erp.work_request_job_order.frappe.get_doc")
+	def test_different_backlink_and_unrelated_work_request_are_unchanged(self, get_doc):
+		linked_elsewhere = frappe._dict(
+			job_order="5", status="In Progress", flags=frappe._dict(), save=Mock()
+		)
+		unrelated = frappe._dict(
+			job_order="9", status="Converted to Job Order", flags=frappe._dict(), save=Mock()
+		)
+		get_doc.return_value = linked_elsewhere
+
+		clear_work_request(frappe._dict(name=4, work_request="WR-05"))
+
+		self.assertEqual((linked_elsewhere.job_order, linked_elsewhere.status), ("5", "In Progress"))
+		linked_elsewhere.save.assert_not_called()
+		self.assertEqual((unrelated.job_order, unrelated.status), ("9", "Converted to Job Order"))
+		unrelated.save.assert_not_called()
+
 
 class IntegrationTestJobOrder(IntegrationTestCase):
 	"""
@@ -19,4 +147,25 @@ class IntegrationTestJobOrder(IntegrationTestCase):
 	Use this class for testing interactions between multiple components.
 	"""
 
-	pass
+	def test_work_request_is_immutable_after_save(self):
+		doc = MagicMock(spec=JobOrder)
+		doc.is_new.return_value = False
+		doc.work_request = "WR-02"
+		doc.get_doc_before_save.return_value = frappe._dict(work_request="WR-01")
+		with self.assertRaises(frappe.ValidationError):
+			JobOrder.validate_work_request_immutable(doc)
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.clear_work_request")
+	def test_open_job_order_deletion_is_allowed(self, clear_work_request):
+		doc = MagicMock(spec=JobOrder)
+		doc.status = "Open"
+		JobOrder.on_trash(doc)
+		clear_work_request.assert_called_once_with(doc)
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.clear_work_request")
+	def test_progressed_job_order_deletion_is_blocked(self, clear_work_request):
+		doc = MagicMock(spec=JobOrder)
+		doc.status = "Assigned"
+		with self.assertRaises(frappe.ValidationError):
+			JobOrder.on_trash(doc)
+		clear_work_request.assert_not_called()

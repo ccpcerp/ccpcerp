@@ -5,6 +5,64 @@ app_description = "CCPC Maintenance Management System"
 app_email = "gani@ccpc.local"
 app_license = "mit"
 
+fixtures = [
+	{
+		"doctype": "Custom Field",
+		"filters": [
+			[
+				"name",
+				"in",
+				[
+					"Material Request-equipment",
+					"Material Request-department",
+					"Material Request-work_request",
+				],
+			]
+		],
+	}
+]
+
+doctype_js = {
+	"Work Request": "public/js/equipment_costing.js",
+	"Job Order": "public/js/equipment_costing.js",
+	"Material Request": "public/js/equipment_costing.js",
+	"Stock Entry": "public/js/equipment_costing.js",
+	"Purchase Invoice": "public/js/equipment_costing.js",
+	"Journal Entry": "public/js/equipment_costing.js",
+	"Purchase Receipt": "public/js/equipment_costing.js",
+}
+
+doc_events = {
+	"Material Request": {
+		"before_validate": [
+			"ccpcerp.ccpc_erp.equipment_costing.preserve_material_request_work_request",
+			"ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		],
+		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+	},
+	"Stock Entry": {
+		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+	},
+	"Purchase Invoice": {
+		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+	},
+	"Journal Entry": {
+		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+	},
+	"Purchase Receipt": {
+		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+	},
+}
+
 # Apps
 # ------------------
 
@@ -255,4 +313,3 @@ app_license = "mit"
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
-
