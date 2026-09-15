@@ -5,6 +5,10 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from ccpcerp.ccpc_erp.equipment_asset import (
+	set_new_equipment_snapshot,
+	validate_snapshot_immutable,
+)
 from ccpcerp.ccpc_erp.equipment_costing import (
 	set_department_from_equipment,
 	validate_department_company,
@@ -22,9 +26,12 @@ class JobOrder(Document):
 		self.copy_work_request_context()
 		if (self.is_new() or self._equipment_changed()) and not self.work_request:
 			set_department_from_equipment(self)
+		if self.is_new() and not self.work_request:
+			set_new_equipment_snapshot(self, bool(getattr(self, "equipment", None)))
 
 	def validate(self):
 		self.validate_priority()
+		validate_snapshot_immutable(self)
 		self.validate_work_request_immutable()
 		self.validate_duplicate_work_request()
 		self.validate_work_request_context()
@@ -70,6 +77,8 @@ class JobOrder(Document):
 			"priority",
 			"maintenance_section",
 			"requested_by",
+			"equipment_asset_assignment",
+			"asset",
 		):
 			if not self.get(fieldname):
 				self.set(fieldname, work_request.get(fieldname))
@@ -112,6 +121,11 @@ class JobOrder(Document):
 			frappe.throw(_("Job Order Company must match Work Request Company."))
 		if self.equipment != work_request.equipment:
 			frappe.throw(_("Job Order Equipment must match Work Request Equipment."))
+		if self.is_new() and any(
+			getattr(self, fieldname, None) != work_request.get(fieldname)
+			for fieldname in ("equipment_asset_assignment", "asset")
+		):
+			frappe.throw(_("Job Order Asset snapshot must match Work Request exactly."))
 
 	def _requires_active_equipment(self):
 		if not self.equipment:

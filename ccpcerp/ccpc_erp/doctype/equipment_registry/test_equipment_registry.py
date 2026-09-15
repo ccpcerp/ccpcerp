@@ -9,6 +9,7 @@ from frappe.tests import IntegrationTestCase
 
 from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
 	EquipmentRegistry,
+	has_protected_equipment_history,
 	has_submitted_equipment_use,
 )
 
@@ -21,6 +22,32 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestEquipmentRegistryDepartmentEligibility(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.validate_department_company")
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.has_protected_equipment_history", return_value=True)
+	def test_company_change_is_blocked_when_assignment_exists(self, history, validate_department):
+		doc = MagicMock(spec=EquipmentRegistry)
+		doc.is_new.return_value = False
+		doc.name = "EQ-1"
+		doc.equipment_number = "EQ-1"
+		doc.company = "Company B"
+		doc.department = "Department B"
+		doc._requires_eligible_department.return_value = True
+		doc.get_doc_before_save.return_value = frappe._dict(company="Company A")
+		with self.assertRaises(frappe.ValidationError):
+			EquipmentRegistry.validate(doc)
+
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.has_protected_equipment_history", return_value=True)
+	def test_rename_is_blocked_when_assignment_exists(self, history):
+		doc = MagicMock(spec=EquipmentRegistry)
+		with self.assertRaises(frappe.ValidationError):
+			EquipmentRegistry.before_rename(doc, "EQ-1", "EQ-2")
+
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.has_submitted_equipment_use", return_value=True)
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.frappe.db.exists", return_value=None)
+	def test_phase1_history_still_counts_as_protected_history(self, exists, submitted_use):
+		self.assertTrue(has_protected_equipment_history("EQ-1"))
+		submitted_use.assert_called_once_with("EQ-1")
+
 	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry._", side_effect=lambda value: value)
 	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.validate_department_company")
 	def test_validation_requests_full_eligibility_for_new_equipment(self, validate_department, translate):

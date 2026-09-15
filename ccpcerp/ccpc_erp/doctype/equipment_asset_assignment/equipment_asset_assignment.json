@@ -1,0 +1,34 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "EAA-.#####",
+ "creation": "2026-09-14 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["equipment", "asset", "company", "installed_on", "removed_on", "removal_reason", "remarks"],
+ "fields": [
+  {"fieldname": "equipment", "fieldtype": "Link", "in_list_view": 1, "label": "Equipment", "options": "Equipment Registry", "reqd": 1, "search_index": 1},
+  {"fieldname": "asset", "fieldtype": "Link", "in_list_view": 1, "label": "Asset", "options": "Asset", "reqd": 1, "search_index": 1},
+  {"fieldname": "company", "fieldtype": "Link", "label": "Company", "options": "Company", "read_only": 1, "reqd": 1},
+  {"fieldname": "installed_on", "fieldtype": "Datetime", "in_list_view": 1, "label": "Installed On", "reqd": 1, "search_index": 1},
+  {"fieldname": "removed_on", "fieldtype": "Datetime", "in_list_view": 1, "label": "Removed On"},
+  {"fieldname": "removal_reason", "fieldtype": "Small Text", "label": "Removal Reason"},
+  {"fieldname": "remarks", "fieldtype": "Small Text", "label": "Remarks"}
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-09-14 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CCPC ERP",
+ "name": "Equipment Asset Assignment",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "System Manager", "share": 1, "write": 1}
+ ],
+ "sort_field": "installed_on",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

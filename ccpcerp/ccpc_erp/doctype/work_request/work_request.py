@@ -6,6 +6,10 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.model.mapper import get_mapped_doc
 
+from ccpcerp.ccpc_erp.equipment_asset import (
+	set_new_equipment_snapshot,
+	validate_snapshot_immutable,
+)
 from ccpcerp.ccpc_erp.equipment_costing import (
 	set_department_from_equipment,
 	validate_department_company,
@@ -81,9 +85,15 @@ class WorkRequest(Document):
 	def before_validate(self):
 		if self.is_new() or self._equipment_changed():
 			set_department_from_equipment(self)
+		set_new_equipment_snapshot(
+			self,
+			getattr(self, "request_type", None) == "Equipment"
+			and bool(getattr(self, "equipment", None)),
+		)
 
 	def validate(self):
 		self.validate_priority()
+		validate_snapshot_immutable(self)
 		if self.request_type == "Equipment" and not self.equipment:
 			frappe.throw(_("Equipment is required for an Equipment Work Request."))
 		validate_equipment(self.equipment, self.company, require_active=self._requires_active_equipment())
@@ -182,6 +192,8 @@ def make_job_order(source_name, target_doc=None):
 					"problem_description": "problem_description",
 					"priority": "priority",
 					"requested_by": "requested_by",
+					"equipment_asset_assignment": "equipment_asset_assignment",
+					"asset": "asset",
 				},
 			}
 		},

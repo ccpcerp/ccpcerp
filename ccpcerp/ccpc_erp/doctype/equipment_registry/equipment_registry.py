@@ -19,8 +19,8 @@ class EquipmentRegistry(Document):
 		if not self.is_new() and self.equipment_number != self.name:
 			frappe.throw(_("Use Rename to correct an Equipment Number."))
 		before = self.get_doc_before_save()
-		if before and before.company != self.company and has_submitted_equipment_use(self.name):
-			frappe.throw(_("Company cannot be changed after submitted or cancelled stock/accounting use."))
+		if before and before.company != self.company and has_protected_equipment_history(self.name):
+			frappe.throw(_("Company cannot be changed after Equipment assignment or stock/accounting history."))
 
 	def _requires_eligible_department(self):
 		if self.is_new():
@@ -36,12 +36,19 @@ class EquipmentRegistry(Document):
 	def before_rename(self, old, new, merge=False):
 		if merge:
 			frappe.throw(_("Equipment Registry records cannot be merged."))
-		if has_submitted_equipment_use(old):
+		if has_protected_equipment_history(old):
 			frappe.throw(
-				_("Equipment Number {0} cannot be renamed after submitted or cancelled stock/accounting use.").format(
+				_("Equipment Number {0} cannot be renamed after Equipment assignment or stock/accounting history.").format(
 					frappe.bold(old)
 				)
 			)
+
+
+def has_protected_equipment_history(equipment):
+	return bool(
+		frappe.db.exists("Equipment Asset Assignment", {"equipment": equipment})
+		or has_submitted_equipment_use(equipment)
+	)
 
 
 def has_submitted_equipment_use(equipment):

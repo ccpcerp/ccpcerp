@@ -22,6 +22,18 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestJobOrderDeleteRules(TestCase):
+	@patch("ccpcerp.ccpc_erp.equipment_asset.get_current_equipment_asset")
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.set_department_from_equipment")
+	def test_new_standalone_job_order_snapshots_current_asset(self, set_department, current):
+		current.return_value = ("EAA-00001", "ASSET-1")
+		doc = MagicMock(spec=JobOrder)
+		doc.is_new.return_value = True
+		doc.work_request = None
+		doc.equipment = "EQ-1"
+		JobOrder.before_validate(doc)
+		self.assertEqual((doc.equipment_asset_assignment, doc.asset), ("EAA-00001", "ASSET-1"))
+		current.assert_called_once_with("EQ-1")
+
 	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order._", side_effect=lambda value: value)
 	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.frappe.throw", side_effect=frappe.ValidationError)
 	def test_new_standalone_job_order_requires_priority(self, throw, translate):
@@ -188,6 +200,8 @@ class TestJobOrderDeleteRules(TestCase):
 			priority="2",
 			maintenance_section="Civil",
 			requested_by="Administrator",
+			equipment_asset_assignment="EAA-00001",
+			asset="ASSET-1",
 		)
 		get_doc.return_value = work_request
 		doc = MagicMock(spec=JobOrder)
@@ -197,6 +211,32 @@ class TestJobOrderDeleteRules(TestCase):
 		JobOrder.copy_work_request_context(doc)
 		doc.set.assert_any_call("asset_location", "Boiler House")
 		doc.set.assert_any_call("priority", "2")
+		doc.set.assert_any_call("equipment_asset_assignment", "EAA-00001")
+		doc.set.assert_any_call("asset", "ASSET-1")
+
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.validate_new_job_order_relationship")
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.frappe.get_doc")
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order._", side_effect=lambda value: value)
+	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.frappe.throw", side_effect=frappe.ValidationError)
+	def test_new_linked_job_order_rejects_asset_snapshot_mismatch(
+		self, throw, translate, get_doc, validate_relationship
+	):
+		get_doc.return_value = frappe._dict(
+			name="WR-10", company="Company A", equipment="EQ-1", priority="2",
+			equipment_asset_assignment="EAA-00001", asset="ASSET-1",
+		)
+		doc = MagicMock(spec=JobOrder)
+		doc.is_new.return_value = True
+		doc.name = None
+		doc.work_request = "WR-10"
+		doc.company = "Company A"
+		doc.equipment = "EQ-1"
+		doc.priority = "2"
+		doc.get.side_effect = {
+			"equipment_asset_assignment": "EAA-00002", "asset": "ASSET-2"
+		}.get
+		with self.assertRaises(frappe.ValidationError):
+			JobOrder.validate_work_request_context(doc)
 
 	@patch("ccpcerp.ccpc_erp.doctype.job_order.job_order.set_department_from_equipment")
 	def test_standalone_job_order_uses_shared_defaulting_but_linked_job_order_does_not(
