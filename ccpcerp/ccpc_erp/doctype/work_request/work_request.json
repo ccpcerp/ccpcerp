@@ -11,6 +11,8 @@
   "request_type",
   "company",
   "equipment",
+  "equipment_asset_assignment",
+  "asset",
   "equipment_description",
   "asset_location",
   "department",
@@ -70,6 +72,20 @@
    "fieldtype": "Link",
    "label": "Equipment No.",
    "options": "Equipment Registry"
+  },
+  {
+   "fieldname": "equipment_asset_assignment",
+   "fieldtype": "Link",
+   "label": "Equipment Asset Assignment",
+   "options": "Equipment Asset Assignment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "label": "Asset",
+   "options": "Asset",
+   "read_only": 1
   },
   {
    "fieldname": "problem_description",

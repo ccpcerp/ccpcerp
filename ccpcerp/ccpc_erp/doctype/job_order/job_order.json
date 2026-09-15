@@ -11,6 +11,8 @@
   "work_request",
   "company",
   "equipment",
+  "equipment_asset_assignment",
+  "asset",
   "equipment_description",
   "problem_description",
   "column_break_63wu",
@@ -90,6 +92,20 @@
    "fieldtype": "Link",
    "label": "Equipment No.",
    "options": "Equipment Registry"
+  },
+  {
+   "fieldname": "equipment_asset_assignment",
+   "fieldtype": "Link",
+   "label": "Equipment Asset Assignment",
+   "options": "Equipment Asset Assignment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "asset",
+   "fieldtype": "Link",
+   "label": "Asset",
+   "options": "Asset",
+   "read_only": 1
   },
   {
    "fieldname": "equipment_description",

@@ -30,6 +30,8 @@ frappe.ui.form.on("Job Order", {
 			[
 				"company",
 				"equipment",
+				"equipment_asset_assignment",
+				"asset",
 				"equipment_description",
 				"asset_location",
 				"department",

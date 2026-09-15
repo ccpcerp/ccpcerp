@@ -27,6 +27,27 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestWorkRequestMapper(TestCase):
+	@patch("ccpcerp.ccpc_erp.equipment_asset.get_current_equipment_asset")
+	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.set_department_from_equipment")
+	def test_new_work_request_snapshots_only_equipment_context(self, set_department, current):
+		current.return_value = ("EAA-00001", "ASSET-1")
+		for request_type, equipment, expected in (
+			("Equipment", "EQ-1", True),
+			("Equipment", None, False),
+			("Facility", None, False),
+			("Furniture", None, False),
+			("Vehicle", None, False),
+			("Other", None, False),
+		):
+			doc = Mock(spec=WorkRequest, request_type=request_type, equipment=equipment)
+			doc.is_new.return_value = True
+			WorkRequest.before_validate(doc)
+			self.assertEqual(
+				(doc.equipment_asset_assignment, doc.asset),
+				("EAA-00001", "ASSET-1") if expected else (None, None),
+			)
+		current.assert_called_once_with("EQ-1")
+
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request._", side_effect=lambda value: value)
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.frappe.throw", side_effect=frappe.ValidationError)
 	def test_new_work_request_requires_priority_for_every_request_type(self, throw, translate):
@@ -71,7 +92,7 @@ class TestWorkRequestMapper(TestCase):
 		source_values = {
 			"name": "WR-04",
 			"company": "Cagayan Corn Products Corporation",
-			"equipment": None,
+			"equipment": "EQ-1",
 			"equipment_description": None,
 			"asset_location": "Boiler House",
 			"department": "Wet Mill Plant - CCPC",
@@ -82,8 +103,10 @@ class TestWorkRequestMapper(TestCase):
 			"status": "Open",
 			"naming_series": "WR-.##",
 			"job_order": None,
-			"request_type": "Facility",
+			"request_type": "Equipment",
 			"date_reported": "2026-09-14 08:00:00",
+			"equipment_asset_assignment": "EAA-00001",
+			"asset": "ASSET-1",
 		}
 		source = Mock(doctype="Work Request", idx=0)
 		source.name = source_values["name"]
@@ -107,6 +130,8 @@ class TestWorkRequestMapper(TestCase):
 			"status": None,
 			"naming_series": None,
 			"job_order": None,
+			"equipment_asset_assignment": None,
+			"asset": None,
 		}
 		target = Mock(doctype="Job Order", idx=0)
 		target.is_new.return_value = True
@@ -139,6 +164,8 @@ class TestWorkRequestMapper(TestCase):
 			"problem_description",
 			"priority",
 			"requested_by",
+			"equipment_asset_assignment",
+			"asset",
 		):
 			self.assertEqual(target_values[fieldname], source_values[fieldname])
 		self.assertEqual(target_values["work_request"], "WR-04")
