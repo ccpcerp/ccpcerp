@@ -5,20 +5,12 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
 
 from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
 	EquipmentRegistry,
 	has_protected_equipment_history,
 	has_submitted_equipment_use,
 )
-
-
-# On IntegrationTestCase, the doctype test records and all
-# link-field test record dependencies are recursively loaded
-# Use these module variables to add/remove to/from that list
-EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
-IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestEquipmentRegistryDepartmentEligibility(TestCase):
@@ -104,11 +96,7 @@ class TestEquipmentRegistryDepartmentEligibility(TestCase):
 
 
 
-class IntegrationTestEquipmentRegistry(IntegrationTestCase):
-	"""
-	Integration tests for EquipmentRegistry.
-	Use this class for testing interactions between multiple components.
-	"""
+class TestEquipmentRegistryAdditionalRules(TestCase):
 
 	@patch("frappe.get_meta")
 	@patch("frappe.db.exists")

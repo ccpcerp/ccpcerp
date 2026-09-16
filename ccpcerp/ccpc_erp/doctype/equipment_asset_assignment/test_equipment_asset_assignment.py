@@ -180,7 +180,7 @@ class TestEquipmentAssetAssignment(TestCase):
 			),
 			self.assertRaisesRegex(
 				frappe.ValidationError,
-				"Equipment assignment overlaps with <strong>EAA-00001</strong>\\.",
+				"Equipment assignment overlaps with EAA-00001\\.",
 			),
 		):
 			EquipmentAssetAssignment.validate_overlap(
@@ -254,9 +254,25 @@ class TestEquipmentAssetAssignment(TestCase):
 				doc.is_new.return_value = False
 				before = frappe._dict({name: getattr(doc, name) for name in ("equipment", "asset", "company", "installed_on", "removed_on")})
 				doc.get_doc_before_save.return_value = before
-				setattr(doc, fieldname, "changed")
+				changed_value = (
+					"2026-09-01 09:00:00" if fieldname == "installed_on" else "changed"
+				)
+				setattr(doc, fieldname, changed_value)
 				with self.assertRaises(frappe.ValidationError):
 					EquipmentAssetAssignment.validate_immutability(doc)
+
+	def test_equivalent_installed_time_types_are_not_treated_as_a_change(self):
+		doc = assignment()
+		doc.is_new.return_value = False
+		doc.get_doc_before_save.return_value = frappe._dict(
+			equipment=doc.equipment,
+			asset=doc.asset,
+			company=doc.company,
+			installed_on=frappe.utils.get_datetime(doc.installed_on),
+			removed_on=None,
+		)
+
+		EquipmentAssetAssignment.validate_immutability(doc)
 
 	def test_closing_once_is_allowed_but_closed_assignment_cannot_change_or_reopen(self):
 		doc = assignment(removed_on="2026-09-02")
