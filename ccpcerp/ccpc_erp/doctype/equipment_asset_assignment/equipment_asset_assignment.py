@@ -79,7 +79,12 @@ class EquipmentAssetAssignment(Document):
 		if not before:
 			return
 		for fieldname in IMMUTABLE_FIELDS:
-			if self.get(fieldname) != before.get(fieldname):
+			current_value = self.get(fieldname)
+			previous_value = before.get(fieldname)
+			if fieldname == "installed_on":
+				current_value = get_datetime(current_value)
+				previous_value = get_datetime(previous_value)
+			if current_value != previous_value:
 				frappe.throw(_("{0} cannot be changed after the assignment is saved.").format(
 					frappe.bold(self.meta.get_label(fieldname))
 				))

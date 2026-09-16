@@ -5,20 +5,12 @@ from unittest import TestCase
 from unittest.mock import MagicMock, Mock, patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
 
 from ccpcerp.ccpc_erp.doctype.job_order.job_order import JobOrder
 from ccpcerp.ccpc_erp.work_request_job_order import (
 	clear_work_request,
 	validate_new_job_order_relationship,
 )
-
-
-# On IntegrationTestCase, the doctype test records and all
-# link-field test record dependencies are recursively loaded
-# Use these module variables to add/remove to/from that list
-EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
-IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestJobOrderDeleteRules(TestCase):
@@ -360,11 +352,7 @@ class TestJobOrderDeleteRules(TestCase):
 		unrelated.save.assert_not_called()
 
 
-class IntegrationTestJobOrder(IntegrationTestCase):
-	"""
-	Integration tests for JobOrder.
-	Use this class for testing interactions between multiple components.
-	"""
+class TestJobOrderAdditionalRules(TestCase):
 
 	def test_work_request_is_immutable_after_save(self):
 		doc = MagicMock(spec=JobOrder)

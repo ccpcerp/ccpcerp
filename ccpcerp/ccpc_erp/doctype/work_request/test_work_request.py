@@ -7,7 +7,6 @@ from unittest.mock import Mock, patch
 import frappe
 
 from frappe.model.mapper import map_doc
-from frappe.tests import IntegrationTestCase
 
 from ccpcerp.ccpc_erp.doctype.work_request.work_request import (
 	MATERIAL_REQUEST_ALLOWED_STATUSES,
@@ -17,13 +16,6 @@ from ccpcerp.ccpc_erp.doctype.work_request.work_request import (
 	validate_job_order_creation_eligibility,
 	validate_material_request_eligibility,
 )
-
-
-# On IntegrationTestCase, the doctype test records and all
-# link-field test record dependencies are recursively loaded
-# Use these module variables to add/remove to/from that list
-EXTRA_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
-IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 class TestWorkRequestMapper(TestCase):
@@ -416,11 +408,7 @@ class TestWorkRequestMapper(TestCase):
 		self.assertFalse(WorkRequest._requires_eligible_department(doc))
 
 
-class IntegrationTestWorkRequest(IntegrationTestCase):
-	"""
-	Integration tests for WorkRequest.
-	Use this class for testing interactions between multiple components.
-	"""
+class TestWorkRequestAdditionalRules(TestCase):
 
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_department_company")
 	@patch("ccpcerp.ccpc_erp.doctype.work_request.work_request.validate_equipment")
