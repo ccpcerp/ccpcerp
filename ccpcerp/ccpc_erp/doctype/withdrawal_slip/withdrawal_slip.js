@@ -18,6 +18,7 @@ async function initialize_form_defaults(frm) {
 	if (!frm.doc.source_warehouse && defaults.source_warehouse) {
 		values.source_warehouse = defaults.source_warehouse;
 	}
+	if (!frm.doc.required_by) values.required_by = frappe.datetime.get_today();
 	if (Object.keys(values).length) await frm.set_value(values);
 }
 
