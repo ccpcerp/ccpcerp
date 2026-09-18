@@ -22,6 +22,19 @@ async function initialize_form_defaults(frm) {
 	if (Object.keys(values).length) await frm.set_value(values);
 }
 
+async function load_requestor_suggestions(frm) {
+	const response = await frappe.call({
+		method:
+			"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.get_requestor_suggestions",
+	});
+	const names = response_message(response) || [];
+	const field = frm.fields_dict.requestor;
+	if (field && field.set_data) {
+		field.df.ignore_validation = 1;
+		field.set_data(names);
+	}
+}
+
 async function load_location_suggestions(frm) {
 	const response = await frappe.call({
 		method:
@@ -150,11 +163,11 @@ frappe.ui.form.on("Withdrawal Slip", {
 	async onload(frm) {
 		await initialize_form_defaults(frm);
 		await initialize_equipment_defaults(frm);
+		await load_requestor_suggestions(frm);
 		await load_location_suggestions(frm);
 	},
 
 	setup(frm) {
-		frm.set_query("requestor", () => ({ filters: { status: "Active" } }));
 		frm.set_query("equipment", () => ({
 			filters: { company: frm.doc.company, status: "Active" },
 		}));
