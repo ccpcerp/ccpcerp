@@ -288,7 +288,7 @@ def get_item_availability(item_code, warehouse):
 
 @frappe.whitelist()
 def get_physical_location_suggestions(company=None):
-	filters = {"physical_location": ["not in", ["", None]]}
+	filters = {"physical_location": ["!=", ""]}
 	if company:
 		filters["company"] = company
 	rows = frappe.get_all(
