@@ -52,7 +52,7 @@ class WithdrawalSlip(Document):
 	def _set_company_default(self):
 		if self.company:
 			return
-		self.company = frappe.defaults.get_user_default("Company")
+		self.company = _get_default_company()
 
 	def _apply_job_order_defaults(self):
 		if not self.job_order:
@@ -220,7 +220,7 @@ class WithdrawalSlip(Document):
 				)
 
 
-def _get_default_source_warehouse(company):
+def _get_default_company():\n\treturn frappe.defaults.get_user_default("Company") or frappe.db.get_single_value(\n\t\t"Global Defaults", "default_company"\n\t)\n\n\ndef _get_default_source_warehouse(company):
 	if not company:
 		return None
 	warehouses = frappe.get_all(
