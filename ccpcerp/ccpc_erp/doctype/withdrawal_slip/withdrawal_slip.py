@@ -220,7 +220,13 @@ class WithdrawalSlip(Document):
 				)
 
 
-def _get_default_company():\n\treturn frappe.defaults.get_user_default("Company") or frappe.db.get_single_value(\n\t\t"Global Defaults", "default_company"\n\t)\n\n\ndef _get_default_source_warehouse(company):
+def _get_default_company():
+	return frappe.defaults.get_user_default("Company") or frappe.db.get_single_value(
+		"Global Defaults", "default_company"
+	)
+
+
+def _get_default_source_warehouse(company):
 	if not company:
 		return None
 	warehouses = frappe.get_all(
@@ -232,7 +238,7 @@ def _get_default_company():\n\treturn frappe.defaults.get_user_default("Company"
 			"disabled": 0,
 		},
 		pluck="name",
-		limit=2,
+		limit_page_length=2,
 	)
 	return warehouses[0] if len(warehouses) == 1 else None
 
