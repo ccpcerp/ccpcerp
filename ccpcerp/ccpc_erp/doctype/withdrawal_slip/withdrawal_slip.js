@@ -1,0 +1,208 @@
+// Copyright (c) 2026, CCPC and contributors
+// For license information, please see license.txt
+
+const withdrawal_equipment_defaults_key = "__withdrawal_equipment_defaults";
+
+function response_message(response) {
+	return response && response.message ? response.message : response;
+}
+
+async function initialize_form_defaults(frm) {
+	if (!frm.is_new()) return;
+	const response = await frappe.call({
+		method: "ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.get_form_defaults",
+	});
+	const defaults = response_message(response);
+	const values = {};
+	if (!frm.doc.company && defaults.company) values.company = defaults.company;
+	if (!frm.doc.source_warehouse && defaults.source_warehouse) {
+		values.source_warehouse = defaults.source_warehouse;
+	}
+	if (Object.keys(values).length) await frm.set_value(values);
+}
+
+async function load_location_suggestions(frm) {
+	const response = await frappe.call({
+		method:
+			"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.get_physical_location_suggestions",
+		args: { company: frm.doc.company || null },
+	});
+	const locations = response_message(response) || [];
+	const field = frm.fields_dict.physical_location;
+	if (field && field.set_data) field.set_data(locations);
+}
+
+async function get_equipment_context(equipment) {
+	if (!equipment) return null;
+	return response_message(
+		await frappe.db.get_value("Equipment Registry", equipment, [
+			"company",
+			"department",
+			"equipment_description",
+			"physical_location",
+			"status",
+		])
+	);
+}
+
+async function initialize_equipment_defaults(frm) {
+	if (!frm.doc.equipment) {
+		delete frm[withdrawal_equipment_defaults_key];
+		return;
+	}
+	const context = await get_equipment_context(frm.doc.equipment);
+	if (!context) return;
+	frm[withdrawal_equipment_defaults_key] = {
+		equipment: frm.doc.equipment,
+		department: context.department,
+		physical_location: context.physical_location,
+	};
+}
+
+async function default_from_equipment(frm) {
+	const equipment = frm.doc.equipment;
+	if (!equipment) {
+		delete frm[withdrawal_equipment_defaults_key];
+		await frm.set_value("equipment_description", "");
+		return;
+	}
+
+	const previous = frm[withdrawal_equipment_defaults_key];
+	const context = await get_equipment_context(equipment);
+	if (!context || frm.doc.equipment !== equipment) return;
+	if (context.status !== "Active") {
+		frappe.msgprint(__("Equipment must be Active for a new Withdrawal Slip."));
+		return;
+	}
+	if (frm.doc.company && context.company !== frm.doc.company) {
+		frappe.msgprint(__("Equipment must belong to the Withdrawal Slip Company."));
+		return;
+	}
+
+	const values = {
+		equipment_description: context.equipment_description || "",
+	};
+	if (!frm.doc.company) values.company = context.company;
+	if (
+		!frm.doc.department ||
+		(previous && frm.doc.department === previous.department)
+	) {
+		values.department = context.department;
+	}
+	if (
+		context.physical_location &&
+		(!frm.doc.physical_location ||
+			(previous && frm.doc.physical_location === previous.physical_location))
+	) {
+		values.physical_location = context.physical_location;
+	}
+	await frm.set_value(values);
+	frm[withdrawal_equipment_defaults_key] = {
+		equipment,
+		department: context.department,
+		physical_location: context.physical_location,
+	};
+}
+
+async function refresh_item_row(frm, cdt, cdn) {
+	const row = frappe.get_doc(cdt, cdn);
+	if (!row.item_code || !frm.doc.source_warehouse) return;
+	const response = await frappe.call({
+		method:
+			"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.get_item_availability",
+		args: {
+			item_code: row.item_code,
+			warehouse: frm.doc.source_warehouse,
+		},
+	});
+	const values = response_message(response) || {};
+	await frappe.model.set_value(cdt, cdn, {
+		item_name: values.item_name || "",
+		uom: values.uom || "",
+		available_qty: values.available_qty || 0,
+	});
+}
+
+function validate_requested_qty(frm, cdt, cdn) {
+	const row = frappe.get_doc(cdt, cdn);
+	const requested = flt(row.requested_qty);
+	if (!requested || !row.item_code) return;
+
+	const total = (frm.doc.items || [])
+		.filter((item) => item.item_code === row.item_code)
+		.reduce((sum, item) => sum + flt(item.requested_qty), 0);
+	if (total <= flt(row.available_qty)) return;
+
+	frappe.msgprint(
+		__(
+			"Total requested quantity for {0} cannot exceed available stock ({1}) in {2}.",
+			[row.item_code, row.available_qty, frm.doc.source_warehouse]
+		)
+	);
+	frappe.model.set_value(cdt, cdn, "requested_qty", 0);
+}
+
+frappe.ui.form.on("Withdrawal Slip", {
+	async onload(frm) {
+		await initialize_form_defaults(frm);
+		await initialize_equipment_defaults(frm);
+		await load_location_suggestions(frm);
+	},
+
+	setup(frm) {
+		frm.set_query("requestor", () => ({ filters: { status: "Active" } }));
+		frm.set_query("equipment", () => ({
+			filters: { company: frm.doc.company, status: "Active" },
+		}));
+		frm.set_query("department", () => ({
+			filters: { company: frm.doc.company, disabled: 0, is_group: 0 },
+		}));
+		frm.set_query("job_order", () => ({
+			filters: { company: frm.doc.company },
+		}));
+		frm.set_query("item_code", "items", () => ({
+			filters: { disabled: 0, is_stock_item: 1 },
+		}));
+	},
+
+	async company(frm) {
+		await load_location_suggestions(frm);
+	},
+
+	async job_order(frm) {
+		if (!frm.doc.job_order) return;
+		const context = response_message(
+			await frappe.db.get_value("Job Order", frm.doc.job_order, [
+				"company",
+				"equipment",
+				"department",
+				"asset_location",
+			])
+		);
+		if (!context) return;
+
+		const values = {};
+		if (context.company) values.company = context.company;
+		values.equipment = context.equipment || "";
+		if (!frm.doc.department && context.department) {
+			values.department = context.department;
+		}
+		if (!context.equipment && !frm.doc.physical_location && context.asset_location) {
+			values.physical_location = context.asset_location;
+		}
+		await frm.set_value(values);
+		if (context.equipment) await default_from_equipment(frm);
+	},
+
+	async equipment(frm) {
+		await default_from_equipment(frm);
+	},
+});
+
+frappe.ui.form.on("Withdrawal Slip Item", {
+	async item_code(frm, cdt, cdn) {
+		await refresh_item_row(frm, cdt, cdn);
+	},
+
+	requested_qty: validate_requested_qty,
+});
