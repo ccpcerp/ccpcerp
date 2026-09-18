@@ -29,7 +29,10 @@ async function load_location_suggestions(frm) {
 	});
 	const locations = response_message(response) || [];
 	const field = frm.fields_dict.physical_location;
-	if (field && field.set_data) field.set_data(locations);
+	if (field && field.set_data) {
+		field.df.ignore_validation = 1;
+		field.set_data(locations);
+	}
 }
 
 async function get_equipment_context(equipment) {
