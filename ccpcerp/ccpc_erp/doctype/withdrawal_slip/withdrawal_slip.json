@@ -6,25 +6,26 @@
  "engine": "InnoDB",
  "field_order": [
   "request_details_section",
-  "naming_series",
   "requestor",
-  "approving_supervisor",
   "required_by",
   "column_break_request",
+  "approving_supervisor",
   "job_order",
-  "source_warehouse",
-  "company",
   "charge_location_section",
   "equipment",
   "equipment_description",
+  "section",
+  "source_warehouse",
   "column_break_equipment",
   "department",
-  "section",
   "physical_location",
+  "purpose_section",
   "purpose",
   "materials_section",
   "items",
-  "status"
+  "status",
+  "naming_series",
+  "company"
  ],
  "fields": [
   {
@@ -128,6 +129,11 @@
    "fieldtype": "Autocomplete",
    "label": "Physical Location",
    "reqd": 1
+  },
+  {
+   "fieldname": "purpose_section",
+   "fieldtype": "Section Break",
+   "label": "Purpose / Reason"
   },
   {
    "fieldname": "purpose",
