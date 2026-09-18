@@ -305,3 +305,26 @@ def get_physical_location_suggestions(company=None):
 		limit_page_length=500,
 	)
 	return sorted({row.physical_location for row in rows if row.physical_location})
+
+
+@frappe.whitelist()
+def get_requestor_suggestions():
+	rows = frappe.get_all(
+		"Withdrawal Slip",
+		filters={"requestor": ["!=", ""]},
+		fields=["requestor"],
+		order_by="modified desc",
+		limit_page_length=500,
+	)
+	seen = set()
+	result = []
+	for row in rows:
+		name = (row.requestor or "").strip()
+		if not name:
+			continue
+		key = name.casefold()
+		if key in seen:
+			continue
+		seen.add(key)
+		result.append(name)
+	return result
