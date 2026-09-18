@@ -43,10 +43,9 @@
   },
   {
    "fieldname": "requestor",
-   "fieldtype": "Link",
+   "fieldtype": "Autocomplete",
    "in_list_view": 1,
    "label": "Requestor",
-   "options": "Employee",
    "reqd": 1
   },
   {
