@@ -6,7 +6,7 @@ from collections import defaultdict
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, nowdate
+from frappe.utils import cstr, flt, nowdate
 
 from ccpcerp.ccpc_erp.equipment_costing import (
 	set_department_from_equipment,
@@ -236,15 +236,23 @@ class WithdrawalSlip(Document):
 
 	def _request_intent_changed(self, before):
 		for fieldname in REQUEST_INTENT_HEADER_FIELDS:
-			if (before.get(fieldname) or None) != (self.get(fieldname) or None):
+			if _normalize_request_value(fieldname, before.get(fieldname)) != _normalize_request_value(
+				fieldname, self.get(fieldname)
+			):
 				return True
 
 		before_items = [
-			tuple((row.get(fieldname) or None) for fieldname in REQUEST_INTENT_ITEM_FIELDS)
+			tuple(
+				_normalize_request_value(fieldname, row.get(fieldname))
+				for fieldname in REQUEST_INTENT_ITEM_FIELDS
+			)
 			for row in before.items or []
 		]
 		current_items = [
-			tuple((row.get(fieldname) or None) for fieldname in REQUEST_INTENT_ITEM_FIELDS)
+			tuple(
+				_normalize_request_value(fieldname, row.get(fieldname))
+				for fieldname in REQUEST_INTENT_ITEM_FIELDS
+			)
 			for row in self.items or []
 		]
 		return before_items != current_items
@@ -367,6 +375,12 @@ class WithdrawalSlip(Document):
 						frappe.bold(self.source_warehouse),
 					)
 				)
+
+
+def _normalize_request_value(fieldname, value):
+	if fieldname == "requested_qty":
+		return flt(value)
+	return cstr(value or "")
 
 
 def _get_default_company():
