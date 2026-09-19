@@ -3,6 +3,37 @@
 
 const withdrawal_equipment_defaults_key = "__withdrawal_equipment_defaults";
 
+const request_intent_fields = [
+	"requestor",
+	"required_by",
+	"job_order",
+	"equipment",
+	"department",
+	"section",
+	"physical_location",
+	"purpose",
+];
+
+function can_edit_request_intent(frm) {
+	const state = frm.doc.status || "Draft";
+	if (state === "Draft") return true;
+	if (state !== "Returned for Correction") return false;
+
+	return (
+		frappe.session.user === frm.doc.approving_supervisor ||
+		frappe.session.user === "Administrator" ||
+		frappe.user_roles.includes("System Manager")
+	);
+}
+
+function apply_request_intent_lock(frm) {
+	const read_only = !can_edit_request_intent(frm);
+	for (const fieldname of request_intent_fields) {
+		frm.set_df_property(fieldname, "read_only", read_only ? 1 : 0);
+	}
+	frm.set_df_property("items", "read_only", read_only ? 1 : 0);
+}
+
 function response_message(response) {
 	return response && response.message ? response.message : response;
 }
@@ -160,6 +191,10 @@ function validate_requested_qty(frm, cdt, cdn) {
 }
 
 frappe.ui.form.on("Withdrawal Slip", {
+	refresh(frm) {
+		apply_request_intent_lock(frm);
+	},
+
 	async onload(frm) {
 		await initialize_form_defaults(frm);
 		await initialize_equipment_defaults(frm);
@@ -213,6 +248,10 @@ frappe.ui.form.on("Withdrawal Slip", {
 
 	async equipment(frm) {
 		await default_from_equipment(frm);
+	},
+
+	status(frm) {
+		apply_request_intent_lock(frm);
 	},
 });
 
