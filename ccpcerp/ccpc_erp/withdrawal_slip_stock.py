@@ -183,15 +183,21 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 	slip = frappe.get_doc("Withdrawal Slip", withdrawal_slip)
 	submitted_qty = _get_submitted_qty_by_slip_item(slip.name)
 
+	quantities = []
 	any_issued = False
 	fully_issued = True
 	for row in slip.items or []:
 		issued_qty = flt(submitted_qty.get(row.name))
 		requested_qty = flt(row.requested_qty)
 		returned_qty = flt(row.returned_qty)
-		shortage_qty = max(requested_qty - issued_qty, 0) if issued_qty > EPSILON else 0
-		net_used_qty = max(issued_qty - returned_qty, 0)
+		quantities.append((row, issued_qty, requested_qty, returned_qty))
+		any_issued = any_issued or issued_qty > EPSILON
+		if issued_qty + EPSILON < requested_qty:
+			fully_issued = False
 
+	for row, issued_qty, requested_qty, returned_qty in quantities:
+		shortage_qty = max(requested_qty - issued_qty, 0) if any_issued else 0
+		net_used_qty = max(issued_qty - returned_qty, 0)
 		frappe.db.set_value(
 			"Withdrawal Slip Item",
 			row.name,
@@ -202,9 +208,6 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 			},
 			update_modified=False,
 		)
-		any_issued = any_issued or issued_qty > EPSILON
-		if issued_qty + EPSILON < requested_qty:
-			fully_issued = False
 
 	if not any_issued:
 		status = "Stockroom Review"
