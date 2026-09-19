@@ -120,6 +120,39 @@ class TestWithdrawalSlip(TestCase):
 		with self.assertRaises(frappe.ValidationError):
 			WithdrawalSlip._validate_request_intent_lock(doc)
 
+
+	def test_request_intent_comparison_normalizes_equivalent_values(self):
+		before = MagicMock()
+		before_values = {
+			"requestor": "Francis Cañada",
+			"required_by": "2026-09-19",
+			"job_order": None,
+			"equipment": None,
+			"department": "Wet Mill Plant - CCPC",
+			"section": None,
+			"physical_location": "Milling Section",
+			"purpose": "Test withdrawal Slip review",
+			"company": "Cagayan Corn Products Corporation",
+		}
+		before.get.side_effect = before_values.get
+		before.items = [
+			frappe._dict(item_code="ITEM-00010", requested_qty=1, remarks=None)
+		]
+
+		doc = MagicMock(spec=WithdrawalSlip)
+		current_values = {
+			**before_values,
+			"job_order": "",
+			"equipment": "",
+			"section": "",
+		}
+		doc.get.side_effect = current_values.get
+		doc.items = [
+			frappe._dict(item_code="ITEM-00010", requested_qty=1.0, remarks="")
+		]
+
+		self.assertFalse(WithdrawalSlip._request_intent_changed(doc, before))
+
 	@patch(
 		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
 		side_effect=lambda value: value,
