@@ -104,9 +104,13 @@ class TestWithdrawalSlip(TestCase):
 		doc = MagicMock(spec=WithdrawalSlip)
 		doc.is_new.return_value = False
 		doc._request_intent_changed.return_value = True
-		doc.get_doc_before_save.return_value = frappe._dict(
+		before = frappe._dict(
 			status="Returned for Correction",
 			approving_supervisor="supervisor@example.com",
+		)
+		doc.get_doc_before_save.return_value = before
+		doc._can_edit_returned_request.side_effect = (
+			lambda previous: WithdrawalSlip._can_edit_returned_request(doc, previous)
 		)
 
 		session.user = "supervisor@example.com"
