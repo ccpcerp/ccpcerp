@@ -24,9 +24,9 @@
   "materials_section",
   "items",
   "stockroom_section",
-  "released_to",
   "received_by",
   "column_break_stockroom",
+  "issued_by_name",
   "issued_by",
   "issued_on",
   "status",
@@ -173,11 +173,6 @@
    "label": "Stockroom"
   },
   {
-   "fieldname": "released_to",
-   "fieldtype": "Data",
-   "label": "Released To"
-  },
-  {
    "fieldname": "received_by",
    "fieldtype": "Data",
    "label": "Received By"
@@ -187,11 +182,18 @@
    "fieldtype": "Column Break"
   },
   {
+   "fieldname": "issued_by_name",
+   "fieldtype": "Data",
+   "label": "Issued By",
+   "read_only": 1
+  },
+  {
    "fieldname": "issued_by",
    "fieldtype": "Link",
-   "label": "Issued By",
+   "label": "Issued By User",
    "options": "User",
-   "read_only": 1
+   "read_only": 1,
+   "hidden": 1
   },
   {
    "fieldname": "issued_on",
@@ -203,7 +205,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 13:12:00.000000",
+ "modified": "2026-09-19 14:10:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Withdrawal Slip",
