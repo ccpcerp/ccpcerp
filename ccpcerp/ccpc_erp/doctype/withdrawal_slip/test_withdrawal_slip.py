@@ -56,6 +56,66 @@ class TestWithdrawalSlip(TestCase):
 		doc.source_warehouse = "Warehouse 1 - CCPC"
 		WithdrawalSlip._validate_requested_quantities(doc)
 
+	def test_approved_slip_does_not_revalidate_stock_cap_after_approval(self):
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.items = [
+			frappe._dict(idx=1, item_code="BEARING-6205", requested_qty=8, available_qty=3),
+		]
+		doc.source_warehouse = "Warehouse 1 - CCPC"
+		doc.is_new.return_value = False
+		doc.get_doc_before_save.return_value = frappe._dict(status="Approved")
+		WithdrawalSlip._validate_requested_quantities(doc)
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
+		side_effect=lambda value: value,
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_approved_request_intent_is_locked(self, throw, translate):
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.is_new.return_value = False
+		doc.get_doc_before_save.return_value = frappe._dict(status="Approved")
+		doc._request_intent_changed.return_value = True
+		with self.assertRaises(frappe.ValidationError):
+			WithdrawalSlip._validate_request_intent_lock(doc)
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
+		side_effect=lambda value: value,
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.get_roles",
+		return_value=[],
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.session",
+		create=True,
+	)
+	def test_returned_request_only_original_supervisor_can_correct(
+		self, session, get_roles, throw, translate
+	):
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.is_new.return_value = False
+		doc._request_intent_changed.return_value = True
+		doc.get_doc_before_save.return_value = frappe._dict(
+			status="Returned for Correction",
+			approving_supervisor="supervisor@example.com",
+		)
+
+		session.user = "supervisor@example.com"
+		WithdrawalSlip._validate_request_intent_lock(doc)
+
+		session.user = "other-supervisor@example.com"
+		with self.assertRaises(frappe.ValidationError):
+			WithdrawalSlip._validate_request_intent_lock(doc)
+
 	@patch(
 		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.get_cached_value"
 	)
