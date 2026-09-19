@@ -26,12 +26,61 @@ function can_edit_request_intent(frm) {
 	);
 }
 
-function apply_request_intent_lock(frm) {
-	const read_only = !can_edit_request_intent(frm);
+function can_edit_stockroom(frm) {
+	if ((frm.doc.status || "Draft") !== "Stockroom Review") return false;
+	return (
+		frappe.session.user === "Administrator" ||
+		frappe.user_roles.includes("System Manager") ||
+		frappe.user_roles.includes("Stock User")
+	);
+}
+
+function apply_form_permissions(frm) {
+	const request_editable = can_edit_request_intent(frm);
+	const stockroom_editable = can_edit_stockroom(frm);
+
 	for (const fieldname of request_intent_fields) {
-		frm.set_df_property(fieldname, "read_only", read_only ? 1 : 0);
+		frm.set_df_property(fieldname, "read_only", request_editable ? 0 : 1);
 	}
-	frm.set_df_property("items", "read_only", read_only ? 1 : 0);
+
+	frm.set_df_property("source_warehouse", "read_only", stockroom_editable ? 0 : 1);
+	for (const fieldname of ["released_to", "received_by"]) {
+		frm.set_df_property(fieldname, "read_only", stockroom_editable ? 0 : 1);
+	}
+	for (const fieldname of ["issued_by", "issued_on"]) {
+		frm.set_df_property(fieldname, "read_only", 1);
+	}
+
+	const grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+	if (!grid) return;
+
+	frm.set_df_property("items", "read_only", request_editable || stockroom_editable ? 0 : 1);
+	grid.cannot_add_rows = !request_editable;
+	grid.cannot_delete_rows = !request_editable;
+
+	for (const fieldname of ["item_code", "requested_qty", "remarks"]) {
+		grid.update_docfield_property(fieldname, "read_only", request_editable ? 0 : 1);
+	}
+	for (const fieldname of [
+		"item_name",
+		"uom",
+		"available_qty",
+		"issued_qty",
+		"shortage_qty",
+		"returned_qty",
+		"net_used_qty",
+	]) {
+		grid.update_docfield_property(fieldname, "read_only", 1);
+	}
+	for (const fieldname of [
+		"physical_discrepancy",
+		"discrepancy_remarks",
+		"stockroom_remarks",
+	]) {
+		grid.update_docfield_property(fieldname, "read_only", stockroom_editable ? 0 : 1);
+	}
+
+	grid.refresh();
 }
 
 function response_message(response) {
@@ -192,7 +241,7 @@ function validate_requested_qty(frm, cdt, cdn) {
 
 frappe.ui.form.on("Withdrawal Slip", {
 	refresh(frm) {
-		apply_request_intent_lock(frm);
+		apply_form_permissions(frm);
 	},
 
 	async onload(frm) {
@@ -214,6 +263,9 @@ frappe.ui.form.on("Withdrawal Slip", {
 		}));
 		frm.set_query("item_code", "items", () => ({
 			filters: { disabled: 0, is_stock_item: 1 },
+		}));
+		frm.set_query("source_warehouse", () => ({
+			filters: { company: frm.doc.company, disabled: 0, is_group: 0 },
 		}));
 	},
 
