@@ -60,7 +60,7 @@ def make_material_issue(withdrawal_slip):
 		stock_entry.department = slip.department
 
 	detail_meta = frappe.get_meta("Stock Entry Detail")
-	for row in slip.items or []:
+	for row in slip.get("items") or []:
 		remaining_qty = flt(row.requested_qty) - flt(submitted_qty.get(row.name))
 		if remaining_qty <= EPSILON:
 			continue
@@ -110,14 +110,14 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 		frappe.throw(_("Default Source Warehouse must match the Withdrawal Slip Source Warehouse."))
 
 	_validate_provenance_immutable(doc)
-	slip_items = {row.name: row for row in slip.items or []}
+	slip_items = {row.name: row for row in slip.get("items") or []}
 	current_by_slip_item = defaultdict(float)
 	current_by_item = defaultdict(float)
 
-	if not doc.items:
+	if not doc.get("items"):
 		frappe.throw(_("At least one Material Issue item is required."))
 
-	for row in doc.items:
+	for row in doc.get("items") or []:
 		if not row.withdrawal_slip_item:
 			frappe.throw(
 				_("Row {0}: every item must originate from the linked Withdrawal Slip.").format(row.idx)
@@ -186,7 +186,7 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 	quantities = []
 	any_issued = False
 	fully_issued = True
-	for row in slip.items or []:
+	for row in slip.get("items") or []:
 		issued_qty = flt(submitted_qty.get(row.name))
 		requested_qty = flt(row.requested_qty)
 		returned_qty = flt(row.returned_qty)
@@ -285,8 +285,8 @@ def _validate_provenance_immutable(doc):
 	if before.get("withdrawal_slip") != doc.get("withdrawal_slip"):
 		frappe.throw(_("Withdrawal Slip reference cannot be changed after the Stock Entry is saved."))
 
-	old_rows = {row.name: row for row in before.items or []}
-	for row in doc.items or []:
+	old_rows = {row.name: row for row in before.get("items") or []}
+	for row in doc.get("items") or []:
 		old_row = old_rows.get(row.name)
 		if old_row and old_row.get("withdrawal_slip_item") != row.get("withdrawal_slip_item"):
 			frappe.throw(
