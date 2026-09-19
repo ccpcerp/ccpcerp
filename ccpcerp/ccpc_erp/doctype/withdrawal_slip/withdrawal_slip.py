@@ -27,7 +27,7 @@ REQUEST_INTENT_HEADER_FIELDS = (
 	"company",
 )
 REQUEST_INTENT_ITEM_FIELDS = ("item_code", "requested_qty", "remarks")
-STOCKROOM_HEADER_FIELDS = ("source_warehouse", "released_to", "received_by")
+STOCKROOM_HEADER_FIELDS = ("source_warehouse", "received_by")
 STOCKROOM_ITEM_FIELDS = (
 	"physical_discrepancy",
 	"discrepancy_remarks",
