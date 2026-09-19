@@ -146,6 +146,8 @@ doc_events = {
 # before_install = "ccpcerp.install.before_install"
 # after_install = "ccpcerp.install.after_install"
 
+after_migrate = "ccpcerp.setup.after_migrate"
+
 # Uninstallation
 # ------------
 
