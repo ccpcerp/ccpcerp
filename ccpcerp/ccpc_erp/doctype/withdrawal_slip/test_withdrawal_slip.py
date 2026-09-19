@@ -421,7 +421,7 @@ class TestWithdrawalSlip(TestCase):
 			],
 		)
 		with self.assertRaises(frappe.ValidationError):
-			validate_withdrawal_slip_stock_entry(doc)
+			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._require_stockroom_user")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._validate_provenance_immutable")
