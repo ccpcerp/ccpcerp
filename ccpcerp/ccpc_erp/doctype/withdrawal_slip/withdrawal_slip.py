@@ -27,6 +27,13 @@ REQUEST_INTENT_HEADER_FIELDS = (
 	"company",
 )
 REQUEST_INTENT_ITEM_FIELDS = ("item_code", "requested_qty", "remarks")
+STOCKROOM_HEADER_FIELDS = ("source_warehouse", "released_to", "received_by")
+STOCKROOM_ITEM_FIELDS = (
+	"physical_discrepancy",
+	"discrepancy_remarks",
+	"stockroom_remarks",
+)
+ISSUE_STATES = {"Partially Issued", "Fully Issued", "Closed"}
 
 
 class WithdrawalSlip(Document):
@@ -44,10 +51,12 @@ class WithdrawalSlip(Document):
 		self._set_physical_location_from_equipment()
 		self._set_source_warehouse_default()
 		self._set_item_defaults_and_availability()
+		self._set_issue_tracking_totals()
 
 	def validate(self):
 		self._validate_approving_supervisor_immutable()
 		self._validate_request_intent_lock()
+		self._validate_stockroom_controls()
 		self._validate_job_order_context()
 		validate_equipment(
 			self.equipment,
@@ -63,6 +72,7 @@ class WithdrawalSlip(Document):
 		)
 		self._validate_source_warehouse()
 		self._validate_requested_quantities()
+		self._validate_issue_tracking()
 
 	def _set_company_default(self):
 		if self.company:
@@ -244,6 +254,80 @@ class WithdrawalSlip(Document):
 		if user == "Administrator" or "System Manager" in frappe.get_roles(user):
 			return True
 		return user == before.approving_supervisor
+
+	def _set_issue_tracking_totals(self):
+		for row in self.items or []:
+			issued_qty = flt(row.issued_qty)
+			returned_qty = flt(row.returned_qty)
+			tracking_started = bool(issued_qty or returned_qty or self.status in ISSUE_STATES)
+			row.shortage_qty = (
+				max(flt(row.requested_qty) - issued_qty, 0) if tracking_started else 0
+			)
+			row.net_used_qty = max(issued_qty - returned_qty, 0)
+
+	def _validate_stockroom_controls(self):
+		if self.is_new():
+			return
+
+		before = self.get_doc_before_save()
+		if not before or not self._stockroom_controls_changed(before):
+			return
+
+		if self._can_edit_stockroom(before):
+			return
+
+		frappe.throw(
+			_(
+				"Stockroom-controlled fields can only be changed by Stockroom while the Withdrawal Slip is in Stockroom Review."
+			)
+		)
+
+	def _stockroom_controls_changed(self, before):
+		for fieldname in STOCKROOM_HEADER_FIELDS:
+			if (before.get(fieldname) or None) != (self.get(fieldname) or None):
+				return True
+
+		before_items = [
+			tuple((row.get(fieldname) or None) for fieldname in STOCKROOM_ITEM_FIELDS)
+			for row in before.items or []
+		]
+		current_items = [
+			tuple((row.get(fieldname) or None) for fieldname in STOCKROOM_ITEM_FIELDS)
+			for row in self.items or []
+		]
+		return before_items != current_items
+
+	def _can_edit_stockroom(self, before):
+		if (before.status or "Draft") != "Stockroom Review":
+			return False
+		user = frappe.session.user
+		if user == "Administrator":
+			return True
+		roles = frappe.get_roles(user)
+		return "System Manager" in roles or "Stock User" in roles
+
+	def _validate_issue_tracking(self):
+		for row in self.items or []:
+			issued_qty = flt(row.issued_qty)
+			returned_qty = flt(row.returned_qty)
+
+			if issued_qty < 0:
+				frappe.throw(_("Issued Qty cannot be negative on row {0}.").format(row.idx))
+			if issued_qty > flt(row.requested_qty):
+				frappe.throw(
+					_("Issued Qty cannot exceed Requested Qty on row {0}.").format(row.idx)
+				)
+			if returned_qty < 0:
+				frappe.throw(_("Returned Qty cannot be negative on row {0}.").format(row.idx))
+			if returned_qty > issued_qty:
+				frappe.throw(
+					_("Returned Qty cannot exceed Issued Qty on row {0}.").format(row.idx)
+				)
+			if row.physical_discrepancy and not (row.discrepancy_remarks or "").strip():
+				frappe.throw(
+					_("Discrepancy Remarks are required on row {0}.").format(row.idx)
+				)
+
 
 	def _validate_requested_quantities(self):
 		if not self.items:
