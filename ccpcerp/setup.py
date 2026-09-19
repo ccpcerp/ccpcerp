@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
 WITHDRAWAL_SLIP_SUPERVISOR_ROLE = "Withdrawal Slip Supervisor"
@@ -52,7 +53,48 @@ WORKFLOW_TRANSITIONS = (
 
 
 def after_migrate():
+	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
+
+
+
+def ensure_withdrawal_slip_stock_entry_fields():
+	create_custom_fields(
+		{
+			"Stock Entry": [
+				{
+					"fieldname": "withdrawal_slip",
+					"label": "Withdrawal Slip",
+					"fieldtype": "Link",
+					"options": "Withdrawal Slip",
+					"insert_after": "purchase_order",
+					"read_only": 1,
+					"no_copy": 1,
+				},
+				{
+					"fieldname": "withdrawal_slip_issued_by",
+					"label": "Withdrawal Slip Issued By",
+					"fieldtype": "Link",
+					"options": "User",
+					"insert_after": "withdrawal_slip",
+					"read_only": 1,
+					"hidden": 1,
+					"no_copy": 1,
+				},
+			],
+			"Stock Entry Detail": [
+				{
+					"fieldname": "withdrawal_slip_item",
+					"label": "Withdrawal Slip Item",
+					"fieldtype": "Data",
+					"insert_after": "material_request_item",
+					"read_only": 1,
+					"hidden": 1,
+					"no_copy": 1,
+				},
+			],
+		}
+	)
 
 
 def ensure_withdrawal_slip_workflow():
