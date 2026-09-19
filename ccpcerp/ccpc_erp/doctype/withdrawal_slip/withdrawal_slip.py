@@ -15,6 +15,20 @@ from ccpcerp.ccpc_erp.equipment_costing import (
 )
 
 
+REQUEST_INTENT_HEADER_FIELDS = (
+	"requestor",
+	"required_by",
+	"job_order",
+	"equipment",
+	"department",
+	"section",
+	"physical_location",
+	"purpose",
+	"company",
+)
+REQUEST_INTENT_ITEM_FIELDS = ("item_code", "requested_qty", "remarks")
+
+
 class WithdrawalSlip(Document):
 	def before_validate(self):
 		if self.is_new():
@@ -33,6 +47,7 @@ class WithdrawalSlip(Document):
 
 	def validate(self):
 		self._validate_approving_supervisor_immutable()
+		self._validate_request_intent_lock()
 		self._validate_job_order_context()
 		validate_equipment(
 			self.equipment,
@@ -189,9 +204,56 @@ class WithdrawalSlip(Document):
 		if warehouse.disabled:
 			frappe.throw(_("Source Warehouse is disabled."))
 
+	def _validate_request_intent_lock(self):
+		if self.is_new():
+			return
+
+		before = self.get_doc_before_save()
+		if not before or not self._request_intent_changed(before):
+			return
+
+		previous_state = before.status or "Draft"
+		if previous_state == "Draft":
+			return
+		if previous_state == "Returned for Correction" and self._can_edit_returned_request(before):
+			return
+
+		frappe.throw(
+			_(
+				"Approved Withdrawal Slip request details cannot be changed. Return the slip for correction before changing the request."
+			)
+		)
+
+	def _request_intent_changed(self, before):
+		for fieldname in REQUEST_INTENT_HEADER_FIELDS:
+			if (before.get(fieldname) or None) != (self.get(fieldname) or None):
+				return True
+
+		before_items = [
+			tuple((row.get(fieldname) or None) for fieldname in REQUEST_INTENT_ITEM_FIELDS)
+			for row in before.items or []
+		]
+		current_items = [
+			tuple((row.get(fieldname) or None) for fieldname in REQUEST_INTENT_ITEM_FIELDS)
+			for row in self.items or []
+		]
+		return before_items != current_items
+
+	def _can_edit_returned_request(self, before):
+		user = frappe.session.user
+		if user == "Administrator" or "System Manager" in frappe.get_roles(user):
+			return True
+		return user == before.approving_supervisor
+
 	def _validate_requested_quantities(self):
 		if not self.items:
 			frappe.throw(_("At least one item is required."))
+
+		before = None if self.is_new() else self.get_doc_before_save()
+		enforce_current_stock = not before or (before.status or "Draft") in {
+			"Draft",
+			"Returned for Correction",
+		}
 
 		requested_by_item = defaultdict(float)
 		available_by_item = {}
@@ -204,6 +266,9 @@ class WithdrawalSlip(Document):
 				)
 			requested_by_item[row.item_code] += flt(row.requested_qty)
 			available_by_item[row.item_code] = flt(row.available_qty)
+
+		if not enforce_current_stock:
+			return
 
 		for item_code, requested_qty in requested_by_item.items():
 			available_qty = available_by_item[item_code]
