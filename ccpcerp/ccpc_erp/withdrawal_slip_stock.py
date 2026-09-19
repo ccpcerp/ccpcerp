@@ -155,21 +155,21 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 				).format(slip_items[row_name].idx, frappe.bold(requested_qty))
 			)
 
-	for item_code, issue_qty in current_by_item.items():
-		actual_qty = _get_actual_qty(item_code, slip.source_warehouse)
-		if issue_qty > actual_qty + EPSILON:
-			frappe.throw(
-				_(
-					"Issue quantity {0} for Item {1} exceeds current Actual Qty {2} in {3}."
-				).format(
-					frappe.bold(issue_qty),
-					frappe.bold(item_code),
-					frappe.bold(actual_qty),
-					frappe.bold(slip.source_warehouse),
-				)
-			)
-
 	if method == "before_submit":
+		for item_code, issue_qty in current_by_item.items():
+			actual_qty = _get_actual_qty(item_code, slip.source_warehouse)
+			if issue_qty > actual_qty + EPSILON:
+				frappe.throw(
+					_(
+						"Issue quantity {0} for Item {1} exceeds current Actual Qty {2} in {3}."
+					).format(
+						frappe.bold(issue_qty),
+						frappe.bold(item_code),
+						frappe.bold(actual_qty),
+						frappe.bold(slip.source_warehouse),
+					)
+				)
+
 		doc.withdrawal_slip_issued_by = frappe.session.user
 
 
