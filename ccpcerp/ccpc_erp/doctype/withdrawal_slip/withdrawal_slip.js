@@ -44,10 +44,8 @@ function apply_form_permissions(frm) {
 	}
 
 	frm.set_df_property("source_warehouse", "read_only", stockroom_editable ? 0 : 1);
-	for (const fieldname of ["released_to", "received_by"]) {
-		frm.set_df_property(fieldname, "read_only", stockroom_editable ? 0 : 1);
-	}
-	for (const fieldname of ["issued_by", "issued_on"]) {
+	frm.set_df_property("received_by", "read_only", stockroom_editable ? 0 : 1);
+	for (const fieldname of ["issued_by_name", "issued_by", "issued_on"]) {
 		frm.set_df_property(fieldname, "read_only", 1);
 	}
 
@@ -303,7 +301,7 @@ frappe.ui.form.on("Withdrawal Slip", {
 	},
 
 	status(frm) {
-		apply_request_intent_lock(frm);
+		apply_form_permissions(frm);
 	},
 });
 
