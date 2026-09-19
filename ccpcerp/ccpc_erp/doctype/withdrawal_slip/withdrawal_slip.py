@@ -312,7 +312,7 @@ class WithdrawalSlip(Document):
 		if user == "Administrator":
 			return True
 		roles = frappe.get_roles(user)
-		return "System Manager" in roles or "Stock User" in roles
+		return "System Manager" in roles or "Withdrawal Slip Stockroom" in roles
 
 	def _validate_issue_tracking(self):
 		for row in self.items or []:
