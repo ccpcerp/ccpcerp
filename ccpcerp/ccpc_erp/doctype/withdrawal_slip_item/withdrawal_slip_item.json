@@ -10,7 +10,15 @@
   "requested_qty",
   "uom",
   "available_qty",
-  "remarks"
+  "remarks",
+  "stockroom_section",
+  "issued_qty",
+  "shortage_qty",
+  "returned_qty",
+  "net_used_qty",
+  "physical_discrepancy",
+  "discrepancy_remarks",
+  "stockroom_remarks"
  ],
  "fields": [
   {
@@ -53,14 +61,67 @@
   {
    "fieldname": "remarks",
    "fieldtype": "Small Text",
-   "label": "Remarks"
+   "label": "Request Remarks"
+  },
+  {
+   "fieldname": "stockroom_section",
+   "fieldtype": "Section Break",
+   "label": "Stockroom"
+  },
+  {
+   "default": "0",
+   "fieldname": "issued_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Issued Qty",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "shortage_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Shortage",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "returned_qty",
+   "fieldtype": "Float",
+   "label": "Returned Qty",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "net_used_qty",
+   "fieldtype": "Float",
+   "label": "Net Used Qty",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "physical_discrepancy",
+   "fieldtype": "Check",
+   "label": "Physical Discrepancy"
+  },
+  {
+   "depends_on": "eval:doc.physical_discrepancy",
+   "fieldname": "discrepancy_remarks",
+   "fieldtype": "Small Text",
+   "label": "Discrepancy Remarks",
+   "mandatory_depends_on": "eval:doc.physical_discrepancy"
+  },
+  {
+   "fieldname": "stockroom_remarks",
+   "fieldtype": "Small Text",
+   "label": "Stockroom Remarks"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-09-18 00:00:00.000000",
+ "modified": "2026-09-19 13:10:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Withdrawal Slip Item",
