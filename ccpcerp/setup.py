@@ -7,15 +7,16 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
 WITHDRAWAL_SLIP_SUPERVISOR_ROLE = "Withdrawal Slip Supervisor"
+WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
 WORKFLOW_STATES = (
 	("Draft", "Withdrawal Slip Supervisor"),
-	("Approved", "Stock User"),
-	("Stockroom Review", "Stock User"),
+	("Approved", "Withdrawal Slip Stockroom"),
+	("Stockroom Review", "Withdrawal Slip Stockroom"),
 	("Returned for Correction", "Withdrawal Slip Supervisor"),
-	("Partially Issued", "Stock User"),
-	("Fully Issued", "Stock User"),
+	("Partially Issued", "Withdrawal Slip Stockroom"),
+	("Fully Issued", "Withdrawal Slip Stockroom"),
 	("Cancelled", "System Manager"),
 	("Closed", "System Manager"),
 )
@@ -32,14 +33,14 @@ WORKFLOW_TRANSITIONS = (
 		"state": "Approved",
 		"action": "Start Review",
 		"next_state": "Stockroom Review",
-		"allowed": "Stock User",
+		"allowed": "Withdrawal Slip Stockroom",
 		"allow_self_approval": 1,
 	},
 	{
 		"state": "Stockroom Review",
 		"action": "Return for Correction",
 		"next_state": "Returned for Correction",
-		"allowed": "Stock User",
+		"allowed": "Withdrawal Slip Stockroom",
 		"allow_self_approval": 1,
 	},
 	{
@@ -54,25 +55,49 @@ WORKFLOW_TRANSITIONS = (
 
 
 def after_migrate():
-	ensure_stock_user_stock_settings_read_permission()
+	ensure_withdrawal_slip_stockroom_role_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 
 
 
 
-def ensure_stock_user_stock_settings_read_permission():
-	"""ERPNext Stock Entry client reads Stock Settings while Stock User operates the form."""
+def ensure_withdrawal_slip_stockroom_role_permissions():
+	"""Keep Withdrawal Slip access separate from ERPNext's standard Stock User role."""
+	_ensure_role(WITHDRAWAL_SLIP_STOCKROOM_ROLE)
+
+	# Remove the temporary development permission previously added to Stock User.
+	for name in frappe.get_all(
+		"Custom DocPerm",
+		filters={
+			"parent": "Stock Settings",
+			"role": "Stock User",
+			"permlevel": 0,
+			"read": 1,
+			"write": 0,
+			"create": 0,
+			"delete": 0,
+			"submit": 0,
+			"cancel": 0,
+		},
+		pluck="name",
+	):
+		frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
+
 	filters = {
 		"parent": "Stock Settings",
-		"role": "Stock User",
+		"role": WITHDRAWAL_SLIP_STOCKROOM_ROLE,
 		"permlevel": 0,
 		"read": 1,
 	}
-	if frappe.db.exists("Custom DocPerm", filters):
-		return
+	if not frappe.db.exists("Custom DocPerm", filters):
+		add_permission(
+			"Stock Settings",
+			WITHDRAWAL_SLIP_STOCKROOM_ROLE,
+			permlevel=0,
+			ptype="read",
+		)
 
-	add_permission("Stock Settings", "Stock User", permlevel=0, ptype="read")
 	frappe.clear_cache(doctype="Stock Settings")
 
 
@@ -117,6 +142,7 @@ def ensure_withdrawal_slip_stock_entry_fields():
 
 def ensure_withdrawal_slip_workflow():
 	_ensure_role(WITHDRAWAL_SLIP_SUPERVISOR_ROLE)
+	_ensure_role(WITHDRAWAL_SLIP_STOCKROOM_ROLE)
 	for state, _allow_edit in WORKFLOW_STATES:
 		_ensure_named_master("Workflow State", state, "workflow_state_name")
 	for transition in WORKFLOW_TRANSITIONS:
