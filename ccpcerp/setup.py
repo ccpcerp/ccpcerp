@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe.permissions import add_permission
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
@@ -53,9 +54,26 @@ WORKFLOW_TRANSITIONS = (
 
 
 def after_migrate():
+	ensure_stock_user_stock_settings_read_permission()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 
+
+
+
+def ensure_stock_user_stock_settings_read_permission():
+	"""ERPNext Stock Entry client reads Stock Settings while Stock User operates the form."""
+	filters = {
+		"parent": "Stock Settings",
+		"role": "Stock User",
+		"permlevel": 0,
+		"read": 1,
+	}
+	if frappe.db.exists("Custom DocPerm", filters):
+		return
+
+	add_permission("Stock Settings", "Stock User", permlevel=0, ptype="read")
+	frappe.clear_cache(doctype="Stock Settings")
 
 
 def ensure_withdrawal_slip_stock_entry_fields():
