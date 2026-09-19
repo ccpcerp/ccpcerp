@@ -43,8 +43,16 @@ doc_events = {
 	},
 	"Stock Entry": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
-		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
-		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"validate": [
+			"ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+			"ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_withdrawal_slip_stock_entry",
+		],
+		"before_submit": [
+			"ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+			"ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_withdrawal_slip_stock_entry",
+		],
+		"on_submit": "ccpcerp.ccpc_erp.withdrawal_slip_stock.sync_withdrawal_slip_issue_status",
+		"on_cancel": "ccpcerp.ccpc_erp.withdrawal_slip_stock.sync_withdrawal_slip_issue_status",
 	},
 	"Purchase Invoice": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
