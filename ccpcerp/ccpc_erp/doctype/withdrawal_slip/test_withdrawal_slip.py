@@ -121,6 +121,83 @@ class TestWithdrawalSlip(TestCase):
 			WithdrawalSlip._validate_request_intent_lock(doc)
 
 	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
+		side_effect=lambda value: value,
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_stockroom_fields_cannot_change_outside_stockroom_review(self, throw, translate):
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.is_new.return_value = False
+		doc.get_doc_before_save.return_value = frappe._dict(status="Returned for Correction")
+		doc._stockroom_controls_changed.return_value = True
+		doc._can_edit_stockroom.return_value = False
+		with self.assertRaises(frappe.ValidationError):
+			WithdrawalSlip._validate_stockroom_controls(doc)
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.get_roles",
+		return_value=["Stock User"],
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.session",
+		create=True,
+	)
+	def test_stock_user_can_edit_stockroom_review_fields(self, session, get_roles):
+		session.user = "stockroom@example.com"
+		doc = MagicMock(spec=WithdrawalSlip)
+		before = frappe._dict(status="Stockroom Review")
+		self.assertTrue(WithdrawalSlip._can_edit_stockroom(doc, before))
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
+		side_effect=lambda value: value,
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_physical_discrepancy_requires_remarks(self, throw, translate):
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.items = [
+			frappe._dict(
+				idx=1,
+				requested_qty=2,
+				issued_qty=0,
+				returned_qty=0,
+				physical_discrepancy=1,
+				discrepancy_remarks="",
+			)
+		]
+		with self.assertRaises(frappe.ValidationError):
+			WithdrawalSlip._validate_issue_tracking(doc)
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
+		side_effect=lambda value: value,
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_issued_qty_cannot_exceed_requested_qty(self, throw, translate):
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.items = [
+			frappe._dict(
+				idx=1,
+				requested_qty=2,
+				issued_qty=3,
+				returned_qty=0,
+				physical_discrepancy=0,
+				discrepancy_remarks="",
+			)
+		]
+		with self.assertRaises(frappe.ValidationError):
+			WithdrawalSlip._validate_issue_tracking(doc)
+
+	@patch(
 		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.get_cached_value"
 	)
 	def test_physical_location_default_preserves_manual_override(self, get_cached_value):
