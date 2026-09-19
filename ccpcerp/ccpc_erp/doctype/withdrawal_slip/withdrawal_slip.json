@@ -23,6 +23,12 @@
   "purpose",
   "materials_section",
   "items",
+  "stockroom_section",
+  "released_to",
+  "received_by",
+  "column_break_stockroom",
+  "issued_by",
+  "issued_on",
   "status",
   "naming_series",
   "company"
@@ -159,12 +165,45 @@
    "label": "Status",
    "options": "Draft\nApproved\nReturned for Correction\nStockroom Review\nPartially Issued\nFully Issued\nCancelled\nClosed",
    "read_only": 1
+  },
+  {
+   "depends_on": "eval:doc.status && doc.status != 'Draft'",
+   "fieldname": "stockroom_section",
+   "fieldtype": "Section Break",
+   "label": "Stockroom"
+  },
+  {
+   "fieldname": "released_to",
+   "fieldtype": "Data",
+   "label": "Released To"
+  },
+  {
+   "fieldname": "received_by",
+   "fieldtype": "Data",
+   "label": "Received By"
+  },
+  {
+   "fieldname": "column_break_stockroom",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "issued_by",
+   "fieldtype": "Link",
+   "label": "Issued By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "issued_on",
+   "fieldtype": "Datetime",
+   "label": "Issued On",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-19 11:55:00.000000",
+ "modified": "2026-09-19 13:12:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "Withdrawal Slip",
