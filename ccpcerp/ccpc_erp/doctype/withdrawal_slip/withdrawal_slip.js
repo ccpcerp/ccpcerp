@@ -71,6 +71,7 @@ function apply_form_permissions(frm) {
 		grid.update_docfield_property(fieldname, "read_only", 1);
 	}
 	for (const fieldname of [
+		"issue_qty",
 		"physical_discrepancy",
 		"discrepancy_remarks",
 		"stockroom_remarks",
