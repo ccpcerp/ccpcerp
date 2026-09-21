@@ -275,6 +275,23 @@ function validate_requested_qty(frm, cdt, cdn) {
 	frappe.model.set_value(cdt, cdn, "requested_qty", 0);
 }
 
+function validate_issue_qty(frm, cdt, cdn) {
+	const row = frappe.get_doc(cdt, cdn);
+	const requested = flt(row.requested_qty);
+	const issue = flt(row.issue_qty);
+
+	if (issue > 0 && issue <= requested) return;
+
+	if (issue > requested) {
+		frappe.msgprint(
+			__("Issue Qty cannot exceed Requested Qty ({0}).", [requested])
+		);
+	} else {
+		frappe.msgprint(__("Issue Qty must be greater than zero."));
+	}
+	frappe.model.set_value(cdt, cdn, "issue_qty", requested);
+}
+
 frappe.ui.form.on("Withdrawal Slip", {
 	refresh(frm) {
 		apply_form_permissions(frm);
@@ -356,4 +373,5 @@ frappe.ui.form.on("Withdrawal Slip Item", {
 	},
 
 	requested_qty: validate_requested_qty,
+	issue_qty: validate_issue_qty,
 });
