@@ -202,8 +202,15 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 		returned_qty = flt(row.returned_qty)
 		quantities.append((row, issued_qty, requested_qty, returned_qty))
 		any_issued = any_issued or issued_qty > EPSILON
-		if issued_qty + EPSILON < requested_qty:
+		if abs(issued_qty - requested_qty) > EPSILON:
 			fully_issued = False
+
+	if any_issued and not fully_issued:
+		frappe.throw(
+			_(
+				"Partial issuance is not allowed for Withdrawal Slip {0}. Return the request for correction instead."
+			).format(frappe.bold(slip.name))
+		)
 
 	for row, issued_qty, requested_qty, returned_qty in quantities:
 		shortage_qty = max(requested_qty - issued_qty, 0) if any_issued else 0
@@ -217,13 +224,6 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 				"net_used_qty": net_used_qty,
 			},
 			update_modified=False,
-		)
-
-	if any_issued and not fully_issued:
-		frappe.throw(
-			_(
-				"Partial issuance is not allowed for Withdrawal Slip {0}. Return the request for correction instead."
-			).format(frappe.bold(slip.name))
 		)
 
 	status = "Fully Issued" if any_issued else "Stockroom Review"
