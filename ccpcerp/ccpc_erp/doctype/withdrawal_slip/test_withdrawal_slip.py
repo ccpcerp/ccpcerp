@@ -345,7 +345,7 @@ class TestWithdrawalSlip(TestCase):
 		)
 		doc = frappe._dict(
 			withdrawal_slip="WS-1",
-			docstatus=0,
+			docstatus=1,
 			company="CCPC",
 			purpose="Material Issue",
 			from_warehouse="Warehouse 1 - CCPC",
@@ -463,7 +463,7 @@ class TestWithdrawalSlip(TestCase):
 		doc = frappe._dict(
 			withdrawal_slip="WS-1",
 			withdrawal_slip_issued_by=None,
-			docstatus=0,
+			docstatus=1,
 			company="CCPC",
 			purpose="Material Issue",
 			from_warehouse="Warehouse 1 - CCPC",
