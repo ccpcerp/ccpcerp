@@ -8,16 +8,18 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
-WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
+STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
+STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Job Order", "Equipment Registry")
+LEGACY_STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
 WORKFLOW_STATES = (
 	("Draft", "Maintenance Supervisor"),
-	("Approved", "Withdrawal Slip Stockroom"),
-	("Stockroom Review", "Withdrawal Slip Stockroom"),
+	("Approved", "Stockroom Personnel"),
+	("Stockroom Review", "Stockroom Personnel"),
 	("Returned for Correction", "Maintenance Supervisor"),
-	("Partially Issued", "Withdrawal Slip Stockroom"),
-	("Fully Issued", "Withdrawal Slip Stockroom"),
+	("Partially Issued", "Stockroom Personnel"),
+	("Fully Issued", "Stockroom Personnel"),
 	("Cancelled", "System Manager"),
 	("Closed", "System Manager"),
 )
@@ -34,14 +36,14 @@ WORKFLOW_TRANSITIONS = (
 		"state": "Approved",
 		"action": "Start Review",
 		"next_state": "Stockroom Review",
-		"allowed": "Withdrawal Slip Stockroom",
+		"allowed": "Stockroom Personnel",
 		"allow_self_approval": 1,
 	},
 	{
 		"state": "Stockroom Review",
 		"action": "Return for Correction",
 		"next_state": "Returned for Correction",
-		"allowed": "Withdrawal Slip Stockroom",
+		"allowed": "Stockroom Personnel",
 		"allow_self_approval": 1,
 	},
 	{
@@ -57,7 +59,7 @@ WORKFLOW_TRANSITIONS = (
 
 def after_migrate():
 	ensure_maintenance_supervisor_reference_permissions()
-	ensure_withdrawal_slip_stockroom_role_permissions()
+	ensure_stockroom_personnel_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 
@@ -84,9 +86,9 @@ def ensure_maintenance_supervisor_reference_permissions():
 		frappe.clear_cache(doctype=doctype)
 
 
-def ensure_withdrawal_slip_stockroom_role_permissions():
-	"""Keep Withdrawal Slip access separate from ERPNext's standard Stock User role."""
-	_ensure_role(WITHDRAWAL_SLIP_STOCKROOM_ROLE)
+def ensure_stockroom_personnel_permissions():
+	"""Keep CCPC stockroom workflow access separate from ERPNext's standard Stock User role."""
+	_ensure_role(STOCKROOM_PERSONNEL_ROLE)
 
 	# Remove the temporary development permission previously added to Stock User.
 	for name in frappe.get_all(
@@ -106,23 +108,32 @@ def ensure_withdrawal_slip_stockroom_role_permissions():
 	):
 		frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
 
-	filters = {
-		"parent": "Stock Settings",
-		"role": WITHDRAWAL_SLIP_STOCKROOM_ROLE,
-		"permlevel": 0,
-		"read": 1,
-	}
-	if not frappe.db.exists("Custom DocPerm", filters):
-		add_permission(
-			"Stock Settings",
-			WITHDRAWAL_SLIP_STOCKROOM_ROLE,
-			permlevel=0,
-			ptype="read",
-		)
+	# Remove permissions created for the legacy custom role without deleting the role itself.
+	for doctype in ("Stock Settings",) + STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES:
+		for name in frappe.get_all(
+			"Custom DocPerm",
+			filters={
+				"parent": doctype,
+				"role": LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE,
+			},
+			pluck="name",
+		):
+			frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
 
-	frappe.clear_cache(doctype="Stock Settings")
+	for doctype in ("Stock Settings",) + STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES:
+		filters = {
+			"parent": doctype,
+			"role": STOCKROOM_PERSONNEL_ROLE,
+			"permlevel": 0,
+			"if_owner": 0,
+		}
+		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+		if custom_perm:
+			frappe.db.set_value("Custom DocPerm", custom_perm, "read", 1, update_modified=False)
+		else:
+			add_permission(doctype, STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
 
-
+		frappe.clear_cache(doctype=doctype)
 def ensure_withdrawal_slip_stock_entry_fields():
 	create_custom_fields(
 		{
@@ -164,7 +175,7 @@ def ensure_withdrawal_slip_stock_entry_fields():
 
 def ensure_withdrawal_slip_workflow():
 	_ensure_role(MAINTENANCE_SUPERVISOR_ROLE)
-	_ensure_role(WITHDRAWAL_SLIP_STOCKROOM_ROLE)
+	_ensure_role(STOCKROOM_PERSONNEL_ROLE)
 	for state, _allow_edit in WORKFLOW_STATES:
 		_ensure_named_master("Workflow State", state, "workflow_state_name")
 	for transition in WORKFLOW_TRANSITIONS:
