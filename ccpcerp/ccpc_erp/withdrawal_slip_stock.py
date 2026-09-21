@@ -10,7 +10,7 @@ from frappe.utils import flt, get_datetime
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import _get_actual_qty
 
 
-ISSUABLE_STATES = {"Stockroom Review", "Partially Issued"}
+ISSUABLE_STATES = {"Stockroom Review"}
 EPSILON = 0.000001
 
 
@@ -23,7 +23,7 @@ def make_material_issue(withdrawal_slip):
 
 	if slip.status not in ISSUABLE_STATES:
 		frappe.throw(
-			_("Withdrawal Slip {0} must be in Stockroom Review or Partially Issued.").format(
+			_("Withdrawal Slip {0} must be in Stockroom Review before stock can be issued.").format(
 				frappe.bold(slip.name)
 			)
 		)
@@ -44,6 +44,13 @@ def make_material_issue(withdrawal_slip):
 		return {"name": existing[0], "existing": 1}
 
 	submitted_qty = _get_submitted_qty_by_slip_item(slip.name)
+	if any(flt(qty) > EPSILON for qty in submitted_qty.values()):
+		frappe.throw(
+			_("Withdrawal Slip {0} already has submitted stock issue quantities.").format(
+				frappe.bold(slip.name)
+			)
+		)
+
 	stock_entry = frappe.new_doc("Stock Entry")
 	stock_entry.company = slip.company
 	stock_entry.purpose = "Material Issue"
@@ -61,13 +68,9 @@ def make_material_issue(withdrawal_slip):
 
 	detail_meta = frappe.get_meta("Stock Entry Detail")
 	for row in slip.get("items") or []:
-		remaining_qty = flt(row.requested_qty) - flt(submitted_qty.get(row.name))
-		if remaining_qty <= EPSILON:
-			continue
-
 		values = {
 			"item_code": row.item_code,
-			"qty": remaining_qty,
+			"qty": flt(row.requested_qty),
 			"uom": row.uom,
 			"conversion_factor": 1,
 			"s_warehouse": slip.source_warehouse,
@@ -80,8 +83,7 @@ def make_material_issue(withdrawal_slip):
 		stock_entry.append("items", values)
 
 	if not stock_entry.items:
-		sync_withdrawal_slip_issue_status_for_name(slip.name)
-		frappe.throw(_("Withdrawal Slip {0} has no remaining quantity to issue.").format(slip.name))
+		frappe.throw(_("Withdrawal Slip {0} has no items to issue.").format(slip.name))
 
 	stock_entry.insert()
 	return {"name": stock_entry.name, "existing": 0}
@@ -145,14 +147,22 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 		current_by_item[row.item_code] += stock_qty
 
 	submitted_qty = _get_submitted_qty_by_slip_item(slip.name)
-	for row_name, current_qty in current_by_slip_item.items():
-		requested_qty = flt(slip_items[row_name].requested_qty)
-		total_issued = flt(submitted_qty.get(row_name)) + current_qty
-		if total_issued > requested_qty + EPSILON:
+	if any(flt(qty) > EPSILON for qty in submitted_qty.values()):
+		frappe.throw(
+			_(
+				"Withdrawal Slip {0} already has a submitted stock issue. Partial or repeat issuance is not allowed."
+			).format(frappe.bold(slip.name))
+		)
+
+	for row_name, request_row in slip_items.items():
+		requested_qty = flt(request_row.requested_qty)
+		issue_qty = flt(current_by_slip_item.get(row_name))
+		if abs(issue_qty - requested_qty) > EPSILON:
 			frappe.throw(
 				_(
-					"Issue quantity for row {0} would exceed the approved Requested Qty {1}."
-				).format(slip_items[row_name].idx, frappe.bold(requested_qty))
+					"Row {0}: Material Issue Qty must exactly match the approved Requested Qty {1}. "
+					"If the full quantity cannot be issued, return the Withdrawal Slip for correction."
+				).format(request_row.idx, frappe.bold(requested_qty))
 			)
 
 	if method == "before_submit":
@@ -209,12 +219,14 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 			update_modified=False,
 		)
 
-	if not any_issued:
-		status = "Stockroom Review"
-	elif fully_issued:
-		status = "Fully Issued"
-	else:
-		status = "Partially Issued"
+	if any_issued and not fully_issued:
+		frappe.throw(
+			_(
+				"Partial issuance is not allowed for Withdrawal Slip {0}. Return the request for correction instead."
+			).format(frappe.bold(slip.name))
+		)
+
+	status = "Fully Issued" if any_issued else "Stockroom Review"
 
 	latest = _get_latest_submitted_issue(slip.name)
 	issued_by = latest.withdrawal_slip_issued_by if latest else None
