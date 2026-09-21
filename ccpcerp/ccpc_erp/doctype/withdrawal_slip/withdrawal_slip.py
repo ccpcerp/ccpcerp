@@ -33,7 +33,7 @@ STOCKROOM_ITEM_FIELDS = (
 	"discrepancy_remarks",
 	"stockroom_remarks",
 )
-ISSUE_STATES = {"Partially Issued", "Fully Issued", "Closed"}
+ISSUE_STATES = {"Fully Issued", "Closed"}
 
 
 class WithdrawalSlip(Document):
