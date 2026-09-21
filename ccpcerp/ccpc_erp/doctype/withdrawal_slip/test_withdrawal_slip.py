@@ -11,6 +11,7 @@ from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import (
 	_get_default_source_warehouse,
 )
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import (
+	_require_stockroom_user,
 	sync_withdrawal_slip_issue_status_for_name,
 	validate_withdrawal_slip_stock_entry,
 )
@@ -187,6 +188,18 @@ class TestWithdrawalSlip(TestCase):
 		doc = MagicMock(spec=WithdrawalSlip)
 		before = frappe._dict(status="Stockroom Review")
 		self.assertTrue(WithdrawalSlip._can_edit_stockroom(doc, before))
+
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_roles",
+		return_value=["Stockroom Personnel"],
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.session",
+		create=True,
+	)
+	def test_stockroom_personnel_can_issue_withdrawal_slip(self, session, get_roles):
+		session.user = "stockroom@example.com"
+		_require_stockroom_user()
 
 	@patch(
 		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._",
