@@ -4,6 +4,7 @@
 import frappe
 from frappe.permissions import add_permission
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.utils import flt
 
 
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
@@ -62,6 +63,7 @@ def after_migrate():
 	ensure_stockroom_personnel_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
+	backfill_withdrawal_slip_issue_qty()
 
 
 
@@ -223,6 +225,45 @@ def ensure_withdrawal_slip_workflow():
 
 	frappe.clear_cache(doctype="Withdrawal Slip")
 	frappe.cache.hdel("workflow", "Withdrawal Slip")
+
+
+def backfill_withdrawal_slip_issue_qty():
+	"""Initialize Issue Qty for pre-existing review/issued slips created before the field existed."""
+	rows = frappe.get_all(
+		"Withdrawal Slip Item",
+		filters={"issue_qty": ["<=", 0]},
+		fields=["name", "parent", "requested_qty", "issued_qty"],
+	)
+	if not rows:
+		return
+
+	parent_names = list({row.parent for row in rows})
+	status_by_parent = {
+		row.name: row.status
+		for row in frappe.get_all(
+			"Withdrawal Slip",
+			filters={"name": ["in", parent_names]},
+			fields=["name", "status"],
+		)
+	}
+
+	for row in rows:
+		status = status_by_parent.get(row.parent)
+		if status == "Stockroom Review":
+			issue_qty = flt(row.requested_qty)
+		elif status in {"Fully Issued", "Issued with Shortage"}:
+			issue_qty = flt(row.issued_qty) or flt(row.requested_qty)
+		else:
+			continue
+
+		if issue_qty > 0:
+			frappe.db.set_value(
+				"Withdrawal Slip Item",
+				row.name,
+				"issue_qty",
+				issue_qty,
+				update_modified=False,
+			)
 
 
 def _ensure_role(role_name):
