@@ -88,7 +88,7 @@ def make_material_issue(withdrawal_slip):
 
 
 def validate_withdrawal_slip_stock_entry(doc, method=None):
-	if not doc.get("withdrawal_slip") or doc.docstatus != 0:
+	if not doc.get("withdrawal_slip") or doc.docstatus not in (0, 1):
 		return
 
 	_require_stockroom_user()
