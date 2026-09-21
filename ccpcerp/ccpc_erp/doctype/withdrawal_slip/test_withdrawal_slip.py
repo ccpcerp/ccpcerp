@@ -176,13 +176,13 @@ class TestWithdrawalSlip(TestCase):
 
 	@patch(
 		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.get_roles",
-		return_value=["Withdrawal Slip Stockroom"],
+		return_value=["Stockroom Personnel"],
 	)
 	@patch(
 		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.session",
 		create=True,
 	)
-	def test_withdrawal_slip_stockroom_can_edit_stockroom_review_fields(self, session, get_roles):
+	def test_stockroom_personnel_can_edit_stockroom_review_fields(self, session, get_roles):
 		session.user = "stockroom@example.com"
 		doc = MagicMock(spec=WithdrawalSlip)
 		before = frappe._dict(status="Stockroom Review")
