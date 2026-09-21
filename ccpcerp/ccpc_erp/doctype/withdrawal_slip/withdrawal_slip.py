@@ -29,11 +29,12 @@ REQUEST_INTENT_HEADER_FIELDS = (
 REQUEST_INTENT_ITEM_FIELDS = ("item_code", "requested_qty", "remarks")
 STOCKROOM_HEADER_FIELDS = ("source_warehouse", "received_by")
 STOCKROOM_ITEM_FIELDS = (
+	"issue_qty",
 	"physical_discrepancy",
 	"discrepancy_remarks",
 	"stockroom_remarks",
 )
-ISSUE_STATES = {"Fully Issued", "Closed"}
+ISSUE_STATES = {"Fully Issued", "Issued with Shortage", "Closed"}
 
 
 class WithdrawalSlip(Document):
@@ -51,6 +52,7 @@ class WithdrawalSlip(Document):
 		self._set_physical_location_from_equipment()
 		self._set_source_warehouse_default()
 		self._set_item_defaults_and_availability()
+		self._set_issue_qty_defaults()
 		self._set_issue_tracking_totals()
 
 	def validate(self):
@@ -263,6 +265,17 @@ class WithdrawalSlip(Document):
 			return True
 		return user == before.approving_supervisor
 
+	def _set_issue_qty_defaults(self):
+		if self.is_new() or self.status != "Stockroom Review":
+			return
+
+		before = self.get_doc_before_save()
+		if not before or (before.status or "Draft") == "Stockroom Review":
+			return
+
+		for row in self.items or []:
+			row.issue_qty = flt(row.requested_qty)
+
 	def _set_issue_tracking_totals(self):
 		for row in self.items or []:
 			issued_qty = flt(row.issued_qty)
@@ -306,7 +319,10 @@ class WithdrawalSlip(Document):
 		return before_items != current_items
 
 	def _can_edit_stockroom(self, before):
-		if (before.status or "Draft") != "Stockroom Review":
+		previous_state = before.status or "Draft"
+		if previous_state != "Stockroom Review" and not (
+			previous_state == "Approved" and self.status == "Stockroom Review"
+		):
 			return False
 		user = frappe.session.user
 		if user == "Administrator":
@@ -316,12 +332,28 @@ class WithdrawalSlip(Document):
 
 	def _validate_issue_tracking(self):
 		for row in self.items or []:
+			requested_qty = flt(row.requested_qty)
+			issue_qty = flt(row.issue_qty)
 			issued_qty = flt(row.issued_qty)
 			returned_qty = flt(row.returned_qty)
 
+			if self.status in {"Stockroom Review", "Fully Issued", "Issued with Shortage"}:
+				if issue_qty <= 0:
+					frappe.throw(_("Issue Qty must be greater than zero on row {0}.").format(row.idx))
+				if issue_qty > requested_qty:
+					frappe.throw(
+						_("Issue Qty cannot exceed Requested Qty on row {0}.").format(row.idx)
+					)
+				if issue_qty < requested_qty and not (row.stockroom_remarks or "").strip():
+					frappe.throw(
+						_(
+							"Stockroom Remarks / Shortage Reason is required when Issue Qty is less than Requested Qty on row {0}."
+						).format(row.idx)
+					)
+
 			if issued_qty < 0:
 				frappe.throw(_("Issued Qty cannot be negative on row {0}.").format(row.idx))
-			if issued_qty > flt(row.requested_qty):
+			if issued_qty > requested_qty:
 				frappe.throw(
 					_("Issued Qty cannot exceed Requested Qty on row {0}.").format(row.idx)
 				)
