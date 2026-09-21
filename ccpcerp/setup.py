@@ -134,6 +134,8 @@ def ensure_stockroom_personnel_permissions():
 			add_permission(doctype, STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
 
 		frappe.clear_cache(doctype=doctype)
+
+
 def ensure_withdrawal_slip_stock_entry_fields():
 	create_custom_fields(
 		{
