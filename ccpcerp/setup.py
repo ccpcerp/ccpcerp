@@ -7,6 +7,7 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
+MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
@@ -55,11 +56,32 @@ WORKFLOW_TRANSITIONS = (
 
 
 def after_migrate():
+	ensure_maintenance_supervisor_reference_permissions()
 	ensure_withdrawal_slip_stockroom_role_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 
 
+
+
+def ensure_maintenance_supervisor_reference_permissions():
+	"""Allow supervisors to use required Withdrawal Slip reference masters without editing them."""
+	_ensure_role(MAINTENANCE_SUPERVISOR_ROLE)
+
+	for doctype in MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES:
+		filters = {
+			"parent": doctype,
+			"role": MAINTENANCE_SUPERVISOR_ROLE,
+			"permlevel": 0,
+			"if_owner": 0,
+		}
+		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+		if custom_perm:
+			frappe.db.set_value("Custom DocPerm", custom_perm, "read", 1, update_modified=False)
+		else:
+			add_permission(doctype, MAINTENANCE_SUPERVISOR_ROLE, permlevel=0, ptype="read")
+
+		frappe.clear_cache(doctype=doctype)
 
 
 def ensure_withdrawal_slip_stockroom_role_permissions():
