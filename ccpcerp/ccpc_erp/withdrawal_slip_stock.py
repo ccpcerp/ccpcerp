@@ -68,9 +68,24 @@ def make_material_issue(withdrawal_slip):
 
 	detail_meta = frappe.get_meta("Stock Entry Detail")
 	for row in slip.get("items") or []:
+		requested_qty = flt(row.requested_qty)
+		issue_qty = flt(row.issue_qty)
+		if issue_qty <= 0 or issue_qty > requested_qty + EPSILON:
+			frappe.throw(
+				_("Row {0}: Issue Qty must be greater than zero and cannot exceed Requested Qty.").format(
+					row.idx
+				)
+			)
+		if issue_qty < requested_qty - EPSILON and not (row.stockroom_remarks or "").strip():
+			frappe.throw(
+				_(
+					"Row {0}: Stockroom Remarks / Shortage Reason is required when Issue Qty is reduced."
+				).format(row.idx)
+			)
+
 		values = {
 			"item_code": row.item_code,
-			"qty": flt(row.requested_qty),
+			"qty": issue_qty,
 			"uom": row.uom,
 			"conversion_factor": 1,
 			"s_warehouse": slip.source_warehouse,
@@ -149,20 +164,35 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	submitted_qty = _get_submitted_qty_by_slip_item(slip.name)
 	if any(flt(qty) > EPSILON for qty in submitted_qty.values()):
 		frappe.throw(
-			_(
-				"Withdrawal Slip {0} already has a submitted stock issue. Partial or repeat issuance is not allowed."
-			).format(frappe.bold(slip.name))
+			_("Withdrawal Slip {0} already has a submitted stock issue.").format(
+				frappe.bold(slip.name)
+			)
 		)
 
 	for row_name, request_row in slip_items.items():
 		requested_qty = flt(request_row.requested_qty)
-		issue_qty = flt(current_by_slip_item.get(row_name))
-		if abs(issue_qty - requested_qty) > EPSILON:
+		planned_issue_qty = flt(request_row.issue_qty)
+		if planned_issue_qty <= 0 or planned_issue_qty > requested_qty + EPSILON:
+			frappe.throw(
+				_("Row {0}: Issue Qty must be greater than zero and cannot exceed Requested Qty.").format(
+					request_row.idx
+				)
+			)
+		if planned_issue_qty < requested_qty - EPSILON and not (
+			request_row.stockroom_remarks or ""
+		).strip():
 			frappe.throw(
 				_(
-					"Row {0}: Material Issue Qty must exactly match the approved Requested Qty {1}. "
-					"If the full quantity cannot be issued, return the Withdrawal Slip for correction."
-				).format(request_row.idx, frappe.bold(requested_qty))
+					"Row {0}: Stockroom Remarks / Shortage Reason is required when Issue Qty is reduced."
+				).format(request_row.idx)
+			)
+
+		material_issue_qty = flt(current_by_slip_item.get(row_name))
+		if abs(material_issue_qty - planned_issue_qty) > EPSILON:
+			frappe.throw(
+				_(
+					"Row {0}: Material Issue Qty must exactly match the stockroom Issue Qty {1}."
+				).format(request_row.idx, frappe.bold(planned_issue_qty))
 			)
 
 	if method == "before_submit":
@@ -205,13 +235,6 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 		if abs(issued_qty - requested_qty) > EPSILON:
 			fully_issued = False
 
-	if any_issued and not fully_issued:
-		frappe.throw(
-			_(
-				"Partial issuance is not allowed for Withdrawal Slip {0}. Return the request for correction instead."
-			).format(frappe.bold(slip.name))
-		)
-
 	for row, issued_qty, requested_qty, returned_qty in quantities:
 		shortage_qty = max(requested_qty - issued_qty, 0) if any_issued else 0
 		net_used_qty = max(issued_qty - returned_qty, 0)
@@ -226,7 +249,12 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 			update_modified=False,
 		)
 
-	status = "Fully Issued" if any_issued else "Stockroom Review"
+	if not any_issued:
+		status = "Stockroom Review"
+	elif fully_issued:
+		status = "Fully Issued"
+	else:
+		status = "Issued with Shortage"
 
 	latest = _get_latest_submitted_issue(slip.name)
 	issued_by = latest.withdrawal_slip_issued_by if latest else None
