@@ -9,8 +9,8 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
-STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Job Order", "Equipment Registry")
-LEGACY_STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
+STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
+LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
 WORKFLOW_STATES = (
