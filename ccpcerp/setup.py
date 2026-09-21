@@ -6,15 +6,15 @@ from frappe.permissions import add_permission
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 
-WITHDRAWAL_SLIP_SUPERVISOR_ROLE = "Withdrawal Slip Supervisor"
+MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
 WORKFLOW_STATES = (
-	("Draft", "Withdrawal Slip Supervisor"),
+	("Draft", "Maintenance Supervisor"),
 	("Approved", "Withdrawal Slip Stockroom"),
 	("Stockroom Review", "Withdrawal Slip Stockroom"),
-	("Returned for Correction", "Withdrawal Slip Supervisor"),
+	("Returned for Correction", "Maintenance Supervisor"),
 	("Partially Issued", "Withdrawal Slip Stockroom"),
 	("Fully Issued", "Withdrawal Slip Stockroom"),
 	("Cancelled", "System Manager"),
@@ -26,7 +26,7 @@ WORKFLOW_TRANSITIONS = (
 		"state": "Draft",
 		"action": "Approve & Send to Stockroom",
 		"next_state": "Approved",
-		"allowed": "Withdrawal Slip Supervisor",
+		"allowed": "Maintenance Supervisor",
 		"allow_self_approval": 1,
 	},
 	{
@@ -47,7 +47,7 @@ WORKFLOW_TRANSITIONS = (
 		"state": "Returned for Correction",
 		"action": "Re-Approve",
 		"next_state": "Approved",
-		"allowed": "Withdrawal Slip Supervisor",
+		"allowed": "Maintenance Supervisor",
 		"allow_self_approval": 1,
 		"condition": "frappe.session.user == doc.approving_supervisor",
 	},
@@ -141,7 +141,7 @@ def ensure_withdrawal_slip_stock_entry_fields():
 
 
 def ensure_withdrawal_slip_workflow():
-	_ensure_role(WITHDRAWAL_SLIP_SUPERVISOR_ROLE)
+	_ensure_role(MAINTENANCE_SUPERVISOR_ROLE)
 	_ensure_role(WITHDRAWAL_SLIP_STOCKROOM_ROLE)
 	for state, _allow_edit in WORKFLOW_STATES:
 		_ensure_named_master("Workflow State", state, "workflow_state_name")
