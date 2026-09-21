@@ -19,6 +19,7 @@ WORKFLOW_STATES = (
 	("Stockroom Review", "Stockroom Personnel"),
 	("Returned for Correction", "Maintenance Supervisor"),
 	("Fully Issued", "Stockroom Personnel"),
+	("Issued with Shortage", "Stockroom Personnel"),
 	("Cancelled", "System Manager"),
 	("Closed", "System Manager"),
 )
