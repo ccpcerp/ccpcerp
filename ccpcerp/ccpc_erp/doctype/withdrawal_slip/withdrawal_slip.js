@@ -31,7 +31,7 @@ function can_edit_stockroom(frm) {
 	return (
 		frappe.session.user === "Administrator" ||
 		frappe.user_roles.includes("System Manager") ||
-		frappe.user_roles.includes("Withdrawal Slip Stockroom")
+		frappe.user_roles.includes("Stockroom Personnel")
 	);
 }
 
@@ -91,7 +91,7 @@ function can_create_material_issue(frm) {
 	return (
 		frappe.session.user === "Administrator" ||
 		frappe.user_roles.includes("System Manager") ||
-		frappe.user_roles.includes("Withdrawal Slip Stockroom")
+		frappe.user_roles.includes("Stockroom Personnel")
 	);
 }
 
