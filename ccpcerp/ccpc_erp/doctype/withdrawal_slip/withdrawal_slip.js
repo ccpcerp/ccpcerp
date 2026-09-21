@@ -87,7 +87,7 @@ function response_message(response) {
 
 function can_create_material_issue(frm) {
 	if (frm.is_new()) return false;
-	if (!["Stockroom Review", "Partially Issued"].includes(frm.doc.status)) return false;
+	if (frm.doc.status !== "Stockroom Review") return false;
 	return (
 		frappe.session.user === "Administrator" ||
 		frappe.user_roles.includes("System Manager") ||
