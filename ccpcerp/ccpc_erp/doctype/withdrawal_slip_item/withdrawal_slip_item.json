@@ -12,6 +12,7 @@
   "available_qty",
   "remarks",
   "stockroom_section",
+  "issue_qty",
   "issued_qty",
   "shortage_qty",
   "returned_qty",
@@ -70,6 +71,13 @@
   },
   {
    "default": "0",
+   "fieldname": "issue_qty",
+   "fieldtype": "Float",
+   "in_list_view": 1,
+   "label": "Issue Qty"
+  },
+  {
+   "default": "0",
    "fieldname": "issued_qty",
    "fieldtype": "Float",
    "in_list_view": 1,
@@ -114,7 +122,7 @@
   {
    "fieldname": "stockroom_remarks",
    "fieldtype": "Small Text",
-   "label": "Stockroom Remarks"
+   "label": "Stockroom Remarks / Shortage Reason"
   }
  ],
  "grid_page_length": 50,
