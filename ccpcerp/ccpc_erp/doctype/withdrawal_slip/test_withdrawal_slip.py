@@ -337,7 +337,7 @@ class TestWithdrawalSlip(TestCase):
 		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.throw",
 		side_effect=frappe.ValidationError,
 	)
-	def test_material_issue_cannot_exceed_remaining_requested_qty(
+	def test_material_issue_rejects_existing_submitted_issue(
 		self, throw, get_doc, actual_qty, submitted_qty, provenance, require_stockroom
 	):
 		get_doc.return_value = frappe._dict(
@@ -369,8 +369,62 @@ class TestWithdrawalSlip(TestCase):
 					withdrawal_slip_item="WSI-1",
 					s_warehouse="Warehouse 1 - CCPC",
 					t_warehouse=None,
-					qty=0.75,
-					transfer_qty=0.75,
+					qty=1,
+					transfer_qty=1,
+					conversion_factor=1,
+				)
+			],
+		)
+		with self.assertRaises(frappe.ValidationError):
+			validate_withdrawal_slip_stock_entry(doc)
+
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._require_stockroom_user")
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._validate_provenance_immutable")
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock._get_submitted_qty_by_slip_item",
+		return_value={},
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_doc"
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_material_issue_must_match_full_approved_quantity(
+		self, throw, get_doc, submitted_qty, provenance, require_stockroom
+	):
+		get_doc.return_value = frappe._dict(
+			name="WS-1",
+			status="Stockroom Review",
+			received_by="Pedro Santos",
+			company="CCPC",
+			source_warehouse="Warehouse 1 - CCPC",
+			items=[
+				frappe._dict(
+					name="WSI-1",
+					idx=1,
+					item_code="ITEM-00010",
+					requested_qty=2,
+					returned_qty=0,
+				)
+			],
+		)
+		doc = frappe._dict(
+			withdrawal_slip="WS-1",
+			docstatus=0,
+			company="CCPC",
+			purpose="Material Issue",
+			from_warehouse="Warehouse 1 - CCPC",
+			items=[
+				frappe._dict(
+					idx=1,
+					item_code="ITEM-00010",
+					withdrawal_slip_item="WSI-1",
+					s_warehouse="Warehouse 1 - CCPC",
+					t_warehouse=None,
+					qty=1,
+					transfer_qty=1,
 					conversion_factor=1,
 				)
 			],
@@ -427,8 +481,8 @@ class TestWithdrawalSlip(TestCase):
 					withdrawal_slip_item="WSI-1",
 					s_warehouse="Warehouse 1 - CCPC",
 					t_warehouse=None,
-					qty=2,
-					transfer_qty=2,
+					qty=5,
+					transfer_qty=5,
 					conversion_factor=1,
 				)
 			],
@@ -508,11 +562,11 @@ class TestWithdrawalSlip(TestCase):
 	)
 	@patch(
 		"ccpcerp.ccpc_erp.withdrawal_slip_stock._get_submitted_qty_by_slip_item",
-		return_value={"WSI-1": 1},
+		return_value={"WSI-1": 2, "WSI-2": 3},
 	)
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.set_value")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_doc")
-	def test_partial_issue_marks_all_unfulfilled_rows_as_shortage(
+	def test_full_issue_marks_withdrawal_slip_fully_issued(
 		self, get_doc, set_value, submitted_qty, latest, full_name, clear_cache
 	):
 		get_doc.return_value = frappe._dict(
@@ -538,16 +592,16 @@ class TestWithdrawalSlip(TestCase):
 			for call in set_value.call_args_list
 			if call.args[0] == "Withdrawal Slip Item"
 		}
-		self.assertEqual(child_updates["WSI-1"]["issued_qty"], 1)
-		self.assertEqual(child_updates["WSI-1"]["shortage_qty"], 1)
-		self.assertEqual(child_updates["WSI-2"]["issued_qty"], 0)
-		self.assertEqual(child_updates["WSI-2"]["shortage_qty"], 3)
+		self.assertEqual(child_updates["WSI-1"]["issued_qty"], 2)
+		self.assertEqual(child_updates["WSI-1"]["shortage_qty"], 0)
+		self.assertEqual(child_updates["WSI-2"]["issued_qty"], 3)
+		self.assertEqual(child_updates["WSI-2"]["shortage_qty"], 0)
 
 		parent_update = next(
 			call.args[2]
 			for call in set_value.call_args_list
 			if call.args[0] == "Withdrawal Slip"
 		)
-		self.assertEqual(parent_update["status"], "Partially Issued")
+		self.assertEqual(parent_update["status"], "Fully Issued")
 		self.assertEqual(parent_update["issued_by"], "stockroom@personnel1.com")
 		self.assertEqual(parent_update["issued_by_name"], "Stock Person")
