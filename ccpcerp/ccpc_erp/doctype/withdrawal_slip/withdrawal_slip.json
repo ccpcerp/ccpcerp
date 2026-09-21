@@ -163,7 +163,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "label": "Status",
-   "options": "Draft\nApproved\nReturned for Correction\nStockroom Review\nPartially Issued\nFully Issued\nCancelled\nClosed",
+   "options": "Draft\nApproved\nReturned for Correction\nStockroom Review\nFully Issued\nCancelled\nClosed",
    "read_only": 1
   },
   {
