@@ -311,6 +311,6 @@ def _require_stockroom_user():
 	if user == "Administrator":
 		return
 	roles = frappe.get_roles(user)
-	if "Withdrawal Slip Stockroom" in roles or "System Manager" in roles:
+	if "Stockroom Personnel" in roles or "System Manager" in roles:
 		return
 	frappe.throw(_("Only Stockroom users can issue a Withdrawal Slip."), frappe.PermissionError)
