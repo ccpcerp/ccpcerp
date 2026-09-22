@@ -24,6 +24,7 @@ PURCHASING_PERSONNEL_PERMISSIONS = {
 	"Warehouse": {"read"},
 	"Company": {"read"},
 	"Department": {"read"},
+	"Equipment Registry": {"read", "print", "report"},
 	"Purchase Receipt": {"read", "print", "report"},
 	"Purchase Invoice": {"read", "print", "report"},
 }
