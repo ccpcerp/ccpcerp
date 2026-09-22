@@ -19,6 +19,8 @@ PURCHASING_PERSONNEL_PERMISSIONS = {
 	"Supplier Quotation": {"read", "write", "create", "submit", "print", "report"},
 	"Purchase Order": {"read", "write", "create", "print", "report"},
 	"Supplier": {"read"},
+	"Supplier Group": {"read", "report"},
+	"Price List": {"read", "report"},
 	"Item": {"read"},
 	"UOM": {"read"},
 	"Warehouse": {"read"},
