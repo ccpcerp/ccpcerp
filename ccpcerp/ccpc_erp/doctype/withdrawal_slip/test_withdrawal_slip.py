@@ -276,6 +276,7 @@ class TestWithdrawalSlip(TestCase):
 	)
 	def test_physical_discrepancy_requires_remarks(self, throw, translate):
 		doc = MagicMock(spec=WithdrawalSlip)
+		doc.status = "Draft"
 		doc.items = [
 			frappe._dict(
 				idx=1,
@@ -299,6 +300,7 @@ class TestWithdrawalSlip(TestCase):
 	)
 	def test_issued_qty_cannot_exceed_requested_qty(self, throw, translate):
 		doc = MagicMock(spec=WithdrawalSlip)
+		doc.status = "Draft"
 		doc.items = [
 			frappe._dict(
 				idx=1,
