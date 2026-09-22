@@ -9,6 +9,9 @@ from frappe.utils import flt
 
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
+MAINTENANCE_SUPERVISOR_PERMISSIONS = {
+	"Material Request": {"read", "print", "report"},
+}
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
 LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
@@ -110,7 +113,7 @@ WORKFLOW_TRANSITIONS = (
 
 
 def after_migrate():
-	ensure_maintenance_supervisor_reference_permissions()
+	ensure_maintenance_supervisor_permissions()
 	ensure_stockroom_personnel_permissions()
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
@@ -121,8 +124,8 @@ def after_migrate():
 
 
 
-def ensure_maintenance_supervisor_reference_permissions():
-	"""Allow supervisors to use required Withdrawal Slip reference masters without editing them."""
+def ensure_maintenance_supervisor_permissions():
+	"""Keep supervisor request visibility read-only while preserving required reference access."""
 	_ensure_role(MAINTENANCE_SUPERVISOR_ROLE)
 
 	for doctype in MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES:
@@ -138,6 +141,30 @@ def ensure_maintenance_supervisor_reference_permissions():
 		else:
 			add_permission(doctype, MAINTENANCE_SUPERVISOR_ROLE, permlevel=0, ptype="read")
 
+		frappe.clear_cache(doctype=doctype)
+
+	for doctype, rights in MAINTENANCE_SUPERVISOR_PERMISSIONS.items():
+		filters = {
+			"parent": doctype,
+			"role": MAINTENANCE_SUPERVISOR_ROLE,
+			"permlevel": 0,
+			"if_owner": 0,
+		}
+		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+		if not custom_perm:
+			add_permission(doctype, MAINTENANCE_SUPERVISOR_ROLE, permlevel=0, ptype="read")
+			custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+
+		values = {
+			right: 1 if right in rights else 0
+			for right in CUSTOM_DOCPERM_RIGHTS
+		}
+		frappe.db.set_value(
+			"Custom DocPerm",
+			custom_perm,
+			values,
+			update_modified=False,
+		)
 		frappe.clear_cache(doctype=doctype)
 
 
