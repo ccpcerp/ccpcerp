@@ -12,6 +12,37 @@ MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
+PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
+PURCHASING_PERSONNEL_PERMISSIONS = {
+	"Material Request": {"read", "print", "report"},
+	"Request for Quotation": {"read", "write", "create", "submit", "print", "email", "report"},
+	"Supplier Quotation": {"read", "write", "create", "submit", "print", "report"},
+	"Purchase Order": {"read", "write", "create", "print", "report"},
+	"Supplier": {"read"},
+	"Item": {"read"},
+	"UOM": {"read"},
+	"Warehouse": {"read"},
+	"Company": {"read"},
+	"Department": {"read"},
+	"Purchase Receipt": {"read", "print", "report"},
+	"Purchase Invoice": {"read", "print", "report"},
+}
+CUSTOM_DOCPERM_RIGHTS = (
+	"read",
+	"write",
+	"create",
+	"submit",
+	"cancel",
+	"delete",
+	"amend",
+	"report",
+	"export",
+	"import",
+	"share",
+	"print",
+	"email",
+	"select",
+)
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
 WORKFLOW_STATES = (
@@ -61,6 +92,7 @@ WORKFLOW_TRANSITIONS = (
 def after_migrate():
 	ensure_maintenance_supervisor_reference_permissions()
 	ensure_stockroom_personnel_permissions()
+	ensure_purchasing_personnel_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 	backfill_withdrawal_slip_issue_qty()
@@ -135,6 +167,35 @@ def ensure_stockroom_personnel_permissions():
 		else:
 			add_permission(doctype, STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
 
+		frappe.clear_cache(doctype=doctype)
+
+
+def ensure_purchasing_personnel_permissions():
+	"""Create CCPC's operational purchasing role without granting broad Purchase User rights."""
+	_ensure_role(PURCHASING_PERSONNEL_ROLE)
+
+	for doctype, rights in PURCHASING_PERSONNEL_PERMISSIONS.items():
+		filters = {
+			"parent": doctype,
+			"role": PURCHASING_PERSONNEL_ROLE,
+			"permlevel": 0,
+			"if_owner": 0,
+		}
+		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+		if not custom_perm:
+			add_permission(doctype, PURCHASING_PERSONNEL_ROLE, permlevel=0, ptype="read")
+			custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+
+		values = {
+			right: 1 if right in rights else 0
+			for right in CUSTOM_DOCPERM_RIGHTS
+		}
+		frappe.db.set_value(
+			"Custom DocPerm",
+			custom_perm,
+			values,
+			update_modified=False,
+		)
 		frappe.clear_cache(doctype=doctype)
 
 
