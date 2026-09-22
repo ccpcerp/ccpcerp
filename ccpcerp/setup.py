@@ -10,7 +10,7 @@ from frappe.utils import flt
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
-STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
+STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
 LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
 PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
@@ -189,6 +189,33 @@ def ensure_stockroom_personnel_permissions():
 			add_permission(doctype, STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
 
 		frappe.clear_cache(doctype=doctype)
+
+	# Purchase Receipts carry accounting references that Stock User can transact on but cannot read.
+	account_filters = {
+		"parent": "Account",
+		"role": STOCKROOM_PERSONNEL_ROLE,
+		"permlevel": 0,
+		"if_owner": 0,
+	}
+	account_perm = frappe.db.get_value("Custom DocPerm", account_filters, "name")
+	if account_perm:
+		frappe.db.set_value(
+			"Custom DocPerm",
+			account_perm,
+			{"read": 1, "report": 1},
+			update_modified=False,
+		)
+	else:
+		add_permission("Account", STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
+		account_perm = frappe.db.get_value("Custom DocPerm", account_filters, "name")
+		frappe.db.set_value(
+			"Custom DocPerm",
+			account_perm,
+			"report",
+			1,
+			update_modified=False,
+		)
+	frappe.clear_cache(doctype="Account")
 
 
 def ensure_purchasing_personnel_permissions():
