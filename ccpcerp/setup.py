@@ -275,7 +275,7 @@ def after_migrate():
 
 def ensure_mrs_foundation():
 	"""Create CCPC's lightweight personnel/routing foundation and MRS access roles."""
-	for role in MRS_ROLES:
+	for role in MRS_ROLES + (PURCHASING_PERSONNEL_ROLE, PURCHASING_SUPERVISOR_ROLE):
 		_ensure_role(role)
 
 	create_custom_fields(
