@@ -17,6 +17,152 @@ STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", 
 LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
 PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
+MRS_REQUESTOR_ROLE = "MRS Requestor"
+DEPARTMENT_MANAGER_ROLE = "Department Manager"
+MRS_MANAGEMENT_APPROVER_ROLE = "MRS Management Approver"
+MRS_OWNER_RECORDER_ROLE = "MRS Owner Recorder"
+MRS_ROLES = (
+	MRS_REQUESTOR_ROLE,
+	DEPARTMENT_MANAGER_ROLE,
+	MRS_MANAGEMENT_APPROVER_ROLE,
+	MRS_OWNER_RECORDER_ROLE,
+)
+MRS_REFERENCE_DOCTYPES = (
+	"Company",
+	"Department",
+	"Item",
+	"UOM",
+	"Equipment Registry",
+	"Job Order",
+	"Work Request",
+)
+MRS_WORKFLOW = "CCPC MRS Workflow"
+
+MRS_WORKFLOW_STATES = (
+	("Draft", MRS_REQUESTOR_ROLE),
+	("Pending Requesting Department Manager", DEPARTMENT_MANAGER_ROLE),
+	("Pending Use Department Manager", DEPARTMENT_MANAGER_ROLE),
+	("Pending Plant Manager", MRS_MANAGEMENT_APPROVER_ROLE),
+	("Pending COO", MRS_MANAGEMENT_APPROVER_ROLE),
+	("Pending Owner Signature", MRS_OWNER_RECORDER_ROLE),
+	("Ready for Purchasing", "System Manager"),
+	("Rejected", "System Manager"),
+)
+
+MRS_WORKFLOW_TRANSITIONS = (
+	{
+		"state": "Draft",
+		"action": "Submit for Approval",
+		"next_state": "Pending Requesting Department Manager",
+		"allowed": MRS_REQUESTOR_ROLE,
+		"allow_self_approval": 1,
+	},
+	{
+		"state": "Pending Requesting Department Manager",
+		"action": "Approve",
+		"next_state": "Pending Plant Manager",
+		"allowed": DEPARTMENT_MANAGER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.requesting_department_manager and doc.requesting_department == doc.use_department",
+	},
+	{
+		"state": "Pending Requesting Department Manager",
+		"action": "Approve",
+		"next_state": "Pending Use Department Manager",
+		"allowed": DEPARTMENT_MANAGER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.requesting_department_manager and doc.requesting_department != doc.use_department",
+	},
+	{
+		"state": "Pending Requesting Department Manager",
+		"action": "Reject",
+		"next_state": "Rejected",
+		"allowed": DEPARTMENT_MANAGER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.requesting_department_manager",
+	},
+	{
+		"state": "Pending Use Department Manager",
+		"action": "Approve",
+		"next_state": "Pending Plant Manager",
+		"allowed": DEPARTMENT_MANAGER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.use_department_manager",
+	},
+	{
+		"state": "Pending Use Department Manager",
+		"action": "Reject",
+		"next_state": "Rejected",
+		"allowed": DEPARTMENT_MANAGER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.use_department_manager",
+	},
+	{
+		"state": "Pending Plant Manager",
+		"action": "Approve",
+		"next_state": "Pending COO",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.plant_manager and not doc.bypass_other_management_approval",
+	},
+	{
+		"state": "Pending Plant Manager",
+		"action": "Approve & Bypass COO",
+		"next_state": "Pending Owner Signature",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.plant_manager and doc.bypass_other_management_approval and doc.bypass_reason",
+	},
+	{
+		"state": "Pending Plant Manager",
+		"action": "Approve in Place of Plant Manager",
+		"next_state": "Pending Owner Signature",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.coo and doc.bypass_other_management_approval and doc.bypass_reason",
+	},
+	{
+		"state": "Pending Plant Manager",
+		"action": "Reject",
+		"next_state": "Rejected",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.plant_manager",
+	},
+	{
+		"state": "Pending Plant Manager",
+		"action": "Reject in Place of Plant Manager",
+		"next_state": "Rejected",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.coo and doc.bypass_other_management_approval and doc.bypass_reason",
+	},
+	{
+		"state": "Pending COO",
+		"action": "Approve",
+		"next_state": "Pending Owner Signature",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.coo",
+	},
+	{
+		"state": "Pending COO",
+		"action": "Reject",
+		"next_state": "Rejected",
+		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "frappe.session.user == doc.coo",
+	},
+	{
+		"state": "Pending Owner Signature",
+		"action": "Record Owner Signature",
+		"next_state": "Ready for Purchasing",
+		"allowed": MRS_OWNER_RECORDER_ROLE,
+		"allow_self_approval": 1,
+		"condition": "doc.owner_signed and doc.owner_signed_date",
+	},
+)
+
 PURCHASING_PERSONNEL_PERMISSIONS = {
 	"Material Request": {"read", "print", "report"},
 	"Request for Quotation": {"read", "write", "create", "submit", "print", "email", "report"},
@@ -114,6 +260,8 @@ WORKFLOW_TRANSITIONS = (
 
 def after_migrate():
 	ensure_maintenance_supervisor_permissions()
+	ensure_mrs_foundation()
+	ensure_mrs_workflow()
 	ensure_stockroom_personnel_permissions()
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
@@ -122,6 +270,103 @@ def after_migrate():
 	backfill_withdrawal_slip_issue_qty()
 
 
+
+
+
+def ensure_mrs_foundation():
+	"""Create CCPC's lightweight personnel/routing foundation and MRS access roles."""
+	for role in MRS_ROLES:
+		_ensure_role(role)
+
+	create_custom_fields(
+		{
+			"Department": [
+				{
+					"fieldname": "ccpc_department_manager",
+					"label": "CCPC Department Manager",
+					"fieldtype": "Link",
+					"options": "CCPC Personnel",
+					"insert_after": "parent_department",
+				}
+			]
+		}
+	)
+
+	mrs_permissions = {
+		MRS_REQUESTOR_ROLE: {"read", "write", "create", "print", "report"},
+		DEPARTMENT_MANAGER_ROLE: {"read", "write", "print", "report"},
+		MRS_MANAGEMENT_APPROVER_ROLE: {"read", "write", "print", "report"},
+		MRS_OWNER_RECORDER_ROLE: {"read", "write", "print", "report"},
+		PURCHASING_PERSONNEL_ROLE: {"read", "print", "report"},
+		PURCHASING_SUPERVISOR_ROLE: {"read", "print", "report"},
+	}
+	for role, rights in mrs_permissions.items():
+		_ensure_custom_permission("MRS", role, rights)
+
+	personnel_read_roles = set(MRS_ROLES) | {
+		PURCHASING_PERSONNEL_ROLE,
+		PURCHASING_SUPERVISOR_ROLE,
+	}
+	for role in personnel_read_roles:
+		_ensure_custom_permission("CCPC Personnel", role, {"read", "report"})
+
+	for role in MRS_ROLES:
+		for doctype in MRS_REFERENCE_DOCTYPES:
+			_ensure_custom_permission(doctype, role, {"read"})
+
+	frappe.clear_cache(doctype="Department")
+	frappe.clear_cache(doctype="MRS")
+	frappe.clear_cache(doctype="CCPC Personnel")
+
+
+def ensure_mrs_workflow():
+	for role in MRS_ROLES:
+		_ensure_role(role)
+	for state, _allow_edit in MRS_WORKFLOW_STATES:
+		_ensure_named_master("Workflow State", state, "workflow_state_name")
+	for transition in MRS_WORKFLOW_TRANSITIONS:
+		_ensure_named_master(
+			"Workflow Action Master",
+			transition["action"],
+			"workflow_action_name",
+		)
+
+	workflow = (
+		frappe.get_doc("Workflow", MRS_WORKFLOW)
+		if frappe.db.exists("Workflow", MRS_WORKFLOW)
+		else frappe.new_doc("Workflow")
+	)
+	workflow.workflow_name = MRS_WORKFLOW
+	workflow.document_type = "MRS"
+	workflow.is_active = 1
+	workflow.override_status = 0
+	workflow.send_email_alert = 0
+	workflow.enable_action_confirmation = 1
+	workflow.workflow_state_field = "status"
+
+	workflow.set("states", [])
+	for state, allow_edit in MRS_WORKFLOW_STATES:
+		workflow.append(
+			"states",
+			{
+				"state": state,
+				"doc_status": "0",
+				"allow_edit": allow_edit,
+				"send_email": 0,
+			}
+		)
+
+	workflow.set("transitions", [])
+	for transition in MRS_WORKFLOW_TRANSITIONS:
+		workflow.append("transitions", transition)
+
+	if workflow.is_new():
+		workflow.insert(ignore_permissions=True)
+	else:
+		workflow.save(ignore_permissions=True)
+
+	frappe.clear_cache(doctype="MRS")
+	frappe.cache.hdel("workflow", "MRS")
 
 
 def ensure_maintenance_supervisor_permissions():
@@ -429,6 +674,29 @@ def backfill_withdrawal_slip_issue_qty():
 				issue_qty,
 				update_modified=False,
 			)
+
+
+
+def _ensure_custom_permission(doctype, role, rights):
+	filters = {
+		"parent": doctype,
+		"role": role,
+		"permlevel": 0,
+		"if_owner": 0,
+	}
+	custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+	if not custom_perm:
+		add_permission(doctype, role, permlevel=0, ptype="read")
+		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
+
+	values = {right: 1 if right in rights else 0 for right in CUSTOM_DOCPERM_RIGHTS}
+	frappe.db.set_value(
+		"Custom DocPerm",
+		custom_perm,
+		values,
+		update_modified=False,
+	)
+	frappe.clear_cache(doctype=doctype)
 
 
 def _ensure_role(role_name):
