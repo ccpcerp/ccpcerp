@@ -190,6 +190,14 @@ after_migrate = "ccpcerp.setup.after_migrate"
 
 # notification_config = "ccpcerp.notifications.get_notification_config"
 
+permission_query_conditions = {
+	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.get_mrs_permission_query_conditions",
+}
+
+has_permission = {
+	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.has_mrs_permission",
+}
+
 # Permissions
 # -----------
 # Permissions evaluated in scripted ways
