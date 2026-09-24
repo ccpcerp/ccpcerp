@@ -315,6 +315,17 @@ def ensure_mrs_foundation():
 					"no_copy": 1,
 				}
 			],
+			"Supplier Quotation": [
+				{
+					"fieldname": "mrs",
+					"label": "MRS",
+					"fieldtype": "Link",
+					"options": "MRS",
+					"insert_after": "company",
+					"read_only": 1,
+					"no_copy": 1,
+				}
+			],
 		}
 	)
 
@@ -343,6 +354,7 @@ def ensure_mrs_foundation():
 	frappe.clear_cache(doctype="Department")
 	frappe.clear_cache(doctype="MRS")
 	frappe.clear_cache(doctype="Request for Quotation")
+	frappe.clear_cache(doctype="Supplier Quotation")
 	frappe.clear_cache(doctype="CCPC Personnel")
 
 

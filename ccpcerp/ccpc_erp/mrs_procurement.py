@@ -15,6 +15,8 @@ MATERIAL_REQUEST_CANCELLED = "Material Request Cancelled"
 REQUEST_FOR_QUOTATION_DRAFT = "Request for Quotation Draft"
 REQUEST_FOR_QUOTATION_SUBMITTED = "Request for Quotation Submitted"
 REQUEST_FOR_QUOTATION_CANCELLED = "Request for Quotation Cancelled"
+SUPPLIER_QUOTATION_DRAFT = "Supplier Quotation Draft"
+SUPPLIER_QUOTATION_RECEIVED = "Supplier Quotation Received"
 
 
 @frappe.whitelist()
@@ -88,13 +90,9 @@ def make_material_request(source_name):
 
 
 def sync_material_request_status(doc, method=None):
-	"""Mirror the linked Material Request lifecycle onto the requestor-visible MRS."""
+	"""Keep the MRS backlink current without letting an upstream event hide later progress."""
 	mrs_name = doc.get("mrs")
 	if not mrs_name or not frappe.db.exists("MRS", mrs_name):
-		return
-
-	# Once an RFQ exists, its lifecycle is the more advanced procurement stage.
-	if _get_request_for_quotation_procurement_status(mrs_name):
 		return
 
 	_set_mrs_material_request(
@@ -102,6 +100,7 @@ def sync_material_request_status(doc, method=None):
 		doc.name,
 		_material_request_procurement_status(doc.docstatus),
 	)
+	_sync_mrs_procurement_status(mrs_name)
 
 
 def set_request_for_quotation_mrs(doc, method=None):
@@ -121,21 +120,55 @@ def set_request_for_quotation_mrs(doc, method=None):
 
 
 def sync_request_for_quotation_status(doc, method=None):
-	"""Mirror aggregate RFQ progress onto the requestor-visible MRS."""
+	"""Mirror aggregate procurement progress after an RFQ lifecycle change."""
+	_sync_mrs_names(doc)
+
+
+def set_supplier_quotation_mrs(doc, method=None):
+	"""Derive Supplier Quotation MRS provenance from its standard RFQ/MR item links."""
+	items = doc.get("items") or []
+	request_for_quotations = {
+		row.get("request_for_quotation") for row in items if row.get("request_for_quotation")
+	}
+	material_requests = {row.get("material_request") for row in items if row.get("material_request")}
+	has_unlinked_items = any(
+		not row.get("request_for_quotation") and not row.get("material_request") for row in items
+	)
+	previous_mrs = doc.get("mrs")
+
+	doc.mrs = _resolve_mrs_from_procurement_sources(
+		request_for_quotations,
+		material_requests,
+		has_unlinked_items=has_unlinked_items,
+		strict=True,
+	)
+	if previous_mrs and previous_mrs != doc.mrs:
+		doc.flags.ccpc_previous_mrs = previous_mrs
+
+
+def sync_supplier_quotation_status(doc, method=None):
+	"""Mirror aggregate Supplier Quotation progress onto the requestor-visible MRS."""
+	_sync_mrs_names(doc)
+
+
+def _sync_mrs_names(doc):
 	mrs_names = {
 		name
 		for name in (doc.get("mrs"), doc.flags.get("ccpc_previous_mrs"))
 		if name
 	}
 	for mrs_name in mrs_names:
-		_sync_mrs_procurement_from_request_for_quotations(mrs_name)
+		_sync_mrs_procurement_status(mrs_name)
 
 
-def _sync_mrs_procurement_from_request_for_quotations(mrs_name):
+def _sync_mrs_procurement_status(mrs_name):
 	if not frappe.db.exists("MRS", mrs_name):
 		return
 
-	procurement_status = _get_request_for_quotation_procurement_status(mrs_name)
+	procurement_status = _get_supplier_quotation_procurement_status(mrs_name)
+	if not procurement_status:
+		procurement_status = _get_request_for_quotation_procurement_status(mrs_name)
+
 	if not procurement_status:
 		mrs = frappe.db.get_value(
 			"MRS",
@@ -157,34 +190,15 @@ def _sync_mrs_procurement_from_request_for_quotations(mrs_name):
 
 
 def backfill_mrs_procurement_status():
-	"""Initialize or advance tracking for records created before procurement tracking existed."""
+	"""Backfill downstream MRS links, then recalculate requestor-visible procurement progress."""
 	if not frappe.db.table_exists("MRS") or not frappe.db.has_column("MRS", "procurement_status"):
 		return
 
 	_backfill_request_for_quotation_mrs_links()
+	_backfill_supplier_quotation_mrs_links()
 
-	for row in frappe.get_all(
-		"MRS",
-		fields=["name", "status", "material_request", "procurement_status"],
-	):
-		procurement_status = _get_request_for_quotation_procurement_status(row.name)
-
-		if not procurement_status and row.material_request and frappe.db.exists(
-			"Material Request", row.material_request
-		):
-			docstatus = frappe.db.get_value("Material Request", row.material_request, "docstatus")
-			procurement_status = _material_request_procurement_status(docstatus)
-		elif not procurement_status and row.status == "Ready for Purchasing":
-			procurement_status = AWAITING_PURCHASING
-
-		if procurement_status and row.procurement_status != procurement_status:
-			frappe.db.set_value(
-				"MRS",
-				row.name,
-				"procurement_status",
-				procurement_status,
-				update_modified=False,
-			)
+	for mrs_name in frappe.get_all("MRS", pluck="name"):
+		_sync_mrs_procurement_status(mrs_name)
 
 
 def _backfill_request_for_quotation_mrs_links():
@@ -222,6 +236,47 @@ def _backfill_request_for_quotation_mrs_links():
 			)
 
 
+def _backfill_supplier_quotation_mrs_links():
+	if (
+		not frappe.db.table_exists("Supplier Quotation")
+		or not frappe.db.table_exists("Supplier Quotation Item")
+		or not frappe.db.has_column("Supplier Quotation", "mrs")
+	):
+		return
+
+	for quotation in frappe.get_all("Supplier Quotation", fields=["name", "mrs"]):
+		if quotation.mrs:
+			continue
+
+		items = frappe.get_all(
+			"Supplier Quotation Item",
+			filters={"parent": quotation.name, "parenttype": "Supplier Quotation"},
+			fields=["request_for_quotation", "material_request"],
+			limit_page_length=0,
+		)
+		request_for_quotations = {
+			row.request_for_quotation for row in items if row.request_for_quotation
+		}
+		material_requests = {row.material_request for row in items if row.material_request}
+		has_unlinked_items = any(
+			not row.request_for_quotation and not row.material_request for row in items
+		)
+		mrs_name = _resolve_mrs_from_procurement_sources(
+			request_for_quotations,
+			material_requests,
+			has_unlinked_items=has_unlinked_items,
+			strict=False,
+		)
+		if mrs_name:
+			frappe.db.set_value(
+				"Supplier Quotation",
+				quotation.name,
+				"mrs",
+				mrs_name,
+				update_modified=False,
+			)
+
+
 def _resolve_mrs_from_material_requests(material_requests, has_unlinked_items=False, strict=True):
 	material_requests = {name for name in material_requests if name}
 	if not material_requests:
@@ -251,6 +306,75 @@ def _resolve_mrs_from_material_requests(material_requests, has_unlinked_items=Fa
 		return None
 
 	return next(iter(tracked_mrs), None)
+
+
+def _resolve_mrs_from_procurement_sources(
+	request_for_quotations,
+	material_requests,
+	has_unlinked_items=False,
+	strict=True,
+):
+	request_for_quotations = {name for name in request_for_quotations if name}
+	material_requests = {name for name in material_requests if name}
+	tracked_mrs = set()
+	untracked_sources = False
+
+	if request_for_quotations:
+		rows = frappe.get_all(
+			"Request for Quotation",
+			filters={"name": ["in", list(request_for_quotations)]},
+			fields=["name", "mrs"],
+			limit_page_length=0,
+		)
+		mrs_by_rfq = {row.name: row.mrs for row in rows}
+		tracked_mrs.update(mrs_name for mrs_name in mrs_by_rfq.values() if mrs_name)
+		untracked_sources = untracked_sources or any(
+			not mrs_by_rfq.get(name) for name in request_for_quotations
+		)
+
+	if material_requests:
+		rows = frappe.get_all(
+			"Material Request",
+			filters={"name": ["in", list(material_requests)]},
+			fields=["name", "mrs"],
+			limit_page_length=0,
+		)
+		mrs_by_request = {row.name: row.mrs for row in rows}
+		tracked_mrs.update(mrs_name for mrs_name in mrs_by_request.values() if mrs_name)
+		untracked_sources = untracked_sources or any(
+			not mrs_by_request.get(name) for name in material_requests
+		)
+
+	ambiguous = len(tracked_mrs) > 1 or bool(
+		tracked_mrs and (untracked_sources or has_unlinked_items)
+	)
+	if ambiguous:
+		if strict:
+			frappe.throw(
+				_(
+					"An MRS-linked Supplier Quotation cannot mix items from different MRS records "
+					"or items without the same MRS provenance."
+				)
+			)
+		return None
+
+	return next(iter(tracked_mrs), None)
+
+
+def _get_supplier_quotation_procurement_status(mrs_name):
+	if (
+		not frappe.db.table_exists("Supplier Quotation")
+		or not frappe.db.has_column("Supplier Quotation", "mrs")
+	):
+		return None
+
+	docstatuses = frappe.get_all(
+		"Supplier Quotation",
+		filters={"mrs": mrs_name},
+		pluck="docstatus",
+		limit_page_length=0,
+	)
+	return _supplier_quotation_procurement_status(docstatuses)
 
 
 def _get_request_for_quotation_procurement_status(mrs_name):
@@ -332,6 +456,15 @@ def _request_for_quotation_procurement_status(docstatuses):
 		return REQUEST_FOR_QUOTATION_DRAFT
 	if 2 in docstatuses:
 		return REQUEST_FOR_QUOTATION_CANCELLED
+	return None
+
+
+def _supplier_quotation_procurement_status(docstatuses):
+	docstatuses = {int(docstatus or 0) for docstatus in docstatuses}
+	if 1 in docstatuses:
+		return SUPPLIER_QUOTATION_RECEIVED
+	if 0 in docstatuses:
+		return SUPPLIER_QUOTATION_DRAFT
 	return None
 
 

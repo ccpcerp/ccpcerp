@@ -23,6 +23,10 @@ class TestMRSProcurement(TestCase):
 		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Request for Quotation"]
 		self.assertTrue({"read", "write", "create", "submit"}.issubset(rights))
 
+	def test_purchasing_supplier_quotation_permissions(self):
+		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Supplier Quotation"]
+		self.assertTrue({"read", "write", "create", "submit"}.issubset(rights))
+
 	def test_material_request_procurement_status(self):
 		self.assertEqual(
 			mrs_procurement._material_request_procurement_status(0),
@@ -75,6 +79,54 @@ class TestMRSProcurement(TestCase):
 		with self.assertRaises(frappe.ValidationError):
 			mrs_procurement._resolve_mrs_from_material_requests(
 				{"MAT-MR-1"},
+				has_unlinked_items=True,
+			)
+
+	def test_supplier_quotation_procurement_status(self):
+		self.assertEqual(
+			mrs_procurement._supplier_quotation_procurement_status([0, 2]),
+			mrs_procurement.SUPPLIER_QUOTATION_DRAFT,
+		)
+		self.assertEqual(
+			mrs_procurement._supplier_quotation_procurement_status([0, 1, 2]),
+			mrs_procurement.SUPPLIER_QUOTATION_RECEIVED,
+		)
+		self.assertIsNone(mrs_procurement._supplier_quotation_procurement_status([2]))
+		self.assertIsNone(mrs_procurement._supplier_quotation_procurement_status([]))
+
+	@patch.object(frappe, "get_all")
+	def test_supplier_quotation_resolves_matching_rfq_and_mr_provenance(self, get_all):
+		get_all.side_effect = [
+			[frappe._dict(name="RFQ-1", mrs="MRS-1")],
+			[frappe._dict(name="MAT-MR-1", mrs="MRS-1")],
+		]
+		self.assertEqual(
+			mrs_procurement._resolve_mrs_from_procurement_sources(
+				{"RFQ-1"},
+				{"MAT-MR-1"},
+			),
+			"MRS-1",
+		)
+
+	@patch.object(frappe, "get_all")
+	def test_supplier_quotation_rejects_mixed_mrs_provenance(self, get_all):
+		get_all.side_effect = [
+			[frappe._dict(name="RFQ-1", mrs="MRS-1")],
+			[frappe._dict(name="MAT-MR-2", mrs="MRS-2")],
+		]
+		with self.assertRaises(frappe.ValidationError):
+			mrs_procurement._resolve_mrs_from_procurement_sources(
+				{"RFQ-1"},
+				{"MAT-MR-2"},
+			)
+
+	@patch.object(frappe, "get_all")
+	def test_supplier_quotation_rejects_unlinked_item_mixed_with_mrs(self, get_all):
+		get_all.return_value = [frappe._dict(name="RFQ-1", mrs="MRS-1")]
+		with self.assertRaises(frappe.ValidationError):
+			mrs_procurement._resolve_mrs_from_procurement_sources(
+				{"RFQ-1"},
+				set(),
 				has_unlinked_items=True,
 			)
 
