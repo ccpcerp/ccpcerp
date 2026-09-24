@@ -109,21 +109,49 @@ def set_request_for_quotation_mrs(doc, method=None):
 	items = doc.get("items") or []
 	material_requests = {row.get("material_request") for row in items if row.get("material_request")}
 	has_unlinked_items = any(not row.get("material_request") for row in items)
+	previous_mrs = doc.get("mrs")
 
 	doc.mrs = _resolve_mrs_from_material_requests(
 		material_requests,
 		has_unlinked_items=has_unlinked_items,
 		strict=True,
 	)
+	if previous_mrs and previous_mrs != doc.mrs:
+		doc.flags.ccpc_previous_mrs = previous_mrs
 
 
 def sync_request_for_quotation_status(doc, method=None):
 	"""Mirror aggregate RFQ progress onto the requestor-visible MRS."""
-	mrs_name = doc.get("mrs")
-	if not mrs_name or not frappe.db.exists("MRS", mrs_name):
+	mrs_names = {
+		name
+		for name in (doc.get("mrs"), doc.flags.get("ccpc_previous_mrs"))
+		if name
+	}
+	for mrs_name in mrs_names:
+		_sync_mrs_procurement_from_request_for_quotations(mrs_name)
+
+
+def _sync_mrs_procurement_from_request_for_quotations(mrs_name):
+	if not frappe.db.exists("MRS", mrs_name):
 		return
 
 	procurement_status = _get_request_for_quotation_procurement_status(mrs_name)
+	if not procurement_status:
+		mrs = frappe.db.get_value(
+			"MRS",
+			mrs_name,
+			["status", "material_request"],
+			as_dict=True,
+		)
+		if not mrs:
+			return
+
+		if mrs.material_request and frappe.db.exists("Material Request", mrs.material_request):
+			docstatus = frappe.db.get_value("Material Request", mrs.material_request, "docstatus")
+			procurement_status = _material_request_procurement_status(docstatus)
+		elif mrs.status == "Ready for Purchasing":
+			procurement_status = AWAITING_PURCHASING
+
 	if procurement_status:
 		_set_mrs_procurement_status(mrs_name, procurement_status)
 
