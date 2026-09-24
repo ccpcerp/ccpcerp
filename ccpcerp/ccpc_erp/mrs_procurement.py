@@ -171,8 +171,8 @@ def _material_request_procurement_status(docstatus):
 	return MATERIAL_REQUEST_DRAFT
 
 
-def _require_purchasing_role():
-	user = frappe.session.user
+def _require_purchasing_role(user=None):
+	user = user or frappe.session.user
 	roles = set(frappe.get_roles(user))
 	if user == "Administrator" or "System Manager" in roles or roles.intersection(PURCHASING_ROLES):
 		return

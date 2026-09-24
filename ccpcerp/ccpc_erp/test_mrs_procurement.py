@@ -26,11 +26,9 @@ class TestMRSProcurement(TestCase):
 
 	@patch.object(frappe, "get_roles", return_value=["Purchasing Personnel"])
 	def test_purchasing_personnel_is_allowed(self, _get_roles):
-		with patch.object(frappe.session, "user", "purchasing@example.com"):
-			mrs_procurement._require_purchasing_role()
+		mrs_procurement._require_purchasing_role("purchasing@example.com")
 
 	@patch.object(frappe, "get_roles", return_value=["Employee"])
 	def test_non_purchasing_user_is_rejected(self, _get_roles):
-		with patch.object(frappe.session, "user", "employee@example.com"):
-			with self.assertRaises(frappe.PermissionError):
-				mrs_procurement._require_purchasing_role()
+		with self.assertRaises(frappe.PermissionError):
+			mrs_procurement._require_purchasing_role("employee@example.com")
