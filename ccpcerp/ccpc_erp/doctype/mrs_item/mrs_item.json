@@ -6,12 +6,12 @@
  "engine": "InnoDB",
  "field_order": ["item_code", "item_name", "description", "requested_qty", "authorized_qty", "uom", "date_needed", "decision", "remarks"],
  "fields": [
-  {"fieldname":"item_code","fieldtype":"Link","in_list_view":1,"label":"Item","options":"Item","reqd":1},
-  {"fieldname":"item_name","fieldtype":"Data","in_list_view":1,"label":"Item Name","read_only":1},
+  {"columns":2,"fieldname":"item_code","fieldtype":"Link","in_list_view":1,"label":"Item","options":"Item","reqd":1},
+  {"columns":4,"fieldname":"item_name","fieldtype":"Data","in_list_view":1,"label":"Item Name","read_only":1},
   {"fieldname":"description","fieldtype":"Small Text","label":"Description","read_only":1},
-  {"fieldname":"requested_qty","fieldtype":"Float","in_list_view":1,"label":"Requested Qty","reqd":1},
-  {"fieldname":"authorized_qty","fieldtype":"Float","in_list_view":1,"label":"Authorized Qty"},
-  {"fieldname":"uom","fieldtype":"Link","in_list_view":1,"label":"UOM","options":"UOM","read_only":1},
+  {"columns":1,"fieldname":"requested_qty","fieldtype":"Float","in_list_view":1,"label":"Requested Qty","reqd":1},
+  {"columns":1,"fieldname":"authorized_qty","fieldtype":"Float","in_list_view":1,"label":"Authorized Qty"},
+  {"columns":1,"fieldname":"uom","fieldtype":"Link","in_list_view":1,"label":"UOM","options":"UOM","read_only":1},
   {"fieldname":"date_needed","fieldtype":"Date","label":"Date Needed"},
   {"fieldname":"decision","fieldtype":"Select","label":"Decision","options":"Pending\nApproved as Requested\nModified\nNot Approved","read_only":1},
   {"fieldname":"remarks","fieldtype":"Small Text","label":"Remarks"}
