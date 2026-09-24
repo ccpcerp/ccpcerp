@@ -51,6 +51,7 @@ doc_events = {
 		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
 		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
 		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
 	},
 	"Stock Entry": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
