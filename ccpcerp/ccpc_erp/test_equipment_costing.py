@@ -238,7 +238,7 @@ class TestEquipmentCostingRules(TestCase):
 		self.assertEqual(work_request["read_only"], 1)
 		self.assertFalse(work_request.get("unique"))
 
-		mrs = next(field for field in fixtures if field["fieldname"] == "mrs")
+		mrs = next(field for field in fixtures if field["name"] == "Material Request-mrs")
 		self.assertEqual(
 			(mrs["fieldtype"], mrs["options"], mrs["insert_after"]),
 			("Link", "MRS", "work_request"),
