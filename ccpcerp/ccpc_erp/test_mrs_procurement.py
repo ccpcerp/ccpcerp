@@ -6,10 +6,19 @@ from unittest.mock import patch
 
 import frappe
 
+from ccpcerp import setup
 from ccpcerp.ccpc_erp import mrs_procurement
 
 
 class TestMRSProcurement(TestCase):
+	def test_purchasing_material_request_permissions(self):
+		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Material Request"]
+		self.assertTrue({"read", "write", "create", "submit"}.issubset(rights))
+		self.assertEqual(
+			setup.MAINTENANCE_SUPERVISOR_PERMISSIONS["Material Request"],
+			{"read", "print", "report"},
+		)
+
 	def test_material_request_procurement_status(self):
 		self.assertEqual(
 			mrs_procurement._material_request_procurement_status(0),

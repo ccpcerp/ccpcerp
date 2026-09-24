@@ -10,7 +10,7 @@ from frappe.utils import flt
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 MAINTENANCE_SUPERVISOR_PERMISSIONS = {
-	"Material Request": {"read", "write", "create", "submit", "print", "report"},
+	"Material Request": {"read", "print", "report"},
 }
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
@@ -164,7 +164,7 @@ MRS_WORKFLOW_TRANSITIONS = (
 )
 
 PURCHASING_PERSONNEL_PERMISSIONS = {
-	"Material Request": {"read", "print", "report"},
+	"Material Request": {"read", "write", "create", "submit", "print", "report"},
 	"Request for Quotation": {"read", "write", "create", "submit", "print", "email", "report"},
 	"Supplier Quotation": {"read", "write", "create", "submit", "print", "report"},
 	"Purchase Order": {"read", "write", "create", "print", "report"},
