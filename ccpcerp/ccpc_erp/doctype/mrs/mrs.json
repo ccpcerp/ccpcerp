@@ -345,7 +345,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Procurement Status",
-   "options": "\\nAwaiting Purchasing\\nMaterial Request Draft\\nMaterial Request Submitted\\nMaterial Request Cancelled",
+   "options": "\nAwaiting Purchasing\nMaterial Request Draft\nMaterial Request Submitted\nMaterial Request Cancelled\nRequest for Quotation Draft\nRequest for Quotation Submitted\nRequest for Quotation Cancelled",
    "read_only": 1
   },
   {

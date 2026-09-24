@@ -17,6 +17,7 @@ fixtures = [
 					"Material Request-department",
 					"Material Request-work_request",
 					"Material Request-mrs",
+					"Request for Quotation-mrs",
 				],
 			]
 		],
@@ -44,6 +45,12 @@ doc_events = {
 		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
 		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
 		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
+	},
+	"Request for Quotation": {
+		"before_validate": "ccpcerp.ccpc_erp.mrs_procurement.set_request_for_quotation_mrs",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
 	},
 	"Stock Entry": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",

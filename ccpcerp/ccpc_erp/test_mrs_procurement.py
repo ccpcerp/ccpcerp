@@ -19,6 +19,10 @@ class TestMRSProcurement(TestCase):
 			{"read", "print", "report"},
 		)
 
+	def test_purchasing_rfq_permissions(self):
+		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Request for Quotation"]
+		self.assertTrue({"read", "write", "create", "submit"}.issubset(rights))
+
 	def test_material_request_procurement_status(self):
 		self.assertEqual(
 			mrs_procurement._material_request_procurement_status(0),
@@ -32,6 +36,47 @@ class TestMRSProcurement(TestCase):
 			mrs_procurement._material_request_procurement_status(2),
 			mrs_procurement.MATERIAL_REQUEST_CANCELLED,
 		)
+
+	def test_request_for_quotation_procurement_status(self):
+		self.assertEqual(
+			mrs_procurement._request_for_quotation_procurement_status([0, 2]),
+			mrs_procurement.REQUEST_FOR_QUOTATION_DRAFT,
+		)
+		self.assertEqual(
+			mrs_procurement._request_for_quotation_procurement_status([0, 1, 2]),
+			mrs_procurement.REQUEST_FOR_QUOTATION_SUBMITTED,
+		)
+		self.assertEqual(
+			mrs_procurement._request_for_quotation_procurement_status([2]),
+			mrs_procurement.REQUEST_FOR_QUOTATION_CANCELLED,
+		)
+		self.assertIsNone(mrs_procurement._request_for_quotation_procurement_status([]))
+
+	@patch.object(frappe, "get_all")
+	def test_rfq_resolves_single_mrs_provenance(self, get_all):
+		get_all.return_value = [frappe._dict(name="MAT-MR-1", mrs="MRS-1")]
+		self.assertEqual(
+			mrs_procurement._resolve_mrs_from_material_requests({"MAT-MR-1"}),
+			"MRS-1",
+		)
+
+	@patch.object(frappe, "get_all")
+	def test_rfq_rejects_mixed_mrs_provenance(self, get_all):
+		get_all.return_value = [
+			frappe._dict(name="MAT-MR-1", mrs="MRS-1"),
+			frappe._dict(name="MAT-MR-2", mrs="MRS-2"),
+		]
+		with self.assertRaises(frappe.ValidationError):
+			mrs_procurement._resolve_mrs_from_material_requests({"MAT-MR-1", "MAT-MR-2"})
+
+	@patch.object(frappe, "get_all")
+	def test_rfq_rejects_unlinked_item_mixed_with_mrs(self, get_all):
+		get_all.return_value = [frappe._dict(name="MAT-MR-1", mrs="MRS-1")]
+		with self.assertRaises(frappe.ValidationError):
+			mrs_procurement._resolve_mrs_from_material_requests(
+				{"MAT-MR-1"},
+				has_unlinked_items=True,
+			)
 
 	@patch.object(frappe, "get_roles", return_value=["Purchasing Personnel"])
 	def test_purchasing_personnel_is_allowed(self, _get_roles):

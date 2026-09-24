@@ -42,5 +42,17 @@
   "options": "MRS",
   "read_only": 1,
   "unique": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Request for Quotation",
+  "fieldname": "mrs",
+  "fieldtype": "Link",
+  "insert_after": "company",
+  "label": "MRS",
+  "name": "Request for Quotation-mrs",
+  "no_copy": 1,
+  "options": "MRS",
+  "read_only": 1
  }
 ]
