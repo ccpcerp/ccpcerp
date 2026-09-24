@@ -132,13 +132,25 @@ class MRS(Document):
 		before = None if self.is_new() else self.get_doc_before_save()
 		if before and (before.status or "Draft") != "Draft":
 			return
-		self.requesting_department_manager = _get_department_manager_user(self.requesting_department)
+
+		requesting_manager = _get_department_manager_identity(self.requesting_department)
+		self.requesting_department_manager = requesting_manager.user
+		self.requesting_department_manager_name = requesting_manager.personnel_name
+
 		self.use_department_manager = None
+		self.use_department_manager_name = None
 		if self.use_department and self.use_department != self.requesting_department:
-			self.use_department_manager = _get_department_manager_user(self.use_department)
+			use_manager = _get_department_manager_identity(self.use_department)
+			self.use_department_manager = use_manager.user
+			self.use_department_manager_name = use_manager.personnel_name
+
 		settings = frappe.get_single("CCPC Approval Settings")
-		self.plant_manager = _get_personnel_user(settings.plant_manager)
-		self.coo = _get_personnel_user(settings.coo)
+		plant_manager = _get_personnel_identity(settings.plant_manager)
+		coo = _get_personnel_identity(settings.coo)
+		self.plant_manager = plant_manager.user
+		self.plant_manager_name = plant_manager.personnel_name
+		self.coo = coo.user
+		self.coo_name = coo.personnel_name
 		self.owner_name = settings.owner_name
 
 	def _set_item_decisions(self):
@@ -257,10 +269,12 @@ class MRS(Document):
 				self.coo_approved_on = stamp
 				self.management_bypassed_role = "Plant Manager"
 			self.management_bypass_by = user
+			self.management_bypass_by_name = _get_personnel_name_for_user(user)
 		elif before.status == "Pending COO" and self.status == "Pending General Manager Signature":
 			self.coo_approved_on = stamp
 		elif before.status == "Pending General Manager Signature" and self.status == "Ready for Purchasing":
 			self.owner_signed_recorded_by = user
+			self.owner_signed_recorded_by_name = _get_personnel_name_for_user(user)
 			self.owner_signed_recorded_on = stamp
 
 
@@ -271,17 +285,33 @@ def _get_default_company():
 	return company
 
 
-def _get_personnel_user(personnel_name):
+def _get_personnel_identity(personnel_name):
 	if not personnel_name:
-		return None
-	personnel = frappe.db.get_value("CCPC Personnel", personnel_name, ["user", "active"], as_dict=True)
+		return frappe._dict(user=None, personnel_name=None)
+
+	personnel = frappe.db.get_value(
+		"CCPC Personnel",
+		personnel_name,
+		["user", "personnel_name", "active"],
+		as_dict=True,
+	)
 	if not personnel or not personnel.active:
+		return frappe._dict(user=None, personnel_name=None)
+	return frappe._dict(user=personnel.user, personnel_name=personnel.personnel_name)
+
+
+def _get_personnel_name_for_user(user):
+	if not user:
 		return None
-	return personnel.user
+	return frappe.db.get_value(
+		"CCPC Personnel",
+		{"user": user, "active": 1},
+		"personnel_name",
+	) or frappe.db.get_value("User", user, "full_name")
 
 
-def _get_department_manager_user(department):
+def _get_department_manager_identity(department):
 	if not department:
-		return None
+		return frappe._dict(user=None, personnel_name=None)
 	personnel_name = frappe.db.get_value("Department", department, "ccpc_department_manager")
-	return _get_personnel_user(personnel_name)
+	return _get_personnel_identity(personnel_name)

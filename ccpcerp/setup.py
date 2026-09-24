@@ -262,6 +262,7 @@ def after_migrate():
 	ensure_maintenance_supervisor_permissions()
 	ensure_mrs_foundation()
 	ensure_mrs_workflow()
+	backfill_mrs_display_names()
 	ensure_stockroom_personnel_permissions()
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
@@ -367,6 +368,83 @@ def ensure_mrs_workflow():
 
 	frappe.clear_cache(doctype="MRS")
 	frappe.cache.hdel("workflow", "MRS")
+
+
+def backfill_mrs_display_names():
+	"""Populate person-name snapshots without exposing User links on MRS forms."""
+	if not frappe.db.table_exists("MRS"):
+		return
+
+	settings = frappe.get_single("CCPC Approval Settings")
+	plant_personnel = _get_ccpc_personnel(settings.plant_manager)
+	coo_personnel = _get_ccpc_personnel(settings.coo)
+
+	for row in frappe.get_all(
+		"MRS",
+		fields=[
+			"name",
+			"prepared_by",
+			"requesting_department",
+			"use_department",
+			"requesting_department_manager",
+			"use_department_manager",
+			"plant_manager",
+			"coo",
+			"management_bypass_by",
+			"owner_signed_recorded_by",
+		],
+	):
+		requesting_manager = _get_department_manager_personnel(row.requesting_department)
+		use_manager = (
+			_get_department_manager_personnel(row.use_department)
+			if row.use_department and row.use_department != row.requesting_department
+			else frappe._dict()
+		)
+		values = {
+			"prepared_by_name": _get_personnel_name_by_user(row.prepared_by),
+			"requesting_department_manager_name": _get_personnel_name_by_user(
+				row.requesting_department_manager
+			) or requesting_manager.get("personnel_name"),
+			"use_department_manager_name": _get_personnel_name_by_user(
+				row.use_department_manager
+			) or use_manager.get("personnel_name"),
+			"plant_manager_name": _get_personnel_name_by_user(row.plant_manager)
+			or plant_personnel.get("personnel_name"),
+			"coo_name": _get_personnel_name_by_user(row.coo) or coo_personnel.get("personnel_name"),
+			"management_bypass_by_name": _get_personnel_name_by_user(row.management_bypass_by),
+			"owner_signed_recorded_by_name": _get_personnel_name_by_user(row.owner_signed_recorded_by),
+		}
+		frappe.db.set_value("MRS", row.name, values, update_modified=False)
+
+	frappe.clear_cache(doctype="MRS")
+
+
+def _get_ccpc_personnel(personnel_name):
+	if not personnel_name:
+		return frappe._dict()
+	return frappe.db.get_value(
+		"CCPC Personnel",
+		personnel_name,
+		["user", "personnel_name", "active"],
+		as_dict=True,
+	) or frappe._dict()
+
+
+def _get_personnel_name_by_user(user):
+	if not user:
+		return None
+	return frappe.db.get_value(
+		"CCPC Personnel",
+		{"user": user, "active": 1},
+		"personnel_name",
+	) or frappe.db.get_value("User", user, "full_name")
+
+
+def _get_department_manager_personnel(department):
+	if not department:
+		return frappe._dict()
+	personnel_name = frappe.db.get_value("Department", department, "ccpc_department_manager")
+	return _get_ccpc_personnel(personnel_name)
 
 
 def ensure_maintenance_supervisor_permissions():
