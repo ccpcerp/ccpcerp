@@ -8,8 +8,8 @@
   {"fieldname":"management_section","fieldtype":"Section Break","label":"Management Approvers"},
   {"fieldname":"plant_manager","fieldtype":"Link","label":"Plant Manager","options":"CCPC Personnel"},
   {"fieldname":"coo","fieldtype":"Link","label":"COO","options":"CCPC Personnel"},
-  {"fieldname":"owner_section","fieldtype":"Section Break","label":"Owner"},
-  {"fieldname":"owner_name","fieldtype":"Data","label":"Owner Name"}
+  {"fieldname":"owner_section","fieldtype":"Section Break","label":"General Manager"},
+  {"fieldname":"owner_name","fieldtype":"Data","label":"General Manager Name"}
  ],
  "issingle": 1,
  "links": [],

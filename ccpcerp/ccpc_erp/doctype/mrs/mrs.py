@@ -217,7 +217,7 @@ class MRS(Document):
 		if not self.coo:
 			frappe.throw(_("COO must be configured in CCPC Approval Settings."))
 		if not self.owner_name:
-			frappe.throw(_("Owner Name must be configured in CCPC Approval Settings."))
+			frappe.throw(_("General Manager Name must be configured in CCPC Approval Settings."))
 
 	def _validate_bypass(self):
 		if self.bypass_other_management_approval and not (self.bypass_reason or "").strip():
@@ -231,9 +231,9 @@ class MRS(Document):
 		if self.status != "Ready for Purchasing":
 			return
 		if not self.owner_signed:
-			frappe.throw(_("Owner Signed must be checked before the MRS can become Ready for Purchasing."))
+			frappe.throw(_("General Manager Signed must be checked before the MRS can become Ready for Purchasing."))
 		if not self.owner_signed_date:
-			frappe.throw(_("Owner Signed Date is required before the MRS can become Ready for Purchasing."))
+			frappe.throw(_("General Manager Signed Date is required before the MRS can become Ready for Purchasing."))
 
 	def _stamp_approval_transition(self):
 		if self.is_new():
@@ -249,7 +249,7 @@ class MRS(Document):
 			self.use_department_manager_approved_on = stamp
 		elif before.status == "Pending Plant Manager" and self.status == "Pending COO":
 			self.plant_manager_approved_on = stamp
-		elif before.status == "Pending Plant Manager" and self.status == "Pending Owner Signature":
+		elif before.status == "Pending Plant Manager" and self.status == "Pending General Manager Signature":
 			if user == self.plant_manager:
 				self.plant_manager_approved_on = stamp
 				self.management_bypassed_role = "COO"
@@ -257,9 +257,9 @@ class MRS(Document):
 				self.coo_approved_on = stamp
 				self.management_bypassed_role = "Plant Manager"
 			self.management_bypass_by = user
-		elif before.status == "Pending COO" and self.status == "Pending Owner Signature":
+		elif before.status == "Pending COO" and self.status == "Pending General Manager Signature":
 			self.coo_approved_on = stamp
-		elif before.status == "Pending Owner Signature" and self.status == "Ready for Purchasing":
+		elif before.status == "Pending General Manager Signature" and self.status == "Ready for Purchasing":
 			self.owner_signed_recorded_by = user
 			self.owner_signed_recorded_on = stamp
 

@@ -26,8 +26,8 @@ def get_mrs_permission_query_conditions(user=None):
 				f"(`tabMRS`.`requesting_department` in ({department_sql}) or `tabMRS`.`use_department` in ({department_sql}))"
 			)
 
-	if "MRS Owner Recorder" in roles:
-		conditions.append("`tabMRS`.`status` in ('Pending Owner Signature', 'Ready for Purchasing')")
+	if "MRS GM Signature Recorder" in roles:
+		conditions.append("`tabMRS`.`status` in ('Pending General Manager Signature', 'Ready for Purchasing')")
 
 	if roles.intersection({"Purchasing Personnel", "Purchasing Supervisor"}):
 		conditions.append("`tabMRS`.`status` = 'Ready for Purchasing'")
@@ -53,7 +53,7 @@ def has_mrs_permission(doc, user=None, permission_type=None):
 		doc.requesting_department in managed_departments or doc.use_department in managed_departments
 	):
 		return True
-	if "MRS Owner Recorder" in roles and doc.status in {"Pending Owner Signature", "Ready for Purchasing"}:
+	if "MRS GM Signature Recorder" in roles and doc.status in {"Pending General Manager Signature", "Ready for Purchasing"}:
 		return True
 	if roles.intersection({"Purchasing Personnel", "Purchasing Supervisor"}) and doc.status == "Ready for Purchasing":
 		return True

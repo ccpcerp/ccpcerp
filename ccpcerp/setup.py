@@ -20,12 +20,12 @@ PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
 MRS_REQUESTOR_ROLE = "MRS Requestor"
 DEPARTMENT_MANAGER_ROLE = "Department Manager"
 MRS_MANAGEMENT_APPROVER_ROLE = "MRS Management Approver"
-MRS_OWNER_RECORDER_ROLE = "MRS Owner Recorder"
+MRS_GM_SIGNATURE_RECORDER_ROLE = "MRS GM Signature Recorder"
 MRS_ROLES = (
 	MRS_REQUESTOR_ROLE,
 	DEPARTMENT_MANAGER_ROLE,
 	MRS_MANAGEMENT_APPROVER_ROLE,
-	MRS_OWNER_RECORDER_ROLE,
+	MRS_GM_SIGNATURE_RECORDER_ROLE,
 )
 MRS_REFERENCE_DOCTYPES = (
 	"Company",
@@ -44,7 +44,7 @@ MRS_WORKFLOW_STATES = (
 	("Pending Use Department Manager", DEPARTMENT_MANAGER_ROLE),
 	("Pending Plant Manager", MRS_MANAGEMENT_APPROVER_ROLE),
 	("Pending COO", MRS_MANAGEMENT_APPROVER_ROLE),
-	("Pending Owner Signature", MRS_OWNER_RECORDER_ROLE),
+	("Pending General Manager Signature", MRS_GM_SIGNATURE_RECORDER_ROLE),
 	("Ready for Purchasing", "System Manager"),
 	("Rejected", "System Manager"),
 )
@@ -108,7 +108,7 @@ MRS_WORKFLOW_TRANSITIONS = (
 	{
 		"state": "Pending Plant Manager",
 		"action": "Approve & Bypass COO",
-		"next_state": "Pending Owner Signature",
+		"next_state": "Pending General Manager Signature",
 		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
 		"allow_self_approval": 1,
 		"condition": "frappe.session.user == doc.plant_manager and doc.bypass_other_management_approval and doc.bypass_reason",
@@ -116,7 +116,7 @@ MRS_WORKFLOW_TRANSITIONS = (
 	{
 		"state": "Pending Plant Manager",
 		"action": "Approve in Place of Plant Manager",
-		"next_state": "Pending Owner Signature",
+		"next_state": "Pending General Manager Signature",
 		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
 		"allow_self_approval": 1,
 		"condition": "frappe.session.user == doc.coo and doc.bypass_other_management_approval and doc.bypass_reason",
@@ -140,7 +140,7 @@ MRS_WORKFLOW_TRANSITIONS = (
 	{
 		"state": "Pending COO",
 		"action": "Approve",
-		"next_state": "Pending Owner Signature",
+		"next_state": "Pending General Manager Signature",
 		"allowed": MRS_MANAGEMENT_APPROVER_ROLE,
 		"allow_self_approval": 1,
 		"condition": "frappe.session.user == doc.coo",
@@ -154,10 +154,10 @@ MRS_WORKFLOW_TRANSITIONS = (
 		"condition": "frappe.session.user == doc.coo",
 	},
 	{
-		"state": "Pending Owner Signature",
-		"action": "Record Owner Signature",
+		"state": "Pending General Manager Signature",
+		"action": "Record General Manager Signature",
 		"next_state": "Ready for Purchasing",
-		"allowed": MRS_OWNER_RECORDER_ROLE,
+		"allowed": MRS_GM_SIGNATURE_RECORDER_ROLE,
 		"allow_self_approval": 1,
 		"condition": "doc.owner_signed and doc.owner_signed_date",
 	},
@@ -296,7 +296,7 @@ def ensure_mrs_foundation():
 		MRS_REQUESTOR_ROLE: {"read", "write", "create", "print", "report"},
 		DEPARTMENT_MANAGER_ROLE: {"read", "write", "print", "report"},
 		MRS_MANAGEMENT_APPROVER_ROLE: {"read", "write", "print", "report"},
-		MRS_OWNER_RECORDER_ROLE: {"read", "write", "print", "report"},
+		MRS_GM_SIGNATURE_RECORDER_ROLE: {"read", "write", "print", "report"},
 		PURCHASING_PERSONNEL_ROLE: {"read", "print", "report"},
 		PURCHASING_SUPERVISOR_ROLE: {"read", "print", "report"},
 	}

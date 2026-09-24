@@ -25,7 +25,7 @@ frappe.ui.form.on("MRS", {
 			!(is_plant_stage && (user === frm.doc.plant_manager || user === frm.doc.coo))
 		);
 		frm.set_df_property("bypass_reason", "read_only", !is_plant_stage);
-		frm.set_df_property("owner_signed", "read_only", status !== "Pending Owner Signature");
-		frm.set_df_property("owner_signed_date", "read_only", status !== "Pending Owner Signature");
+		frm.set_df_property("owner_signed", "read_only", status !== "Pending General Manager Signature");
+		frm.set_df_property("owner_signed_date", "read_only", status !== "Pending General Manager Signature");
 	},
 });
