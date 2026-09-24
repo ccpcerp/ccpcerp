@@ -227,7 +227,7 @@ class MRS(Document):
 		if not self.plant_manager:
 			frappe.throw(_("Plant Manager must be configured in CCPC Approval Settings."))
 		if not self.coo:
-			frappe.throw(_("COO must be configured in CCPC Approval Settings."))
+			frappe.throw(_("Chief Operating Officer must be configured in CCPC Approval Settings."))
 		if not self.owner_name:
 			frappe.throw(_("General Manager Name must be configured in CCPC Approval Settings."))
 
@@ -276,6 +276,7 @@ class MRS(Document):
 			self.owner_signed_recorded_by = user
 			self.owner_signed_recorded_by_name = _get_personnel_name_for_user(user)
 			self.owner_signed_recorded_on = stamp
+			self.procurement_status = self.procurement_status or "Awaiting Purchasing"
 
 
 def _get_default_company():

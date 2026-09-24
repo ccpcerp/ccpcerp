@@ -10,7 +10,7 @@ from frappe.utils import flt
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 MAINTENANCE_SUPERVISOR_PERMISSIONS = {
-	"Material Request": {"read", "print", "report"},
+	"Material Request": {"read", "write", "create", "submit", "print", "report"},
 }
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
@@ -263,6 +263,8 @@ def after_migrate():
 	ensure_mrs_foundation()
 	ensure_mrs_workflow()
 	backfill_mrs_display_names()
+	from ccpcerp.ccpc_erp.mrs_procurement import backfill_mrs_procurement_status
+	backfill_mrs_procurement_status()
 	ensure_stockroom_personnel_permissions()
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
@@ -289,7 +291,19 @@ def ensure_mrs_foundation():
 					"options": "CCPC Personnel",
 					"insert_after": "parent_department",
 				}
-			]
+			],
+			"Material Request": [
+				{
+					"fieldname": "mrs",
+					"label": "MRS",
+					"fieldtype": "Link",
+					"options": "MRS",
+					"insert_after": "work_request",
+					"read_only": 1,
+					"no_copy": 1,
+					"unique": 1,
+				}
+			],
 		}
 	)
 

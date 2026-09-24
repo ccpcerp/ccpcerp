@@ -16,6 +16,7 @@ fixtures = [
 					"Material Request-equipment",
 					"Material Request-department",
 					"Material Request-work_request",
+					"Material Request-mrs",
 				],
 			]
 		],
@@ -40,6 +41,9 @@ doc_events = {
 		],
 		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
 	},
 	"Stock Entry": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",

@@ -54,6 +54,7 @@
   "plant_manager_approved_on",
   "coo_approved_on",
   "material_request",
+  "procurement_status",
   "status",
   "naming_series",
   "company"
@@ -221,7 +222,7 @@
   {
    "fieldname": "coo",
    "fieldtype": "Link",
-   "label": "COO",
+   "label": "Chief Operating Officer",
    "options": "User",
    "read_only": 1,
    "hidden": 1
@@ -327,7 +328,7 @@
   {
    "fieldname": "coo_approved_on",
    "fieldtype": "Datetime",
-   "label": "COO Approved On",
+   "label": "Chief Operating Officer Approved On",
    "read_only": 1
   },
   {
@@ -335,6 +336,16 @@
    "fieldtype": "Link",
    "label": "Material Request",
    "options": "Material Request",
+   "read_only": 1,
+   "no_copy": 1
+  },
+  {
+   "fieldname": "procurement_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Procurement Status",
+   "options": "\\nAwaiting Purchasing\\nMaterial Request Draft\\nMaterial Request Submitted\\nMaterial Request Cancelled",
    "read_only": 1
   },
   {
@@ -342,7 +353,7 @@
    "fieldname": "status",
    "fieldtype": "Select",
    "in_list_view": 1,
-   "label": "Status",
+   "label": "Approval Status",
    "options": "Draft\nPending Requesting Department Manager\nPending Use Department Manager\nPending Plant Manager\nPending COO\nPending General Manager Signature\nReady for Purchasing\nRejected",
    "read_only": 1
   },
@@ -375,7 +386,7 @@
   {
    "fieldname": "coo_name",
    "fieldtype": "Data",
-   "label": "COO",
+   "label": "Chief Operating Officer",
    "read_only": 1
   },
   {
@@ -394,7 +405,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-23 00:00:00.000000",
+ "modified": "2026-09-24 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "MRS",
