@@ -124,6 +124,8 @@ class TestMRSProcurement(TestCase):
 			(mrs_link["link_to"], mrs_link["link_type"]),
 			("MRS", "DocType"),
 		)
+		self.assertGreater(workspace["modified"], "2026-09-18 17:30:00.000000")
+		self.assertGreater(sidebar["modified"], "2026-09-19 08:00:00.000000")
 
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):
