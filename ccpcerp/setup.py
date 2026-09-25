@@ -32,6 +32,16 @@ STOCKROOM_PERSONNEL_PERMISSIONS = {
 	"Equipment Registry": {"read", "print", "report"},
 }
 LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
+WITHDRAWAL_SLIP_REQUESTOR_ROLE = "Withdrawal Slip Requestor"
+WITHDRAWAL_SLIP_REQUESTOR_REFERENCE_DOCTYPES = (
+	"Company",
+	"Department",
+	"Warehouse",
+	"Item",
+	"UOM",
+	"Equipment Registry",
+	"Job Order",
+)
 PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
 PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
 MRS_REQUESTOR_ROLE = "MRS Requestor"
@@ -43,6 +53,14 @@ MRS_ROLES = (
 	DEPARTMENT_MANAGER_ROLE,
 	MRS_MANAGEMENT_APPROVER_ROLE,
 	MRS_GM_SIGNATURE_RECORDER_ROLE,
+)
+OPERATIONAL_REQUESTOR_SOURCE_ROLES = (
+	MAINTENANCE_SUPERVISOR_ROLE,
+	STOCKROOM_PERSONNEL_ROLE,
+	PURCHASING_PERSONNEL_ROLE,
+	PURCHASING_SUPERVISOR_ROLE,
+	DEPARTMENT_MANAGER_ROLE,
+	MRS_MANAGEMENT_APPROVER_ROLE,
 )
 MRS_REFERENCE_DOCTYPES = (
 	"Company",
@@ -235,10 +253,10 @@ CUSTOM_DOCPERM_RIGHTS = (
 WITHDRAWAL_SLIP_WORKFLOW = "CCPC Withdrawal Slip Workflow"
 
 WORKFLOW_STATES = (
-	("Draft", "Maintenance Supervisor"),
-	("Approved", "Stockroom Personnel"),
-	("Stockroom Review", "Stockroom Personnel"),
-	("Returned for Correction", "Maintenance Supervisor"),
+	("Draft", WITHDRAWAL_SLIP_REQUESTOR_ROLE),
+	("Approved", STOCKROOM_PERSONNEL_ROLE),
+	("Stockroom Review", STOCKROOM_PERSONNEL_ROLE),
+	("Returned for Correction", WITHDRAWAL_SLIP_REQUESTOR_ROLE),
 	("Fully Issued", "Stockroom Personnel"),
 	("Issued with Shortage", "Stockroom Personnel"),
 	("Cancelled", "System Manager"),
@@ -250,7 +268,7 @@ WORKFLOW_TRANSITIONS = (
 		"state": "Draft",
 		"action": "Approve & Send to Stockroom",
 		"next_state": "Approved",
-		"allowed": "Maintenance Supervisor",
+		"allowed": WITHDRAWAL_SLIP_REQUESTOR_ROLE,
 		"allow_self_approval": 1,
 	},
 	{
@@ -271,7 +289,7 @@ WORKFLOW_TRANSITIONS = (
 		"state": "Returned for Correction",
 		"action": "Re-Approve",
 		"next_state": "Approved",
-		"allowed": "Maintenance Supervisor",
+		"allowed": WITHDRAWAL_SLIP_REQUESTOR_ROLE,
 		"allow_self_approval": 1,
 		"condition": "frappe.session.user == doc.approving_supervisor",
 	},
@@ -288,6 +306,7 @@ def after_migrate():
 	ensure_stockroom_personnel_permissions()
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
+	ensure_withdrawal_slip_requestor_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 	backfill_withdrawal_slip_issue_qty()
@@ -669,6 +688,13 @@ def ensure_purchasing_supervisor_permissions():
 		frappe.clear_cache(doctype=doctype)
 
 
+def ensure_withdrawal_slip_requestor_permissions():
+	"""Grant the dedicated requestor role only the references needed to prepare Withdrawal Slips."""
+	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
+	for doctype in WITHDRAWAL_SLIP_REQUESTOR_REFERENCE_DOCTYPES:
+		_ensure_custom_permission(doctype, WITHDRAWAL_SLIP_REQUESTOR_ROLE, {"read"})
+
+
 def ensure_withdrawal_slip_stock_entry_fields():
 	create_custom_fields(
 		{
@@ -710,6 +736,7 @@ def ensure_withdrawal_slip_stock_entry_fields():
 
 def ensure_withdrawal_slip_workflow():
 	_ensure_role(MAINTENANCE_SUPERVISOR_ROLE)
+	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
 	_ensure_role(STOCKROOM_PERSONNEL_ROLE)
 	for state, _allow_edit in WORKFLOW_STATES:
 		_ensure_named_master("Workflow State", state, "workflow_state_name")

@@ -176,7 +176,7 @@ class WithdrawalSlip(Document):
 			return
 		before = self.get_doc_before_save()
 		if before and before.approving_supervisor != self.approving_supervisor:
-			frappe.throw(_("Approving Supervisor cannot be changed after the Withdrawal Slip is saved."))
+			frappe.throw(_("Prepared By cannot be changed after the Withdrawal Slip is saved."))
 
 	def _validate_job_order_context(self):
 		if not self.job_order:
@@ -504,7 +504,7 @@ def get_physical_location_suggestions(company=None):
 
 @frappe.whitelist()
 def get_requestor_suggestions():
-	rows = frappe.get_all(
+	rows = frappe.get_list(
 		"Withdrawal Slip",
 		filters={"requestor": ["!=", ""]},
 		fields=["requestor"],

@@ -1,11 +1,14 @@
 # Copyright (c) 2026, CCPC and Contributors
 # See license.txt
 
+import json
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import frappe
 
+from ccpcerp import setup as app_setup
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import (
 	WithdrawalSlip,
 	_get_default_source_warehouse,
@@ -18,6 +21,52 @@ from ccpcerp.ccpc_erp.withdrawal_slip_stock import (
 
 
 class TestWithdrawalSlip(TestCase):
+	def test_withdrawal_slip_requestor_role_drives_request_states(self):
+		states = dict(app_setup.WORKFLOW_STATES)
+		self.assertEqual(states["Draft"], app_setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE)
+		self.assertEqual(
+			states["Returned for Correction"],
+			app_setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE,
+		)
+		requestor_transitions = {
+			transition["state"]: transition
+			for transition in app_setup.WORKFLOW_TRANSITIONS
+			if transition["state"] in {"Draft", "Returned for Correction"}
+		}
+		self.assertEqual(
+			requestor_transitions["Draft"]["allowed"],
+			app_setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE,
+		)
+		self.assertEqual(
+			requestor_transitions["Returned for Correction"]["allowed"],
+			app_setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE,
+		)
+
+	def test_withdrawal_slip_requestor_permission_is_owner_scoped(self):
+		meta = json.loads(Path(__file__).with_name("withdrawal_slip.json").read_text())
+		permission = next(
+			row
+			for row in meta["permissions"]
+			if row["role"] == app_setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE
+		)
+		self.assertEqual(permission["create"], 1)
+		self.assertEqual(permission["read"], 1)
+		self.assertEqual(permission["write"], 1)
+		self.assertEqual(permission["if_owner"], 1)
+
+	def test_operational_roles_are_seeded_as_requestors(self):
+		self.assertEqual(
+			set(app_setup.OPERATIONAL_REQUESTOR_SOURCE_ROLES),
+			{
+				app_setup.MAINTENANCE_SUPERVISOR_ROLE,
+				app_setup.STOCKROOM_PERSONNEL_ROLE,
+				app_setup.PURCHASING_PERSONNEL_ROLE,
+				app_setup.PURCHASING_SUPERVISOR_ROLE,
+				app_setup.DEPARTMENT_MANAGER_ROLE,
+				app_setup.MRS_MANAGEMENT_APPROVER_ROLE,
+			},
+		)
+
 	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe")
 	def test_default_source_warehouse_requires_unique_warehouse_1(self, patch_frappe):
 		patch_frappe.get_all.return_value = ["Warehouse 1 - CCPC"]
