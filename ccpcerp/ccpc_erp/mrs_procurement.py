@@ -3,7 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import flt, getdate, nowdate
+from frappe.utils import escape_html, flt, getdate, nowdate, validate_email_address
 
 
 PURCHASING_ROLES = {"Purchasing Personnel", "Purchasing Supervisor"}
@@ -19,6 +19,9 @@ SUPPLIER_QUOTATION_DRAFT = "Supplier Quotation Draft"
 SUPPLIER_QUOTATION_RECEIVED = "Supplier Quotation Received"
 PURCHASE_ORDER_DRAFT = "Purchase Order Draft"
 PURCHASE_ORDER_SUBMITTED = "Purchase Order Submitted"
+RECEIVING_IN_PROGRESS = "Receiving in Progress"
+PARTIALLY_RECEIVED = "Partially Received"
+FULLY_RECEIVED = "Fully Received"
 
 
 @frappe.whitelist()
@@ -180,6 +183,159 @@ def sync_purchase_order_status(doc, method=None):
 	_sync_mrs_names(doc)
 
 
+def set_purchase_receipt_mrs(doc, method=None):
+	"""Derive Purchase Receipt MRS provenance from its standard PO/MR item links."""
+	items = doc.get("items") or []
+	purchase_orders = {row.get("purchase_order") for row in items if row.get("purchase_order")}
+	material_requests = {row.get("material_request") for row in items if row.get("material_request")}
+	has_unlinked_items = any(
+		not row.get("purchase_order") and not row.get("material_request") for row in items
+	)
+	previous_mrs = doc.get("mrs")
+
+	doc.mrs = _resolve_mrs_from_purchase_receipt_sources(
+		purchase_orders,
+		material_requests,
+		has_unlinked_items=has_unlinked_items,
+		strict=True,
+	)
+	if previous_mrs and previous_mrs != doc.mrs:
+		doc.flags.ccpc_previous_mrs = previous_mrs
+
+
+def sync_purchase_receipt_status(doc, method=None):
+	"""Mirror aggregate receiving progress onto the requestor-visible MRS."""
+	_sync_mrs_names(doc)
+
+
+def notify_mrs_requestor_of_receipt(doc, method=None):
+	"""Email the originating MRS requestor after Stockroom submits a receipt.
+
+	Email is advisory and must never block stock receipt posting. If DEVELOPMENT
+	or another site has no usable outgoing account, the notification is skipped
+	quietly until an outgoing account is deliberately configured.
+	"""
+	if int(doc.docstatus or 0) != 1 or not doc.get("mrs"):
+		return
+
+	sender = _get_procurement_email_sender()
+	if not sender:
+		return
+
+	mrs = frappe.db.get_value(
+		"MRS",
+		doc.mrs,
+		["prepared_by", "prepared_by_name", "procurement_status"],
+		as_dict=True,
+	)
+	if not mrs or not mrs.prepared_by:
+		return
+
+	recipient = frappe.db.get_value("User", mrs.prepared_by, "email") or mrs.prepared_by
+	if not validate_email_address(recipient):
+		return
+
+	status = mrs.procurement_status or _get_purchase_receipt_procurement_status(doc.mrs)
+	subject, message = _build_purchase_receipt_requestor_email(doc, mrs, status)
+
+	try:
+		frappe.sendmail(
+			recipients=[recipient],
+			sender=sender,
+			subject=subject,
+			message=message,
+			reference_doctype=doc.doctype,
+			reference_name=doc.name,
+		)
+	except Exception:
+		frappe.log_error(
+			title="Purchase Receipt requestor email failed",
+			message=frappe.get_traceback(),
+			reference_doctype=doc.doctype,
+			reference_name=doc.name,
+		)
+
+
+def _get_procurement_email_sender():
+	"""Use Buying's fixed account when configured, otherwise the default outgoing account."""
+	fixed_account = frappe.db.get_single_value("Buying Settings", "fixed_email")
+	if fixed_account:
+		account = frappe.db.get_value(
+			"Email Account",
+			fixed_account,
+			["email_id", "enable_outgoing"],
+			as_dict=True,
+		)
+		if account and account.enable_outgoing and account.email_id:
+			return account.email_id
+
+	return frappe.db.get_value(
+		"Email Account",
+		{"default_outgoing": 1, "enable_outgoing": 1},
+		"email_id",
+	)
+
+
+def _build_purchase_receipt_requestor_email(doc, mrs, status):
+	status = status or PARTIALLY_RECEIVED
+	requestor_name = mrs.prepared_by_name or mrs.prepared_by or _("Requestor")
+	supplier = doc.get("supplier_name") or doc.get("supplier") or ""
+	status_text = _(status)
+
+	if status == FULLY_RECEIVED:
+		subject = _("Items Fully Received for {0}").format(doc.mrs)
+	else:
+		subject = _("Delivery Received for {0}").format(doc.mrs)
+
+	item_rows = []
+	for row in doc.get("items") or []:
+		item_name = row.get("item_name") or row.get("item_code") or ""
+		accepted_qty = flt(row.get("qty"))
+		rejected_qty = flt(row.get("rejected_qty"))
+		uom = row.get("uom") or row.get("stock_uom") or ""
+		warehouse = row.get("warehouse") or ""
+		rejected_text = (
+			_("; rejected {0} {1}").format(f"{rejected_qty:g}", escape_html(uom))
+			if rejected_qty
+			else ""
+		)
+		item_rows.append(
+			"<li>{item}: {qty} {uom} {accepted}{rejected}; {warehouse_label}: {warehouse}</li>".format(
+				item=escape_html(item_name),
+				qty=f"{accepted_qty:g}",
+				uom=escape_html(uom),
+				accepted=_("accepted"),
+				rejected=rejected_text,
+				warehouse_label=_("Warehouse"),
+				warehouse=escape_html(warehouse),
+			)
+		)
+
+	message = (
+		"<p>{greeting} {name},</p>"
+		"<p>{intro}</p>"
+		"<p><strong>{status_label}:</strong> {status}</p>"
+		"<p><strong>{mrs_label}:</strong> {mrs}<br>"
+		"<strong>{receipt_label}:</strong> {receipt}<br>"
+		"<strong>{supplier_label}:</strong> {supplier}</p>"
+		"<ul>{items}</ul>"
+	).format(
+		greeting=_("Hello"),
+		name=escape_html(requestor_name),
+		intro=_("Stockroom has recorded a supplier delivery for your material request."),
+		status_label=_("Receiving Status"),
+		status=escape_html(status_text),
+		mrs_label=_("MRS"),
+		mrs=escape_html(doc.mrs),
+		receipt_label=_("Purchase Receipt"),
+		receipt=escape_html(doc.name),
+		supplier_label=_("Supplier"),
+		supplier=escape_html(supplier),
+		items="".join(item_rows),
+	)
+	return subject, message
+
+
 def _sync_mrs_names(doc):
 	mrs_names = {
 		name
@@ -194,7 +350,9 @@ def _sync_mrs_procurement_status(mrs_name):
 	if not frappe.db.exists("MRS", mrs_name):
 		return
 
-	procurement_status = _get_purchase_order_procurement_status(mrs_name)
+	procurement_status = _get_purchase_receipt_procurement_status(mrs_name)
+	if not procurement_status:
+		procurement_status = _get_purchase_order_procurement_status(mrs_name)
 	if not procurement_status:
 		procurement_status = _get_supplier_quotation_procurement_status(mrs_name)
 	if not procurement_status:
@@ -228,6 +386,7 @@ def backfill_mrs_procurement_status():
 	_backfill_request_for_quotation_mrs_links()
 	_backfill_supplier_quotation_mrs_links()
 	_backfill_purchase_order_mrs_links()
+	_backfill_purchase_receipt_mrs_links()
 
 	for mrs_name in frappe.get_all("MRS", pluck="name"):
 		_sync_mrs_procurement_status(mrs_name)
@@ -344,6 +503,45 @@ def _backfill_purchase_order_mrs_links():
 			frappe.db.set_value(
 				"Purchase Order",
 				purchase_order.name,
+				"mrs",
+				mrs_name,
+				update_modified=False,
+			)
+
+
+def _backfill_purchase_receipt_mrs_links():
+	if (
+		not frappe.db.table_exists("Purchase Receipt")
+		or not frappe.db.table_exists("Purchase Receipt Item")
+		or not frappe.db.has_column("Purchase Receipt", "mrs")
+	):
+		return
+
+	for purchase_receipt in frappe.get_all("Purchase Receipt", fields=["name", "mrs"]):
+		if purchase_receipt.mrs:
+			continue
+
+		items = frappe.get_all(
+			"Purchase Receipt Item",
+			filters={"parent": purchase_receipt.name, "parenttype": "Purchase Receipt"},
+			fields=["purchase_order", "material_request"],
+			limit_page_length=0,
+		)
+		purchase_orders = {row.purchase_order for row in items if row.purchase_order}
+		material_requests = {row.material_request for row in items if row.material_request}
+		has_unlinked_items = any(
+			not row.purchase_order and not row.material_request for row in items
+		)
+		mrs_name = _resolve_mrs_from_purchase_receipt_sources(
+			purchase_orders,
+			material_requests,
+			has_unlinked_items=has_unlinked_items,
+			strict=False,
+		)
+		if mrs_name:
+			frappe.db.set_value(
+				"Purchase Receipt",
+				purchase_receipt.name,
 				"mrs",
 				mrs_name,
 				update_modified=False,
@@ -487,6 +685,87 @@ def _resolve_mrs_from_purchase_order_sources(
 	return next(iter(tracked_mrs), None)
 
 
+def _resolve_mrs_from_purchase_receipt_sources(
+	purchase_orders,
+	material_requests,
+	has_unlinked_items=False,
+	strict=True,
+):
+	purchase_orders = {name for name in purchase_orders if name}
+	material_requests = {name for name in material_requests if name}
+	tracked_mrs = set()
+	untracked_sources = False
+
+	if purchase_orders:
+		rows = frappe.get_all(
+			"Purchase Order",
+			filters={"name": ["in", list(purchase_orders)]},
+			fields=["name", "mrs"],
+			limit_page_length=0,
+		)
+		mrs_by_order = {row.name: row.mrs for row in rows}
+		tracked_mrs.update(mrs_name for mrs_name in mrs_by_order.values() if mrs_name)
+		untracked_sources = untracked_sources or any(
+			not mrs_by_order.get(name) for name in purchase_orders
+		)
+
+	if material_requests:
+		rows = frappe.get_all(
+			"Material Request",
+			filters={"name": ["in", list(material_requests)]},
+			fields=["name", "mrs"],
+			limit_page_length=0,
+		)
+		mrs_by_request = {row.name: row.mrs for row in rows}
+		tracked_mrs.update(mrs_name for mrs_name in mrs_by_request.values() if mrs_name)
+		untracked_sources = untracked_sources or any(
+			not mrs_by_request.get(name) for name in material_requests
+		)
+
+	ambiguous = len(tracked_mrs) > 1 or bool(
+		tracked_mrs and (untracked_sources or has_unlinked_items)
+	)
+	if ambiguous:
+		if strict:
+			frappe.throw(
+				_(
+					"An MRS-linked Purchase Receipt cannot mix items from different MRS records "
+					"or items without the same MRS provenance."
+				)
+			)
+		return None
+
+	return next(iter(tracked_mrs), None)
+
+
+def _get_purchase_receipt_procurement_status(mrs_name):
+	if (
+		not frappe.db.table_exists("Purchase Receipt")
+		or not frappe.db.has_column("Purchase Receipt", "mrs")
+	):
+		return None
+
+	docstatuses = frappe.get_all(
+		"Purchase Receipt",
+		filters={"mrs": mrs_name},
+		pluck="docstatus",
+		limit_page_length=0,
+	)
+	if not docstatuses:
+		return None
+
+	received_percentages = []
+	if 1 in {int(docstatus or 0) for docstatus in docstatuses}:
+		received_percentages = frappe.get_all(
+			"Purchase Order",
+			filters={"mrs": mrs_name, "docstatus": 1},
+			pluck="per_received",
+			limit_page_length=0,
+		)
+
+	return _purchase_receipt_procurement_status(docstatuses, received_percentages)
+
+
 def _get_purchase_order_procurement_status(mrs_name):
 	if (
 		not frappe.db.table_exists("Purchase Order")
@@ -616,6 +895,18 @@ def _purchase_order_procurement_status(docstatuses):
 		return PURCHASE_ORDER_SUBMITTED
 	if 0 in docstatuses:
 		return PURCHASE_ORDER_DRAFT
+	return None
+
+
+def _purchase_receipt_procurement_status(docstatuses, received_percentages=None):
+	docstatuses = {int(docstatus or 0) for docstatus in docstatuses}
+	if 1 in docstatuses:
+		received_percentages = [flt(value) for value in (received_percentages or [])]
+		if received_percentages and all(value >= 100 for value in received_percentages):
+			return FULLY_RECEIVED
+		return PARTIALLY_RECEIVED
+	if 0 in docstatuses:
+		return RECEIVING_IN_PROGRESS
 	return None
 
 

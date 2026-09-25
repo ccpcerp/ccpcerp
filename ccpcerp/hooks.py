@@ -20,6 +20,7 @@ fixtures = [
 					"Request for Quotation-mrs",
 					"Supplier Quotation-mrs",
 					"Purchase Order-mrs",
+					"Purchase Receipt-mrs",
 				],
 			]
 		],
@@ -94,9 +95,19 @@ doc_events = {
 		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 	},
 	"Purchase Receipt": {
-		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		"before_validate": [
+			"ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+			"ccpcerp.ccpc_erp.mrs_procurement.set_purchase_receipt_mrs",
+		],
 		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
+		"on_submit": [
+			"ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
+			"ccpcerp.ccpc_erp.mrs_procurement.notify_mrs_requestor_of_receipt",
+		],
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
 	},
 }
 
