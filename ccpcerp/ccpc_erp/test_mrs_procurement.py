@@ -1,6 +1,8 @@
 # Copyright (c) 2026, CCPC and contributors
 # For license information, please see license.txt
 
+import json
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -102,6 +104,26 @@ class TestMRSProcurement(TestCase):
 				set(),
 				has_unlinked_items=True,
 			)
+
+	def test_mrs_workspace_and_sidebar_links_are_configured(self):
+		app_root = Path(__file__).parents[1]
+		workspace = json.loads(
+			(app_root / "ccpc_erp/workspace/ccpc_erp/ccpc_erp.json").read_text()
+		)
+		content = json.loads(workspace["content"])
+		self.assertIn("MRS", {block["data"].get("shortcut_name") for block in content})
+		mrs_shortcut = next(shortcut for shortcut in workspace["shortcuts"] if shortcut["label"] == "MRS")
+		self.assertEqual(
+			(mrs_shortcut["link_to"], mrs_shortcut["type"], mrs_shortcut["doc_view"]),
+			("MRS", "DocType", "List"),
+		)
+
+		sidebar = json.loads((app_root / "workspace_sidebar/ccpc_erp.json").read_text())
+		mrs_link = next(item for item in sidebar["items"] if item["label"] == "MRS")
+		self.assertEqual(
+			(mrs_link["link_to"], mrs_link["link_type"]),
+			("MRS", "DocType"),
+		)
 
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):
