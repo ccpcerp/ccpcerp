@@ -34,6 +34,23 @@ class TestMRSProcurement(TestCase):
 		self.assertNotIn("submit", personnel_rights)
 		self.assertIn("submit", supervisor_rights)
 
+	def test_stockroom_receiving_permissions(self):
+		purchase_order_rights = setup.STOCKROOM_PERSONNEL_PERMISSIONS["Purchase Order"]
+		purchase_receipt_rights = setup.STOCKROOM_PERSONNEL_PERMISSIONS["Purchase Receipt"]
+
+		self.assertEqual(purchase_order_rights, {"read", "print", "report"})
+		self.assertTrue(
+			{"read", "write", "create", "submit", "print", "report"}.issubset(
+				purchase_receipt_rights
+			)
+		)
+		self.assertNotIn("cancel", purchase_receipt_rights)
+		self.assertNotIn("amend", purchase_receipt_rights)
+		self.assertNotIn("delete", purchase_receipt_rights)
+		self.assertEqual(setup.STOCKROOM_PERSONNEL_PERMISSIONS["Buying Settings"], {"read"})
+		self.assertNotIn("Purchase Invoice", setup.STOCKROOM_PERSONNEL_PERMISSIONS)
+		self.assertNotIn("Payment Entry", setup.STOCKROOM_PERSONNEL_PERMISSIONS)
+
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):
 			with self.subTest(doctype=doctype):

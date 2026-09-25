@@ -14,6 +14,23 @@ MAINTENANCE_SUPERVISOR_PERMISSIONS = {
 }
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
+STOCKROOM_PERSONNEL_PERMISSIONS = {
+	"Stock Settings": {"read"},
+	"Buying Settings": {"read"},
+	"Purchase Order": {"read", "print", "report"},
+	"Purchase Receipt": {"read", "write", "create", "submit", "print", "report"},
+	"Supplier": {"read"},
+	"Supplier Group": {"read", "report"},
+	"Price List": {"read", "report"},
+	"Item": {"read"},
+	"UOM": {"read"},
+	"Warehouse": {"read"},
+	"Company": {"read"},
+	"Department": {"read"},
+	"Account": {"read", "report"},
+	"Cost Center": {"read"},
+	"Equipment Registry": {"read", "print", "report"},
+}
 LEGACY_WITHDRAWAL_SLIP_STOCKROOM_ROLE = "Withdrawal Slip Stockroom"
 PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
 PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
@@ -578,47 +595,8 @@ def ensure_stockroom_personnel_permissions():
 		):
 			frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
 
-	for doctype in ("Stock Settings",) + STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES:
-		filters = {
-			"parent": doctype,
-			"role": STOCKROOM_PERSONNEL_ROLE,
-			"permlevel": 0,
-			"if_owner": 0,
-		}
-		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
-		if custom_perm:
-			frappe.db.set_value("Custom DocPerm", custom_perm, "read", 1, update_modified=False)
-		else:
-			add_permission(doctype, STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
-
-		frappe.clear_cache(doctype=doctype)
-
-	# Purchase Receipts carry accounting references that Stock User can transact on but cannot read.
-	account_filters = {
-		"parent": "Account",
-		"role": STOCKROOM_PERSONNEL_ROLE,
-		"permlevel": 0,
-		"if_owner": 0,
-	}
-	account_perm = frappe.db.get_value("Custom DocPerm", account_filters, "name")
-	if account_perm:
-		frappe.db.set_value(
-			"Custom DocPerm",
-			account_perm,
-			{"read": 1, "report": 1},
-			update_modified=False,
-		)
-	else:
-		add_permission("Account", STOCKROOM_PERSONNEL_ROLE, permlevel=0, ptype="read")
-		account_perm = frappe.db.get_value("Custom DocPerm", account_filters, "name")
-		frappe.db.set_value(
-			"Custom DocPerm",
-			account_perm,
-			"report",
-			1,
-			update_modified=False,
-		)
-	frappe.clear_cache(doctype="Account")
+	for doctype, rights in STOCKROOM_PERSONNEL_PERMISSIONS.items():
+		_ensure_custom_permission(doctype, STOCKROOM_PERSONNEL_ROLE, rights)
 
 
 def ensure_purchasing_personnel_permissions():
