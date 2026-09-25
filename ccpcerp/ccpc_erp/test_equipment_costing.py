@@ -229,6 +229,7 @@ class TestEquipmentCostingRules(TestCase):
 				"Request for Quotation-mrs",
 				"Supplier Quotation-mrs",
 				"Purchase Order-mrs",
+				"Purchase Receipt-mrs",
 			},
 		)
 
