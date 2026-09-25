@@ -43,6 +43,7 @@ class TestMRSProcurement(TestCase):
 				self.assertNotIn("amend", rights)
 
 		self.assertEqual(setup.PURCHASING_PERSONNEL_PERMISSIONS["Mode of Payment"], {"read"})
+		self.assertEqual(setup.PURCHASING_PERSONNEL_PERMISSIONS["Buying Settings"], {"read"})
 
 	def test_material_request_procurement_status(self):
 		self.assertEqual(
