@@ -17,6 +17,8 @@ REQUEST_FOR_QUOTATION_SUBMITTED = "Request for Quotation Submitted"
 REQUEST_FOR_QUOTATION_CANCELLED = "Request for Quotation Cancelled"
 SUPPLIER_QUOTATION_DRAFT = "Supplier Quotation Draft"
 SUPPLIER_QUOTATION_RECEIVED = "Supplier Quotation Received"
+PURCHASE_ORDER_DRAFT = "Purchase Order Draft"
+PURCHASE_ORDER_SUBMITTED = "Purchase Order Submitted"
 
 
 @frappe.whitelist()
@@ -151,6 +153,33 @@ def sync_supplier_quotation_status(doc, method=None):
 	_sync_mrs_names(doc)
 
 
+def set_purchase_order_mrs(doc, method=None):
+	"""Derive Purchase Order MRS provenance from its standard SQ/MR item links."""
+	items = doc.get("items") or []
+	supplier_quotations = {
+		row.get("supplier_quotation") for row in items if row.get("supplier_quotation")
+	}
+	material_requests = {row.get("material_request") for row in items if row.get("material_request")}
+	has_unlinked_items = any(
+		not row.get("supplier_quotation") and not row.get("material_request") for row in items
+	)
+	previous_mrs = doc.get("mrs")
+
+	doc.mrs = _resolve_mrs_from_purchase_order_sources(
+		supplier_quotations,
+		material_requests,
+		has_unlinked_items=has_unlinked_items,
+		strict=True,
+	)
+	if previous_mrs and previous_mrs != doc.mrs:
+		doc.flags.ccpc_previous_mrs = previous_mrs
+
+
+def sync_purchase_order_status(doc, method=None):
+	"""Mirror aggregate Purchase Order progress onto the requestor-visible MRS."""
+	_sync_mrs_names(doc)
+
+
 def _sync_mrs_names(doc):
 	mrs_names = {
 		name
@@ -165,7 +194,9 @@ def _sync_mrs_procurement_status(mrs_name):
 	if not frappe.db.exists("MRS", mrs_name):
 		return
 
-	procurement_status = _get_supplier_quotation_procurement_status(mrs_name)
+	procurement_status = _get_purchase_order_procurement_status(mrs_name)
+	if not procurement_status:
+		procurement_status = _get_supplier_quotation_procurement_status(mrs_name)
 	if not procurement_status:
 		procurement_status = _get_request_for_quotation_procurement_status(mrs_name)
 
@@ -196,6 +227,7 @@ def backfill_mrs_procurement_status():
 
 	_backfill_request_for_quotation_mrs_links()
 	_backfill_supplier_quotation_mrs_links()
+	_backfill_purchase_order_mrs_links()
 
 	for mrs_name in frappe.get_all("MRS", pluck="name"):
 		_sync_mrs_procurement_status(mrs_name)
@@ -271,6 +303,47 @@ def _backfill_supplier_quotation_mrs_links():
 			frappe.db.set_value(
 				"Supplier Quotation",
 				quotation.name,
+				"mrs",
+				mrs_name,
+				update_modified=False,
+			)
+
+
+def _backfill_purchase_order_mrs_links():
+	if (
+		not frappe.db.table_exists("Purchase Order")
+		or not frappe.db.table_exists("Purchase Order Item")
+		or not frappe.db.has_column("Purchase Order", "mrs")
+	):
+		return
+
+	for purchase_order in frappe.get_all("Purchase Order", fields=["name", "mrs"]):
+		if purchase_order.mrs:
+			continue
+
+		items = frappe.get_all(
+			"Purchase Order Item",
+			filters={"parent": purchase_order.name, "parenttype": "Purchase Order"},
+			fields=["supplier_quotation", "material_request"],
+			limit_page_length=0,
+		)
+		supplier_quotations = {
+			row.supplier_quotation for row in items if row.supplier_quotation
+		}
+		material_requests = {row.material_request for row in items if row.material_request}
+		has_unlinked_items = any(
+			not row.supplier_quotation and not row.material_request for row in items
+		)
+		mrs_name = _resolve_mrs_from_purchase_order_sources(
+			supplier_quotations,
+			material_requests,
+			has_unlinked_items=has_unlinked_items,
+			strict=False,
+		)
+		if mrs_name:
+			frappe.db.set_value(
+				"Purchase Order",
+				purchase_order.name,
 				"mrs",
 				mrs_name,
 				update_modified=False,
@@ -359,6 +432,75 @@ def _resolve_mrs_from_procurement_sources(
 		return None
 
 	return next(iter(tracked_mrs), None)
+
+
+def _resolve_mrs_from_purchase_order_sources(
+	supplier_quotations,
+	material_requests,
+	has_unlinked_items=False,
+	strict=True,
+):
+	supplier_quotations = {name for name in supplier_quotations if name}
+	material_requests = {name for name in material_requests if name}
+	tracked_mrs = set()
+	untracked_sources = False
+
+	if supplier_quotations:
+		rows = frappe.get_all(
+			"Supplier Quotation",
+			filters={"name": ["in", list(supplier_quotations)]},
+			fields=["name", "mrs"],
+			limit_page_length=0,
+		)
+		mrs_by_quotation = {row.name: row.mrs for row in rows}
+		tracked_mrs.update(mrs_name for mrs_name in mrs_by_quotation.values() if mrs_name)
+		untracked_sources = untracked_sources or any(
+			not mrs_by_quotation.get(name) for name in supplier_quotations
+		)
+
+	if material_requests:
+		rows = frappe.get_all(
+			"Material Request",
+			filters={"name": ["in", list(material_requests)]},
+			fields=["name", "mrs"],
+			limit_page_length=0,
+		)
+		mrs_by_request = {row.name: row.mrs for row in rows}
+		tracked_mrs.update(mrs_name for mrs_name in mrs_by_request.values() if mrs_name)
+		untracked_sources = untracked_sources or any(
+			not mrs_by_request.get(name) for name in material_requests
+		)
+
+	ambiguous = len(tracked_mrs) > 1 or bool(
+		tracked_mrs and (untracked_sources or has_unlinked_items)
+	)
+	if ambiguous:
+		if strict:
+			frappe.throw(
+				_(
+					"An MRS-linked Purchase Order cannot mix items from different MRS records "
+					"or items without the same MRS provenance."
+				)
+			)
+		return None
+
+	return next(iter(tracked_mrs), None)
+
+
+def _get_purchase_order_procurement_status(mrs_name):
+	if (
+		not frappe.db.table_exists("Purchase Order")
+		or not frappe.db.has_column("Purchase Order", "mrs")
+	):
+		return None
+
+	docstatuses = frappe.get_all(
+		"Purchase Order",
+		filters={"mrs": mrs_name},
+		pluck="docstatus",
+		limit_page_length=0,
+	)
+	return _purchase_order_procurement_status(docstatuses)
 
 
 def _get_supplier_quotation_procurement_status(mrs_name):
@@ -465,6 +607,15 @@ def _supplier_quotation_procurement_status(docstatuses):
 		return SUPPLIER_QUOTATION_RECEIVED
 	if 0 in docstatuses:
 		return SUPPLIER_QUOTATION_DRAFT
+	return None
+
+
+def _purchase_order_procurement_status(docstatuses):
+	docstatuses = {int(docstatus or 0) for docstatus in docstatuses}
+	if 1 in docstatuses:
+		return PURCHASE_ORDER_SUBMITTED
+	if 0 in docstatuses:
+		return PURCHASE_ORDER_DRAFT
 	return None
 
 

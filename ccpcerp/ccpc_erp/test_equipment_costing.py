@@ -228,6 +228,7 @@ class TestEquipmentCostingRules(TestCase):
 				"Material Request-mrs",
 				"Request for Quotation-mrs",
 				"Supplier Quotation-mrs",
+				"Purchase Order-mrs",
 			},
 		)
 
@@ -265,6 +266,15 @@ class TestEquipmentCostingRules(TestCase):
 		self.assertEqual(sq_mrs["read_only"], 1)
 		self.assertEqual(sq_mrs["no_copy"], 1)
 		self.assertFalse(sq_mrs.get("unique"))
+
+		po_mrs = next(field for field in fixtures if field["name"] == "Purchase Order-mrs")
+		self.assertEqual(
+			(po_mrs["fieldtype"], po_mrs["options"], po_mrs["insert_after"]),
+			("Link", "MRS", "company"),
+		)
+		self.assertEqual(po_mrs["read_only"], 1)
+		self.assertEqual(po_mrs["no_copy"], 1)
+		self.assertFalse(po_mrs.get("unique"))
 
 	def test_draft_material_request_deletion_has_no_work_request_hook(self):
 		from ccpcerp import hooks

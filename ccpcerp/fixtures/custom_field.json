@@ -66,5 +66,17 @@
   "no_copy": 1,
   "options": "MRS",
   "read_only": 1
+ },
+ {
+  "doctype": "Custom Field",
+  "dt": "Purchase Order",
+  "fieldname": "mrs",
+  "fieldtype": "Link",
+  "insert_after": "company",
+  "label": "MRS",
+  "name": "Purchase Order-mrs",
+  "no_copy": 1,
+  "options": "MRS",
+  "read_only": 1
  }
 ]

@@ -19,6 +19,7 @@ fixtures = [
 					"Material Request-mrs",
 					"Request for Quotation-mrs",
 					"Supplier Quotation-mrs",
+					"Purchase Order-mrs",
 				],
 			]
 		],
@@ -61,6 +62,13 @@ doc_events = {
 		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
 		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
 		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
+	},
+	"Purchase Order": {
+		"before_validate": "ccpcerp.ccpc_erp.mrs_procurement.set_purchase_order_mrs",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
 	},
 	"Stock Entry": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
