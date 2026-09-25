@@ -215,7 +215,7 @@ def notify_mrs_requestor_of_receipt(doc, method=None):
 	or another site has no usable outgoing account, the notification is skipped
 	quietly until an outgoing account is deliberately configured.
 	"""
-	if int(doc.docstatus or 0) != 1 or not doc.get("mrs"):
+	if int(doc.docstatus or 0) != 1 or not doc.get("mrs") or doc.get("is_return"):
 		return
 
 	sender = _get_procurement_email_sender()

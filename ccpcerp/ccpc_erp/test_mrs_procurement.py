@@ -265,6 +265,72 @@ class TestMRSProcurement(TestCase):
 				has_unlinked_items=True,
 			)
 
+	@patch.object(frappe, "sendmail")
+	@patch.object(mrs_procurement, "_get_procurement_email_sender", return_value=None)
+	def test_purchase_receipt_email_skips_when_no_outgoing_account(self, _sender, sendmail):
+		doc = frappe._dict(
+			doctype="Purchase Receipt",
+			name="MAT-PRE-1",
+			mrs="MRS-1",
+			docstatus=1,
+			is_return=0,
+		)
+		mrs_procurement.notify_mrs_requestor_of_receipt(doc)
+		sendmail.assert_not_called()
+
+	@patch.object(frappe, "sendmail")
+	@patch.object(
+		mrs_procurement,
+		"_build_purchase_receipt_requestor_email",
+		return_value=("Receipt subject", "Receipt message"),
+	)
+	@patch.object(mrs_procurement, "_get_procurement_email_sender", return_value="purchasing@example.com")
+	@patch.object(frappe.db, "get_value")
+	def test_purchase_receipt_email_targets_mrs_requestor(
+		self,
+		get_value,
+		_sender,
+		_build_email,
+		sendmail,
+	):
+		get_value.side_effect = [
+			frappe._dict(
+				prepared_by="requestor@example.com",
+				prepared_by_name="Requestor Name",
+				procurement_status=mrs_procurement.FULLY_RECEIVED,
+			),
+			"requestor@example.com",
+		]
+		doc = frappe._dict(
+			doctype="Purchase Receipt",
+			name="MAT-PRE-1",
+			mrs="MRS-1",
+			docstatus=1,
+			is_return=0,
+		)
+
+		mrs_procurement.notify_mrs_requestor_of_receipt(doc)
+
+		sendmail.assert_called_once()
+		kwargs = sendmail.call_args.kwargs
+		self.assertEqual(kwargs["recipients"], ["requestor@example.com"])
+		self.assertEqual(kwargs["sender"], "purchasing@example.com")
+		self.assertEqual(kwargs["reference_doctype"], "Purchase Receipt")
+		self.assertEqual(kwargs["reference_name"], "MAT-PRE-1")
+
+	@patch.object(frappe, "sendmail")
+	@patch.object(mrs_procurement, "_get_procurement_email_sender", return_value="purchasing@example.com")
+	def test_purchase_return_does_not_send_requestor_receipt_email(self, _sender, sendmail):
+		doc = frappe._dict(
+			doctype="Purchase Receipt",
+			name="MAT-PR-RET-1",
+			mrs="MRS-1",
+			docstatus=1,
+			is_return=1,
+		)
+		mrs_procurement.notify_mrs_requestor_of_receipt(doc)
+		sendmail.assert_not_called()
+
 	def test_purchase_receipt_email_content_targets_requestor_context(self):
 		doc = frappe._dict(
 			doctype="Purchase Receipt",
