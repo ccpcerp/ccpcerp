@@ -26,6 +26,7 @@ fixtures = [
 ]
 
 doctype_js = {
+	"Purchase Order": "public/js/purchase_order_required_by.js",
 	"Work Request": "public/js/equipment_costing.js",
 	"Job Order": "public/js/equipment_costing.js",
 	"Material Request": "public/js/equipment_costing.js",
@@ -216,6 +217,11 @@ permission_query_conditions = {
 
 has_permission = {
 	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.has_mrs_permission",
+}
+
+
+extend_doctype_class = {
+	"Purchase Order": "ccpcerp.ccpc_erp.purchase_order_required_by.PurchaseOrderRequiredByMixin",
 }
 
 # Permissions
