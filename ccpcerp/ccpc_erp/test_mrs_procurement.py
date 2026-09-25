@@ -34,6 +34,16 @@ class TestMRSProcurement(TestCase):
 		self.assertNotIn("submit", personnel_rights)
 		self.assertIn("submit", supervisor_rights)
 
+	def test_purchasing_accounting_permissions(self):
+		for doctype in ("Purchase Invoice", "Payment Entry"):
+			with self.subTest(doctype=doctype):
+				rights = setup.PURCHASING_PERSONNEL_PERMISSIONS[doctype]
+				self.assertTrue({"read", "write", "create", "submit", "print", "report"}.issubset(rights))
+				self.assertNotIn("cancel", rights)
+				self.assertNotIn("amend", rights)
+
+		self.assertEqual(setup.PURCHASING_PERSONNEL_PERMISSIONS["Mode of Payment"], {"read"})
+
 	def test_material_request_procurement_status(self):
 		self.assertEqual(
 			mrs_procurement._material_request_procurement_status(0),

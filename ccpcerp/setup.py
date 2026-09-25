@@ -180,7 +180,9 @@ PURCHASING_PERSONNEL_PERMISSIONS = {
 	"Cost Center": {"read"},
 	"Equipment Registry": {"read", "print", "report"},
 	"Purchase Receipt": {"read", "print", "report"},
-	"Purchase Invoice": {"read", "print", "report"},
+	"Purchase Invoice": {"read", "write", "create", "submit", "print", "report"},
+	"Payment Entry": {"read", "write", "create", "submit", "print", "report"},
+	"Mode of Payment": {"read"},
 }
 PURCHASING_SUPERVISOR_PERMISSIONS = {
 	**PURCHASING_PERSONNEL_PERMISSIONS,
