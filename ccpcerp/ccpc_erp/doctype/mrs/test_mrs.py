@@ -145,6 +145,113 @@ class TestMRSWorkflow(TestCase):
 		session.user = "manager@example.com"
 		self.assertFalse(MRS._can_edit_returned_request(doc))
 
+	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
+	def test_plant_manager_can_change_authorized_qty_without_request_lock_error(self, session):
+		session.user = "plantmanager@ccpc.com"
+		before = frappe._dict(
+			status="Pending Plant Manager",
+			items=[
+				frappe._dict(
+					name="row-1",
+					item_code="ITEM-00018",
+					requested_qty=2,
+					date_needed="2026-10-17",
+					remarks=None,
+					authorized_qty=2,
+				)
+			],
+		)
+		doc = MagicMock(spec=MRS)
+		doc.is_new.return_value = False
+		doc.plant_manager = "plantmanager@ccpc.com"
+		doc.coo = "coo@ccpc.com"
+		doc.bypass_other_management_approval = 0
+		doc.items = [
+			frappe._dict(
+				name="row-1",
+				item_code="ITEM-00018",
+				requested_qty=2,
+				date_needed="2026-10-17",
+				remarks=None,
+				authorized_qty=1,
+			)
+		]
+		doc.get_doc_before_save.return_value = before
+		doc.get.side_effect = lambda fieldname: {
+			"use_department": None,
+			"request_category": None,
+			"equipment": None,
+			"job_order": None,
+			"work_request": None,
+			"physical_location": None,
+			"justification": None,
+			"bypass_other_management_approval": 0,
+			"bypass_reason": None,
+		}.get(fieldname)
+
+		MRS._validate_request_lock(doc)
+		MRS._validate_management_edits(doc)
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_plant_manager_still_cannot_change_requested_qty(self, throw):
+		before = frappe._dict(
+			status="Pending Plant Manager",
+			items=[
+				frappe._dict(
+					name="row-1",
+					item_code="ITEM-00018",
+					requested_qty=2,
+					date_needed="2026-10-17",
+					remarks=None,
+				)
+			],
+		)
+		doc = MagicMock(spec=MRS)
+		doc.is_new.return_value = False
+		doc.items = [
+			frappe._dict(
+				name="row-1",
+				item_code="ITEM-00018",
+				requested_qty=3,
+				date_needed="2026-10-17",
+				remarks=None,
+			)
+		]
+		doc.get_doc_before_save.return_value = before
+		doc.get.return_value = None
+
+		with self.assertRaises(frappe.ValidationError):
+			MRS._validate_request_lock(doc)
+
+	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
+	def test_request_lock_ignores_child_row_order_when_request_is_unchanged(self, session):
+		session.user = "plantmanager@ccpc.com"
+		row_1 = frappe._dict(
+			name="row-1",
+			item_code="ITEM-00018",
+			requested_qty=2,
+			date_needed="2026-10-17",
+			remarks=None,
+		)
+		row_2 = frappe._dict(
+			name="row-2",
+			item_code="ITEM-00019",
+			requested_qty=1,
+			date_needed="2026-10-20",
+			remarks="For pump",
+		)
+		before = frappe._dict(status="Pending Plant Manager", items=[row_1, row_2])
+		doc = MagicMock(spec=MRS)
+		doc.is_new.return_value = False
+		doc.items = [row_2, row_1]
+		doc.get_doc_before_save.return_value = before
+		doc.get.return_value = None
+
+		MRS._validate_request_lock(doc)
+
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.get_roles", return_value=["MRS Requestor"])
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
 	def test_returned_requestor_can_change_requested_qty_without_management_error(

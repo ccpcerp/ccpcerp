@@ -211,8 +211,8 @@ class MRS(Document):
 		for fieldname in REQUEST_FIELDS:
 			if (before.get(fieldname) or None) != (self.get(fieldname) or None):
 				frappe.throw(_("Request details cannot be changed after the MRS is submitted for approval."))
-		before_items = [tuple(row.get(fieldname) for fieldname in REQUEST_ITEM_FIELDS) for row in before.get("items") or []]
-		current_items = [tuple(row.get(fieldname) for fieldname in REQUEST_ITEM_FIELDS) for row in self.items or []]
+		before_items = _request_item_snapshot(before.get("items") or [])
+		current_items = _request_item_snapshot(self.items or [])
 		if before_items != current_items:
 			frappe.throw(_("Requested items cannot be changed after the MRS is submitted for approval."))
 
@@ -233,9 +233,9 @@ class MRS(Document):
 			(before.get(fieldname) or None) != (self.get(fieldname) or None)
 			for fieldname in MANAGEMENT_HEADER_FIELDS
 		)
-		authorized_qty_changed = [flt(row.authorized_qty) for row in before.get("items") or []] != [
-			flt(row.authorized_qty) for row in self.items or []
-		]
+		authorized_qty_changed = _authorized_qty_snapshot(
+			before.get("items") or []
+		) != _authorized_qty_snapshot(self.items or [])
 		if not header_changed and not authorized_qty_changed:
 			return
 
@@ -340,6 +340,42 @@ class MRS(Document):
 			self.owner_signed_recorded_by_name = _get_personnel_name_for_user(user)
 			self.owner_signed_recorded_on = stamp
 			self.procurement_status = self.procurement_status or "Awaiting Purchasing"
+
+
+def _request_item_snapshot(items):
+	"""Compare only request intent, keyed by saved child-row identity."""
+	rows = {}
+	unnamed = []
+	for index, row in enumerate(items or []):
+		values = []
+		for fieldname in REQUEST_ITEM_FIELDS:
+			value = row.get(fieldname)
+			if fieldname == "requested_qty":
+				value = flt(value)
+			elif value in ("", None):
+				value = None
+			values.append(value)
+		values = tuple(values)
+
+		row_name = row.get("name")
+		if row_name:
+			rows[row_name] = values
+		else:
+			unnamed.append((index, values))
+	return rows, tuple(unnamed)
+
+
+def _authorized_qty_snapshot(items):
+	rows = {}
+	unnamed = []
+	for index, row in enumerate(items or []):
+		value = flt(row.get("authorized_qty"))
+		row_name = row.get("name")
+		if row_name:
+			rows[row_name] = value
+		else:
+			unnamed.append((index, value))
+	return rows, tuple(unnamed)
 
 
 def _default_date_needed(request_date=None):
