@@ -94,12 +94,18 @@ frappe.ui.form.on("MRS", {
 		frm.set_df_property("owner_signed", "read_only", status !== "Pending General Manager Signature");
 		frm.set_df_property("owner_signed_date", "read_only", status !== "Pending General Manager Signature");
 
-		if (status === "Ready for Purchasing" && !frm.doc.material_request && can_create_material_request) {
-			frm.add_custom_button(
-				__("Create Material Request"),
-				() => create_material_request(frm),
-				__("Create")
-			);
+		if (status === "Ready for Purchasing" && can_create_material_request) {
+			if (frm.doc.material_request) {
+				const open_material_request_label = __("Open Material Request");
+				frm.add_custom_button(open_material_request_label, () =>
+					frappe.set_route("Form", "Material Request", frm.doc.material_request)
+				);
+				frm.change_custom_button_type(open_material_request_label, null, "primary");
+			} else {
+				const create_material_request_label = __("Create Material Request");
+				frm.add_custom_button(create_material_request_label, () => create_material_request(frm));
+				frm.change_custom_button_type(create_material_request_label, null, "primary");
+			}
 		}
 	},
 });

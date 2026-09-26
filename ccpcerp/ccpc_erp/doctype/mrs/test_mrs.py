@@ -20,6 +20,16 @@ from ccpcerp.ccpc_erp.doctype.mrs.mrs import (
 
 
 class TestMRSWorkflow(TestCase):
+	def test_ready_for_purchasing_material_request_action_is_direct_and_reusable(self):
+		client_script = Path(__file__).with_name("mrs.js").read_text()
+		self.assertIn('const create_material_request_label = __("Create Material Request")', client_script)
+		self.assertIn('const open_material_request_label = __("Open Material Request")', client_script)
+		self.assertIn(
+			'frappe.set_route("Form", "Material Request", frm.doc.material_request)',
+			client_script,
+		)
+		self.assertNotIn('__("Create")\n\t\t\t);', client_script)
+
 	def test_date_needed_defaults_to_21_days_after_request_date(self):
 		self.assertEqual(_default_date_needed("2026-09-26"), "2026-10-17")
 
