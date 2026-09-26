@@ -166,6 +166,26 @@ class TestMRSProcurement(TestCase):
 		self.assertGreater(workspace["modified"], "2026-09-18 17:30:00.000000")
 		self.assertGreater(sidebar["modified"], "2026-09-19 08:00:00.000000")
 
+	def test_finance_home_shortcut_filters_pending_purchase_orders(self):
+		app_root = Path(__file__).parents[1]
+		workspace = json.loads(
+			(app_root / "ccpc_erp/workspace/ccpc_erp/ccpc_erp.json").read_text()
+		)
+		content = json.loads(workspace["content"])
+		self.assertIn(
+			"PO for Approval",
+			{block["data"].get("shortcut_name") for block in content},
+		)
+		shortcut = next(
+			row for row in workspace["shortcuts"] if row["label"] == "PO for Approval"
+		)
+		self.assertEqual(shortcut["link_to"], "Purchase Order")
+		self.assertEqual(shortcut["doc_view"], "List")
+		self.assertEqual(
+			json.loads(shortcut["stats_filter"]),
+			{"ccpc_approval_status": ["=", "Pending Finance Approval"]},
+		)
+
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):
 			with self.subTest(doctype=doctype):
