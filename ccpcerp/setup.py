@@ -839,9 +839,10 @@ def backfill_purchase_order_approval_status():
 	state_by_docstatus = {0: "Draft", 1: "Submitted", 2: "Cancelled"}
 	for row in frappe.get_all(
 		"Purchase Order",
-		filters={"ccpc_approval_status": ["in", ["", None]]},
-		fields=["name", "docstatus"],
+		fields=["name", "docstatus", "ccpc_approval_status"],
 	):
+		if row.ccpc_approval_status:
+			continue
 		state = state_by_docstatus.get(int(row.docstatus))
 		if state:
 			frappe.db.set_value(
