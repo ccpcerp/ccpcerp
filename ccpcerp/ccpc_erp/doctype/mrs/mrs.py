@@ -192,7 +192,7 @@ class MRS(Document):
 		for fieldname in REQUEST_FIELDS:
 			if (before.get(fieldname) or None) != (self.get(fieldname) or None):
 				frappe.throw(_("Request details cannot be changed after the MRS is submitted for approval."))
-		before_items = [tuple(row.get(fieldname) for fieldname in REQUEST_ITEM_FIELDS) for row in before.items or []]
+		before_items = [tuple(row.get(fieldname) for fieldname in REQUEST_ITEM_FIELDS) for row in before.get("items") or []]
 		current_items = [tuple(row.get(fieldname) for fieldname in REQUEST_ITEM_FIELDS) for row in self.items or []]
 		if before_items != current_items:
 			frappe.throw(_("Requested items cannot be changed after the MRS is submitted for approval."))
@@ -214,7 +214,7 @@ class MRS(Document):
 			(before.get(fieldname) or None) != (self.get(fieldname) or None)
 			for fieldname in MANAGEMENT_HEADER_FIELDS
 		)
-		authorized_qty_changed = [flt(row.authorized_qty) for row in before.items or []] != [
+		authorized_qty_changed = [flt(row.authorized_qty) for row in before.get("items") or []] != [
 			flt(row.authorized_qty) for row in self.items or []
 		]
 		if not header_changed and not authorized_qty_changed:
