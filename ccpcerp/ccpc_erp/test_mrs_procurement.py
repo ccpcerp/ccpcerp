@@ -13,6 +13,45 @@ from ccpcerp.ccpc_erp import mrs_procurement
 
 
 class TestMRSProcurement(TestCase):
+	def test_mrs_purchase_order_requires_supplier_quotation(self):
+		doc = frappe._dict(
+			mrs="MRS-1",
+			items=[
+				frappe._dict(
+					material_request="MAT-MR-1",
+					supplier_quotation=None,
+				)
+			],
+		)
+		with self.assertRaises(frappe.ValidationError):
+			mrs_procurement.validate_purchase_order_source(doc)
+
+	def test_mrs_purchase_order_accepts_supplier_quotation_source(self):
+		doc = frappe._dict(
+			mrs="MRS-1",
+			items=[
+				frappe._dict(
+					material_request="MAT-MR-1",
+					supplier_quotation="PUR-SQTN-1",
+				)
+			],
+		)
+		mrs_procurement.validate_purchase_order_source(doc)
+
+	def test_non_mrs_purchase_order_is_not_forced_through_supplier_quotation(self):
+		doc = frappe._dict(
+			mrs=None,
+			items=[frappe._dict(material_request=None, supplier_quotation=None)],
+		)
+		mrs_procurement.validate_purchase_order_source(doc)
+
+	def test_material_request_ui_hides_direct_purchase_order_action(self):
+		client_script = (Path(__file__).parents[1] / "public/js/equipment_costing.js").read_text()
+		self.assertIn(
+			'frm.remove_custom_button(__("Purchase Order"), __("Create"))',
+			client_script,
+		)
+
 	def test_purchasing_material_request_permissions(self):
 		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Material Request"]
 		self.assertTrue({"read", "write", "create", "submit"}.issubset(rights))

@@ -66,7 +66,10 @@ doc_events = {
 		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
 	},
 	"Purchase Order": {
-		"before_validate": "ccpcerp.ccpc_erp.mrs_procurement.set_purchase_order_mrs",
+		"before_validate": [
+			"ccpcerp.ccpc_erp.mrs_procurement.set_purchase_order_mrs",
+			"ccpcerp.ccpc_erp.mrs_procurement.validate_purchase_order_source",
+		],
 		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
 		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
 		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",

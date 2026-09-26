@@ -178,6 +178,28 @@ def set_purchase_order_mrs(doc, method=None):
 		doc.flags.ccpc_previous_mrs = previous_mrs
 
 
+def validate_purchase_order_source(doc, method=None):
+	"""Require MRS-linked Purchase Orders to originate from a Supplier Quotation."""
+	items = doc.get("items") or []
+	if not doc.get("mrs"):
+		return
+
+	missing_supplier_quote = [
+		row
+		for row in items
+		if not row.get("supplier_quotation")
+	]
+	if not missing_supplier_quote:
+		return
+
+	frappe.throw(
+		_(
+			"Purchase Orders linked to an MRS must be created from an approved Supplier Quotation. "
+			"Create or open the Supplier Quotation first, then use its Create Purchase Order action."
+		)
+	)
+
+
 def sync_purchase_order_status(doc, method=None):
 	"""Mirror aggregate Purchase Order progress onto the requestor-visible MRS."""
 	_sync_mrs_names(doc)
