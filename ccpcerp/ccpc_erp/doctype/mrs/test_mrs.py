@@ -90,6 +90,59 @@ class TestMRSWorkflow(TestCase):
 		session.user = "manager@example.com"
 		self.assertFalse(MRS._can_edit_returned_request(doc))
 
+	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.get_roles", return_value=["MRS Requestor"])
+	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
+	def test_returned_requestor_can_change_requested_qty_without_management_error(
+		self, session, _get_roles
+	):
+		session.user = "requestor@example.com"
+		before = frappe._dict(
+			status="Returned for Correction",
+			bypass_other_management_approval=0,
+			bypass_reason=None,
+			items=[frappe._dict(authorized_qty=2, requested_qty=2)],
+		)
+		doc = MagicMock(spec=MRS)
+		doc.is_new.return_value = False
+		doc.prepared_by = "requestor@example.com"
+		doc.items = [frappe._dict(authorized_qty=3, requested_qty=3)]
+		doc.get_doc_before_save.return_value = before
+		doc.get.side_effect = lambda fieldname: {
+			"bypass_other_management_approval": 0,
+			"bypass_reason": None,
+		}.get(fieldname)
+
+		MRS._validate_management_edits(doc)
+
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.get_roles", return_value=["MRS Requestor"])
+	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
+	def test_returned_requestor_cannot_change_management_bypass(
+		self, session, _get_roles, throw
+	):
+		session.user = "requestor@example.com"
+		before = frappe._dict(
+			status="Returned for Correction",
+			bypass_other_management_approval=0,
+			bypass_reason=None,
+			items=[frappe._dict(authorized_qty=2, requested_qty=2)],
+		)
+		doc = MagicMock(spec=MRS)
+		doc.is_new.return_value = False
+		doc.prepared_by = "requestor@example.com"
+		doc.items = [frappe._dict(authorized_qty=2, requested_qty=2)]
+		doc.get_doc_before_save.return_value = before
+		doc.get.side_effect = lambda fieldname: {
+			"bypass_other_management_approval": 1,
+			"bypass_reason": "Not allowed",
+		}.get(fieldname)
+
+		with self.assertRaises(frappe.ValidationError):
+			MRS._validate_management_edits(doc)
+
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.now", return_value="2026-09-26 13:40:00")
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
 	def test_return_clears_prior_department_manager_approval_stamps(self, session, _now):

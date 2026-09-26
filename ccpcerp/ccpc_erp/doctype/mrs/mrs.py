@@ -209,19 +209,40 @@ class MRS(Document):
 		before = self.get_doc_before_save()
 		if not before:
 			return
-		changed = any((before.get(fieldname) or None) != (self.get(fieldname) or None) for fieldname in MANAGEMENT_HEADER_FIELDS)
-		changed = changed or [flt(row.authorized_qty) for row in before.items or []] != [flt(row.authorized_qty) for row in self.items or []]
-		if not changed:
+
+		header_changed = any(
+			(before.get(fieldname) or None) != (self.get(fieldname) or None)
+			for fieldname in MANAGEMENT_HEADER_FIELDS
+		)
+		authorized_qty_changed = [flt(row.authorized_qty) for row in before.items or []] != [
+			flt(row.authorized_qty) for row in self.items or []
+		]
+		if not header_changed and not authorized_qty_changed:
 			return
+
 		previous_status = before.status or "Draft"
+		if (
+			previous_status == "Returned for Correction"
+			and self._can_edit_returned_request()
+			and not header_changed
+			and all(flt(row.authorized_qty) == flt(row.requested_qty) for row in self.items or [])
+		):
+			# During correction, Authorized Qty follows the requestor's corrected
+			# Requested Qty automatically. This is not a management approval edit.
+			return
+
 		user = frappe.session.user
 		allowed = False
 		if previous_status == "Pending Plant Manager":
-			allowed = user == self.plant_manager or (user == self.coo and bool(self.bypass_other_management_approval))
+			allowed = user == self.plant_manager or (
+				user == self.coo and bool(self.bypass_other_management_approval)
+			)
 		elif previous_status == "Pending COO":
 			allowed = user == self.coo
 		if not allowed:
-			frappe.throw(_("Only the active Plant Manager or COO approval stage can change Authorized Qty or bypass controls."))
+			frappe.throw(
+				_("Only the active Plant Manager or COO approval stage can change Authorized Qty or bypass controls.")
+			)
 
 	def _validate_items(self):
 		if not self.items:
