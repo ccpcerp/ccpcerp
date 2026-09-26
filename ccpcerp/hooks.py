@@ -20,6 +20,7 @@ fixtures = [
 					"Request for Quotation-mrs",
 					"Supplier Quotation-mrs",
 					"Purchase Order-mrs",
+					"Purchase Order-ccpc_approval_status",
 					"Purchase Receipt-mrs",
 				],
 			]

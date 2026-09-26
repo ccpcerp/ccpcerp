@@ -12,8 +12,10 @@ from ccpcerp.setup import (
 class TestGrantPurchaseOrderApproverRolePatch(TestCase):
 	def test_purchase_order_approver_is_narrowly_scoped(self):
 		po_rights = PURCHASE_ORDER_APPROVER_PERMISSIONS["Purchase Order"]
-		self.assertTrue({"read", "write", "submit", "cancel", "amend", "print", "report"} <= po_rights)
+		self.assertTrue({"read", "write", "submit", "print", "report"} <= po_rights)
 		self.assertNotIn("create", po_rights)
+		self.assertNotIn("cancel", po_rights)
+		self.assertNotIn("amend", po_rights)
 		self.assertNotIn("Purchase Invoice", PURCHASE_ORDER_APPROVER_PERMISSIONS)
 		self.assertNotIn("Payment Entry", PURCHASE_ORDER_APPROVER_PERMISSIONS)
 

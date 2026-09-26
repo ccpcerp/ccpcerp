@@ -48,6 +48,7 @@ PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
 PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
 PURCHASE_ORDER_APPROVER_ROLE = "Purchase Order Approver"
 PURCHASE_ORDER_APPROVER_USERS = ("finance_controller@ccpc.com",)
+PURCHASE_ORDER_WORKFLOW = "CCPC Purchase Order Approval"
 MRS_REQUESTOR_ROLE = "MRS Requestor"
 DEPARTMENT_MANAGER_ROLE = "Department Manager"
 MRS_MANAGEMENT_APPROVER_ROLE = "MRS Management Approver"
@@ -88,6 +89,46 @@ MRS_WORKFLOW_STATES = (
 	("Ready for Purchasing", "System Manager"),
 	("Rejected", "System Manager"),
 )
+
+PURCHASE_ORDER_WORKFLOW_STATES = (
+	("Draft", "0", PURCHASING_PERSONNEL_ROLE),
+	("Pending Finance Approval", "0", "System Manager"),
+	("Returned for Correction", "0", PURCHASING_PERSONNEL_ROLE),
+	("Submitted", "1", "System Manager"),
+	("Cancelled", "2", "System Manager"),
+)
+
+PURCHASE_ORDER_WORKFLOW_TRANSITIONS = (
+	{
+		"state": "Draft",
+		"action": "Send for Finance Approval",
+		"next_state": "Pending Finance Approval",
+		"allowed": PURCHASING_PERSONNEL_ROLE,
+		"allow_self_approval": 1,
+	},
+	{
+		"state": "Pending Finance Approval",
+		"action": "Return for Correction",
+		"next_state": "Returned for Correction",
+		"allowed": PURCHASE_ORDER_APPROVER_ROLE,
+		"allow_self_approval": 1,
+	},
+	{
+		"state": "Returned for Correction",
+		"action": "Resubmit for Finance Approval",
+		"next_state": "Pending Finance Approval",
+		"allowed": PURCHASING_PERSONNEL_ROLE,
+		"allow_self_approval": 1,
+	},
+	{
+		"state": "Pending Finance Approval",
+		"action": "Approve & Submit",
+		"next_state": "Submitted",
+		"allowed": PURCHASE_ORDER_APPROVER_ROLE,
+		"allow_self_approval": 1,
+	},
+)
+
 
 MRS_WORKFLOW_TRANSITIONS = (
 	{
@@ -265,7 +306,7 @@ PURCHASING_SUPERVISOR_PERMISSIONS = {
 }
 
 PURCHASE_ORDER_APPROVER_PERMISSIONS = {
-	"Purchase Order": {"read", "write", "submit", "cancel", "amend", "print", "report"},
+	"Purchase Order": {"read", "write", "submit", "print", "report"},
 	"Material Request": {"read", "print", "report"},
 	"Request for Quotation": {"read", "print", "report"},
 	"Supplier Quotation": {"read", "print", "report"},
@@ -356,6 +397,8 @@ def after_migrate():
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
 	ensure_purchase_order_approver_permissions()
+	backfill_purchase_order_approval_status()
+	ensure_purchase_order_approval_workflow()
 	ensure_withdrawal_slip_requestor_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
@@ -424,6 +467,18 @@ def ensure_mrs_foundation():
 					"insert_after": "company",
 					"read_only": 1,
 					"no_copy": 1,
+				},
+				{
+					"fieldname": "ccpc_approval_status",
+					"label": "Approval Status",
+					"fieldtype": "Select",
+					"options": "\nDraft\nPending Finance Approval\nReturned for Correction\nSubmitted\nCancelled",
+					"default": "Draft",
+					"insert_after": "mrs",
+					"read_only": 1,
+					"no_copy": 1,
+					"in_list_view": 1,
+					"in_standard_filter": 1,
 				}
 			],
 			"Purchase Receipt": [
@@ -774,6 +829,96 @@ def ensure_purchase_order_approver_permissions():
 	_ensure_role(PURCHASE_ORDER_APPROVER_ROLE)
 	for doctype, rights in PURCHASE_ORDER_APPROVER_PERMISSIONS.items():
 		_ensure_custom_permission(doctype, PURCHASE_ORDER_APPROVER_ROLE, rights)
+
+
+def backfill_purchase_order_approval_status():
+	"""Initialize workflow state for Purchase Orders created before the CCPC approval workflow."""
+	if not frappe.db.table_exists("Purchase Order"):
+		return
+
+	state_by_docstatus = {0: "Draft", 1: "Submitted", 2: "Cancelled"}
+	for row in frappe.get_all(
+		"Purchase Order",
+		filters={"ccpc_approval_status": ["in", ["", None]]},
+		fields=["name", "docstatus"],
+	):
+		state = state_by_docstatus.get(int(row.docstatus))
+		if state:
+			frappe.db.set_value(
+				"Purchase Order",
+				row.name,
+				"ccpc_approval_status",
+				state,
+				update_modified=False,
+			)
+
+	frappe.clear_cache(doctype="Purchase Order")
+
+
+def ensure_purchase_order_approval_workflow():
+	"""Require Finance approval for PO submission while returning corrections to Purchasing."""
+	_ensure_role(PURCHASING_PERSONNEL_ROLE)
+	_ensure_role(PURCHASE_ORDER_APPROVER_ROLE)
+
+	for state, _docstatus, _allow_edit in PURCHASE_ORDER_WORKFLOW_STATES:
+		_ensure_named_master("Workflow State", state, "workflow_state_name")
+	for transition in PURCHASE_ORDER_WORKFLOW_TRANSITIONS:
+		_ensure_named_master(
+			"Workflow Action Master",
+			transition["action"],
+			"workflow_action_name",
+		)
+
+	other_active_workflow = frappe.db.get_value(
+		"Workflow",
+		{
+			"document_type": "Purchase Order",
+			"is_active": 1,
+			"name": ["!=", PURCHASE_ORDER_WORKFLOW],
+		},
+		"name",
+	)
+	if other_active_workflow:
+		frappe.throw(
+			f"Cannot enable {PURCHASE_ORDER_WORKFLOW}: Purchase Order already uses active workflow {other_active_workflow}."
+		)
+
+	workflow = (
+		frappe.get_doc("Workflow", PURCHASE_ORDER_WORKFLOW)
+		if frappe.db.exists("Workflow", PURCHASE_ORDER_WORKFLOW)
+		else frappe.new_doc("Workflow")
+	)
+	workflow.workflow_name = PURCHASE_ORDER_WORKFLOW
+	workflow.document_type = "Purchase Order"
+	workflow.is_active = 1
+	workflow.override_status = 0
+	workflow.send_email_alert = 0
+	workflow.enable_action_confirmation = 1
+	workflow.workflow_state_field = "ccpc_approval_status"
+
+	workflow.set("states", [])
+	for state, docstatus, allow_edit in PURCHASE_ORDER_WORKFLOW_STATES:
+		workflow.append(
+			"states",
+			{
+				"state": state,
+				"doc_status": docstatus,
+				"allow_edit": allow_edit,
+				"send_email": 0,
+			}
+		)
+
+	workflow.set("transitions", [])
+	for transition in PURCHASE_ORDER_WORKFLOW_TRANSITIONS:
+		workflow.append("transitions", transition)
+
+	if workflow.is_new():
+		workflow.insert(ignore_permissions=True)
+	else:
+		workflow.save(ignore_permissions=True)
+
+	frappe.clear_cache(doctype="Purchase Order")
+	frappe.cache.hdel("workflow", "Purchase Order")
 
 
 def ensure_withdrawal_slip_requestor_permissions():
