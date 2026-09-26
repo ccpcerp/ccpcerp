@@ -2,6 +2,7 @@
 # See license.txt
 
 import json
+from datetime import date
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
@@ -10,7 +11,12 @@ import frappe
 
 from ccpcerp import setup
 from ccpcerp.ccpc_erp import mrs_permissions
-from ccpcerp.ccpc_erp.doctype.mrs.mrs import MRS, _build_item_search_text, _default_date_needed
+from ccpcerp.ccpc_erp.doctype.mrs.mrs import (
+	MRS,
+	_build_item_search_text,
+	_default_date_needed,
+	_request_item_snapshot,
+)
 
 
 class TestMRSWorkflow(TestCase):
@@ -145,6 +151,30 @@ class TestMRSWorkflow(TestCase):
 		session.user = "manager@example.com"
 		self.assertFalse(MRS._can_edit_returned_request(doc))
 
+	def test_request_item_snapshot_normalizes_date_objects_and_strings(self):
+		from_database = [
+			frappe._dict(
+				name="row-1",
+				item_code="ITEM-00018",
+				requested_qty=2,
+				date_needed=date(2026, 10, 17),
+				remarks=None,
+			)
+		]
+		from_form = [
+			frappe._dict(
+				name="row-1",
+				item_code="ITEM-00018",
+				requested_qty=2.0,
+				date_needed="2026-10-17",
+				remarks="",
+			)
+		]
+		self.assertEqual(
+			_request_item_snapshot(from_database),
+			_request_item_snapshot(from_form),
+		)
+
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
 	def test_plant_manager_can_change_authorized_qty_without_request_lock_error(self, session):
 		session.user = "plantmanager@ccpc.com"
@@ -155,7 +185,7 @@ class TestMRSWorkflow(TestCase):
 					name="row-1",
 					item_code="ITEM-00018",
 					requested_qty=2,
-					date_needed="2026-10-17",
+					date_needed=date(2026, 10, 17),
 					remarks=None,
 					authorized_qty=2,
 				)

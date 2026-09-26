@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, flt, now, nowdate, strip_html
+from frappe.utils import add_days, flt, getdate, now, nowdate, strip_html
 
 
 REQUEST_FIELDS = (
@@ -354,6 +354,8 @@ def _request_item_snapshot(items):
 				value = flt(value)
 			elif value in ("", None):
 				value = None
+			elif fieldname == "date_needed":
+				value = getdate(value).isoformat()
 			values.append(value)
 		values = tuple(values)
 
