@@ -17,6 +17,7 @@ REQUEST_FIELDS = (
 	"justification",
 )
 REQUEST_ITEM_FIELDS = ("item_code", "requested_qty", "date_needed", "remarks")
+REQUESTOR_EDIT_STATES = {"Draft", "Returned for Correction"}
 MANAGEMENT_HEADER_FIELDS = ("bypass_other_management_approval", "bypass_reason")
 
 
@@ -123,14 +124,14 @@ class MRS(Document):
 
 	def _initialize_authorized_quantities(self):
 		before = None if self.is_new() else self.get_doc_before_save()
-		if before and (before.status or "Draft") != "Draft":
+		if before and (before.status or "Draft") not in REQUESTOR_EDIT_STATES:
 			return
 		for row in self.items or []:
 			row.authorized_qty = flt(row.requested_qty)
 
 	def _resolve_approvers(self):
 		before = None if self.is_new() else self.get_doc_before_save()
-		if before and (before.status or "Draft") != "Draft":
+		if before and (before.status or "Draft") not in REQUESTOR_EDIT_STATES:
 			return
 
 		requesting_manager = _get_department_manager_identity(self.requesting_department)
@@ -154,7 +155,12 @@ class MRS(Document):
 		self.owner_name = settings.owner_name
 
 	def _set_item_decisions(self):
-		pre_management = {"Draft", "Pending Requesting Department Manager", "Pending Use Department Manager"}
+		pre_management = {
+			"Draft",
+			"Returned for Correction",
+			"Pending Requesting Department Manager",
+			"Pending Use Department Manager",
+		}
 		for row in self.items or []:
 			if (self.status or "Draft") in pre_management:
 				row.decision = "Pending"
@@ -176,7 +182,12 @@ class MRS(Document):
 		if self.is_new():
 			return
 		before = self.get_doc_before_save()
-		if not before or (before.status or "Draft") == "Draft":
+		if not before:
+			return
+		previous_status = before.status or "Draft"
+		if previous_status == "Draft":
+			return
+		if previous_status == "Returned for Correction" and self._can_edit_returned_request():
 			return
 		for fieldname in REQUEST_FIELDS:
 			if (before.get(fieldname) or None) != (self.get(fieldname) or None):
@@ -185,6 +196,12 @@ class MRS(Document):
 		current_items = [tuple(row.get(fieldname) for fieldname in REQUEST_ITEM_FIELDS) for row in self.items or []]
 		if before_items != current_items:
 			frappe.throw(_("Requested items cannot be changed after the MRS is submitted for approval."))
+
+	def _can_edit_returned_request(self):
+		user = frappe.session.user
+		if user == "Administrator" or "System Manager" in frappe.get_roles(user):
+			return True
+		return user == self.prepared_by
 
 	def _validate_management_edits(self):
 		if self.is_new():
@@ -218,7 +235,7 @@ class MRS(Document):
 				frappe.throw(_("Authorized Qty cannot be negative on row {0}.").format(row.idx))
 
 	def _validate_approval_configuration(self):
-		if (self.status or "Draft") == "Draft":
+		if (self.status or "Draft") in REQUESTOR_EDIT_STATES:
 			return
 		if not self.requesting_department_manager:
 			frappe.throw(_("Requesting Department must have a CCPC Department Manager configured."))
@@ -255,7 +272,13 @@ class MRS(Document):
 			return
 		stamp = now()
 		user = frappe.session.user
-		if before.status == "Pending Requesting Department Manager" and self.status in {"Pending Use Department Manager", "Pending Plant Manager"}:
+		if self.status == "Returned for Correction" and before.status in {
+			"Pending Requesting Department Manager",
+			"Pending Use Department Manager",
+		}:
+			self.requesting_department_manager_approved_on = None
+			self.use_department_manager_approved_on = None
+		elif before.status == "Pending Requesting Department Manager" and self.status in {"Pending Use Department Manager", "Pending Plant Manager"}:
 			self.requesting_department_manager_approved_on = stamp
 		elif before.status == "Pending Use Department Manager" and self.status == "Pending Plant Manager":
 			self.use_department_manager_approved_on = stamp

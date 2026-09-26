@@ -46,9 +46,12 @@ frappe.ui.form.on("MRS", {
 
 		const status = frm.doc.status || "Draft";
 		const is_draft = status === "Draft";
+		const is_returned_for_correction = status === "Returned for Correction";
 		const is_plant_stage = status === "Pending Plant Manager";
 		const is_coo_stage = status === "Pending COO";
 		const user = frappe.session.user;
+		const can_edit_request =
+			is_draft || (is_returned_for_correction && user === frm.doc.prepared_by);
 		const can_create_material_request =
 			user === "Administrator" ||
 			["System Manager", "Purchasing Personnel", "Purchasing Supervisor"].some((role) =>
@@ -59,13 +62,13 @@ frappe.ui.form.on("MRS", {
 			(is_coo_stage && user === frm.doc.coo);
 
 		["use_department", "request_category", "equipment", "job_order", "work_request", "physical_location", "justification"].forEach(
-			(fieldname) => frm.set_df_property(fieldname, "read_only", !is_draft)
+			(fieldname) => frm.set_df_property(fieldname, "read_only", !can_edit_request)
 		);
 
-		frm.fields_dict.items.grid.update_docfield_property("item_code", "read_only", !is_draft);
-		frm.fields_dict.items.grid.update_docfield_property("requested_qty", "read_only", !is_draft);
-		frm.fields_dict.items.grid.update_docfield_property("date_needed", "read_only", !is_draft);
-		frm.fields_dict.items.grid.update_docfield_property("remarks", "read_only", !is_draft);
+		frm.fields_dict.items.grid.update_docfield_property("item_code", "read_only", !can_edit_request);
+		frm.fields_dict.items.grid.update_docfield_property("requested_qty", "read_only", !can_edit_request);
+		frm.fields_dict.items.grid.update_docfield_property("date_needed", "read_only", !can_edit_request);
+		frm.fields_dict.items.grid.update_docfield_property("remarks", "read_only", !can_edit_request);
 		frm.fields_dict.items.grid.update_docfield_property("authorized_qty", "read_only", !can_manage_qty);
 
 		frm.set_df_property(
@@ -112,7 +115,11 @@ frappe.ui.form.on("MRS Item", {
 	},
 
 	requested_qty(frm, cdt, cdn) {
-		if ((frm.doc.status || "Draft") !== "Draft") {
+		const status = frm.doc.status || "Draft";
+		const can_edit_request =
+			status === "Draft" ||
+			(status === "Returned for Correction" && frappe.session.user === frm.doc.prepared_by);
+		if (!can_edit_request) {
 			return;
 		}
 

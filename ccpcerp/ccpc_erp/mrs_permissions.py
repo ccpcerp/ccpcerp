@@ -43,6 +43,8 @@ def has_mrs_permission(doc, user=None, permission_type=None):
 	roles = set(frappe.get_roles(user))
 	if getattr(doc, "is_new", lambda: False)() and "MRS Requestor" in roles:
 		return True
+	if permission_type == "write" and (doc.status or "Draft") in {"Draft", "Returned for Correction"}:
+		return "MRS Requestor" in roles and doc.prepared_by == user
 	if "MRS Management Approver" in roles and user in _management_users():
 		return True
 	if "MRS Requestor" in roles and doc.prepared_by == user:
