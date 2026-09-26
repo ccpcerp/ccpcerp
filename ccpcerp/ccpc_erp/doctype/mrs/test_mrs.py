@@ -80,14 +80,15 @@ class TestMRSWorkflow(TestCase):
 
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.get_roles", return_value=["MRS Requestor"])
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
-	def test_original_requestor_can_edit_returned_request(self, session, _get_roles):
-		session.user = "requestor@example.com"
+	def test_only_original_requestor_passes_returned_edit_check(self, session, _get_roles):
 		doc = MagicMock(spec=MRS)
-		doc.is_new.return_value = False
 		doc.prepared_by = "requestor@example.com"
-		doc.get_doc_before_save.return_value = frappe._dict(status="Returned for Correction")
 
-		MRS._validate_request_lock(doc)
+		session.user = "requestor@example.com"
+		self.assertTrue(MRS._can_edit_returned_request(doc))
+
+		session.user = "manager@example.com"
+		self.assertFalse(MRS._can_edit_returned_request(doc))
 
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.now", return_value="2026-09-26 13:40:00")
 	@patch("ccpcerp.ccpc_erp.doctype.mrs.mrs.frappe.session", create=True)
