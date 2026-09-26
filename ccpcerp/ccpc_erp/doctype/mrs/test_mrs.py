@@ -1,6 +1,8 @@
 # Copyright (c) 2026, CCPC and Contributors
 # See license.txt
 
+import json
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -8,10 +10,48 @@ import frappe
 
 from ccpcerp import setup
 from ccpcerp.ccpc_erp import mrs_permissions
-from ccpcerp.ccpc_erp.doctype.mrs.mrs import MRS
+from ccpcerp.ccpc_erp.doctype.mrs.mrs import MRS, _build_item_search_text
 
 
 class TestMRSWorkflow(TestCase):
+	def test_item_search_text_contains_code_name_and_description(self):
+		search_text = _build_item_search_text(
+			[
+				frappe._dict(
+					item_code="BRG-6205",
+					item_name="Bearing 6205",
+					description="<p>Deep groove bearing for pump</p>",
+				)
+			]
+		)
+		self.assertIn("BRG-6205", search_text)
+		self.assertIn("Bearing 6205", search_text)
+		self.assertIn("Deep groove bearing for pump", search_text)
+		self.assertNotIn("<p>", search_text)
+
+	def test_item_search_is_available_as_standard_list_filter(self):
+		meta = json.loads(Path(__file__).with_name("mrs.json").read_text())
+		field = next(row for row in meta["fields"] if row["fieldname"] == "item_search_text")
+		self.assertEqual(field["label"], "Item Search")
+		self.assertEqual(field["fieldtype"], "Small Text")
+		self.assertEqual(field["hidden"], 1)
+		self.assertEqual(field["in_standard_filter"], 1)
+		self.assertEqual(field["read_only"], 1)
+
+	def test_mrs_rebuilds_item_search_text_from_current_items(self):
+		doc = MagicMock(spec=MRS)
+		doc.items = [
+			frappe._dict(
+				item_code="ITEM-00010",
+				item_name="Pump Bearing",
+				description="Replacement bearing",
+			)
+		]
+		MRS._set_item_search_text(doc)
+		self.assertIn("ITEM-00010", doc.item_search_text)
+		self.assertIn("Pump Bearing", doc.item_search_text)
+		self.assertIn("Replacement bearing", doc.item_search_text)
+
 	def test_department_managers_can_return_mrs_for_correction(self):
 		states = dict(setup.MRS_WORKFLOW_STATES)
 		self.assertEqual(states["Returned for Correction"], setup.MRS_REQUESTOR_ROLE)

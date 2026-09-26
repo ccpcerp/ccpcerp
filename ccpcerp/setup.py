@@ -1,6 +1,8 @@
 # Copyright (c) 2026, CCPC and contributors
 # For license information, please see license.txt
 
+from collections import defaultdict
+
 import frappe
 from frappe.permissions import add_permission
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
@@ -326,6 +328,7 @@ def after_migrate():
 	ensure_mrs_foundation()
 	ensure_mrs_workflow()
 	backfill_mrs_display_names()
+	backfill_mrs_item_search_text()
 	from ccpcerp.ccpc_erp.mrs_procurement import backfill_mrs_procurement_status
 	backfill_mrs_procurement_status()
 	ensure_stockroom_personnel_permissions()
@@ -541,6 +544,36 @@ def backfill_mrs_display_names():
 			"owner_signed_recorded_by_name": _get_personnel_name_by_user(row.owner_signed_recorded_by),
 		}
 		frappe.db.set_value("MRS", row.name, values, update_modified=False)
+
+	frappe.clear_cache(doctype="MRS")
+
+
+def backfill_mrs_item_search_text():
+	"""Build searchable parent text from existing MRS item snapshots."""
+	if not frappe.db.table_exists("MRS") or not frappe.db.table_exists("MRS Item"):
+		return
+
+	from ccpcerp.ccpc_erp.doctype.mrs.mrs import _build_item_search_text
+
+	items_by_parent = defaultdict(list)
+	for row in frappe.get_all(
+		"MRS Item",
+		fields=["parent", "item_code", "item_name", "description"],
+		order_by="parent asc, idx asc",
+	):
+		items_by_parent[row.parent].append(row)
+
+	for name in frappe.get_all("MRS", pluck="name"):
+		search_text = _build_item_search_text(items_by_parent.get(name, []))
+		if frappe.db.get_value("MRS", name, "item_search_text") == search_text:
+			continue
+		frappe.db.set_value(
+			"MRS",
+			name,
+			"item_search_text",
+			search_text,
+			update_modified=False,
+		)
 
 	frappe.clear_cache(doctype="MRS")
 

@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, now, nowdate
+from frappe.utils import flt, now, nowdate, strip_html
 
 
 REQUEST_FIELDS = (
@@ -32,6 +32,7 @@ class MRS(Document):
 		self._apply_job_order_defaults()
 		self._set_equipment_defaults()
 		self._set_item_defaults()
+		self._set_item_search_text()
 		self._initialize_authorized_quantities()
 		self._resolve_approvers()
 		self._set_item_decisions()
@@ -121,6 +122,9 @@ class MRS(Document):
 			row.item_name = item.item_name
 			row.description = item.description
 			row.uom = item.stock_uom
+
+	def _set_item_search_text(self):
+		self.item_search_text = _build_item_search_text(self.items or [])
 
 	def _initialize_authorized_quantities(self):
 		before = None if self.is_new() else self.get_doc_before_save()
@@ -321,6 +325,23 @@ class MRS(Document):
 			self.owner_signed_recorded_by_name = _get_personnel_name_for_user(user)
 			self.owner_signed_recorded_on = stamp
 			self.procurement_status = self.procurement_status or "Awaiting Purchasing"
+
+
+def _build_item_search_text(items):
+	parts = []
+	seen = set()
+	for row in items or []:
+		for fieldname in ("item_code", "item_name", "description"):
+			value = row.get(fieldname) if hasattr(row, "get") else getattr(row, fieldname, None)
+			value = " ".join(strip_html(str(value or "")).split())
+			if not value:
+				continue
+			key = value.casefold()
+			if key in seen:
+				continue
+			seen.add(key)
+			parts.append(value)
+	return "\n".join(parts)
 
 
 def _get_default_company():
