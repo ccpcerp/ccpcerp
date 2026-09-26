@@ -8,3 +8,4 @@ ccpcerp.patches.v1_0.check_work_request_job_order_duplicates
 ccpcerp.patches.v1_0.migrate_phase1_equipment_costing
 ccpcerp.patches.v1_0.create_equipment_accounting_dimension
 ccpcerp.patches.v1_0.grant_operational_requestor_roles
+ccpcerp.patches.v1_0.grant_purchase_order_approver_role

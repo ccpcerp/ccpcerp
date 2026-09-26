@@ -46,6 +46,8 @@ WITHDRAWAL_SLIP_REQUESTOR_REFERENCE_DOCTYPES = (
 )
 PURCHASING_PERSONNEL_ROLE = "Purchasing Personnel"
 PURCHASING_SUPERVISOR_ROLE = "Purchasing Supervisor"
+PURCHASE_ORDER_APPROVER_ROLE = "Purchase Order Approver"
+PURCHASE_ORDER_APPROVER_USERS = ("finance_controller@ccpc.com",)
 MRS_REQUESTOR_ROLE = "MRS Requestor"
 DEPARTMENT_MANAGER_ROLE = "Department Manager"
 MRS_MANAGEMENT_APPROVER_ROLE = "MRS Management Approver"
@@ -261,6 +263,25 @@ PURCHASING_SUPERVISOR_PERMISSIONS = {
 		"report",
 	},
 }
+
+PURCHASE_ORDER_APPROVER_PERMISSIONS = {
+	"Purchase Order": {"read", "write", "submit", "cancel", "amend", "print", "report"},
+	"Material Request": {"read", "print", "report"},
+	"Request for Quotation": {"read", "print", "report"},
+	"Supplier Quotation": {"read", "print", "report"},
+	"Supplier": {"read"},
+	"Supplier Group": {"read", "report"},
+	"Price List": {"read", "report"},
+	"Item": {"read"},
+	"UOM": {"read"},
+	"Warehouse": {"read"},
+	"Company": {"read"},
+	"Department": {"read"},
+	"Account": {"read", "report"},
+	"Cost Center": {"read"},
+	"Equipment Registry": {"read", "print", "report"},
+	"Buying Settings": {"read"},
+}
 CUSTOM_DOCPERM_RIGHTS = (
 	"read",
 	"write",
@@ -334,6 +355,7 @@ def after_migrate():
 	ensure_stockroom_personnel_permissions()
 	ensure_purchasing_personnel_permissions()
 	ensure_purchasing_supervisor_permissions()
+	ensure_purchase_order_approver_permissions()
 	ensure_withdrawal_slip_requestor_permissions()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
@@ -345,7 +367,7 @@ def after_migrate():
 
 def ensure_mrs_foundation():
 	"""Create CCPC's lightweight personnel/routing foundation and MRS access roles."""
-	for role in MRS_ROLES + (PURCHASING_PERSONNEL_ROLE, PURCHASING_SUPERVISOR_ROLE):
+	for role in MRS_ROLES + (PURCHASING_PERSONNEL_ROLE, PURCHASING_SUPERVISOR_ROLE, PURCHASE_ORDER_APPROVER_ROLE):
 		_ensure_role(role)
 
 	create_custom_fields(
@@ -425,6 +447,7 @@ def ensure_mrs_foundation():
 		MRS_GM_SIGNATURE_RECORDER_ROLE: {"read", "write", "print", "report"},
 		PURCHASING_PERSONNEL_ROLE: {"read", "print", "report"},
 		PURCHASING_SUPERVISOR_ROLE: {"read", "print", "report"},
+		PURCHASE_ORDER_APPROVER_ROLE: {"read", "print", "report"},
 	}
 	for role, rights in mrs_permissions.items():
 		_ensure_custom_permission("MRS", role, rights)
@@ -744,6 +767,13 @@ def ensure_purchasing_supervisor_permissions():
 			update_modified=False,
 		)
 		frappe.clear_cache(doctype=doctype)
+
+
+def ensure_purchase_order_approver_permissions():
+	"""Grant Finance a narrow PO approval role without purchasing execution or accounting posting rights."""
+	_ensure_role(PURCHASE_ORDER_APPROVER_ROLE)
+	for doctype, rights in PURCHASE_ORDER_APPROVER_PERMISSIONS.items():
+		_ensure_custom_permission(doctype, PURCHASE_ORDER_APPROVER_ROLE, rights)
 
 
 def ensure_withdrawal_slip_requestor_permissions():
