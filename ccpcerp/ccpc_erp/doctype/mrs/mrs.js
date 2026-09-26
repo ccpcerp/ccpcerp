@@ -1,3 +1,17 @@
+const MRS_DATE_NEEDED_LEAD_DAYS = 21;
+
+function get_default_date_needed(frm) {
+	const base_date = frm.doc.request_date || frappe.datetime.get_today();
+	return frappe.datetime.add_days(base_date, MRS_DATE_NEEDED_LEAD_DAYS);
+}
+
+function set_default_date_needed(frm, cdt, cdn) {
+	const row = locals[cdt][cdn];
+	if (!row.date_needed) {
+		frappe.model.set_value(cdt, cdn, "date_needed", get_default_date_needed(frm));
+	}
+}
+
 async function create_material_request(frm) {
 	const response = await frappe.call({
 		method: "ccpcerp.ccpc_erp.mrs_procurement.make_material_request",
@@ -91,7 +105,12 @@ frappe.ui.form.on("MRS", {
 });
 
 frappe.ui.form.on("MRS Item", {
+	items_add(frm, cdt, cdn) {
+		set_default_date_needed(frm, cdt, cdn);
+	},
+
 	async item_code(frm, cdt, cdn) {
+		set_default_date_needed(frm, cdt, cdn);
 		const row = locals[cdt][cdn];
 		if (!row.item_code) {
 			await frappe.model.set_value(cdt, cdn, "item_name", "");

@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import flt, now, nowdate, strip_html
+from frappe.utils import add_days, flt, now, nowdate, strip_html
 
 
 REQUEST_FIELDS = (
@@ -19,6 +19,7 @@ REQUEST_FIELDS = (
 REQUEST_ITEM_FIELDS = ("item_code", "requested_qty", "date_needed", "remarks")
 REQUESTOR_EDIT_STATES = {"Draft", "Returned for Correction"}
 MANAGEMENT_HEADER_FIELDS = ("bypass_other_management_approval", "bypass_reason")
+DATE_NEEDED_LEAD_DAYS = 21
 
 
 class MRS(Document):
@@ -32,6 +33,7 @@ class MRS(Document):
 		self._apply_job_order_defaults()
 		self._set_equipment_defaults()
 		self._set_item_defaults()
+		self._set_date_needed_defaults()
 		self._set_item_search_text()
 		self._initialize_authorized_quantities()
 		self._resolve_approvers()
@@ -122,6 +124,19 @@ class MRS(Document):
 			row.item_name = item.item_name
 			row.description = item.description
 			row.uom = item.stock_uom
+
+	def _set_date_needed_defaults(self):
+		before = None if self.is_new() else self.get_doc_before_save()
+		previous_status = (before.status or "Draft") if before else "Draft"
+		if previous_status not in REQUESTOR_EDIT_STATES:
+			return
+		if previous_status == "Returned for Correction" and not self._can_edit_returned_request():
+			return
+
+		default_date = _default_date_needed(self.request_date)
+		for row in self.items or []:
+			if not row.date_needed:
+				row.date_needed = default_date
 
 	def _set_item_search_text(self):
 		self.item_search_text = _build_item_search_text(self.items or [])
@@ -325,6 +340,10 @@ class MRS(Document):
 			self.owner_signed_recorded_by_name = _get_personnel_name_for_user(user)
 			self.owner_signed_recorded_on = stamp
 			self.procurement_status = self.procurement_status or "Awaiting Purchasing"
+
+
+def _default_date_needed(request_date=None):
+	return add_days(request_date or nowdate(), DATE_NEEDED_LEAD_DAYS)
 
 
 def _build_item_search_text(items):

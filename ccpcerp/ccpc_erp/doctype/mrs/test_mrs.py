@@ -10,10 +10,25 @@ import frappe
 
 from ccpcerp import setup
 from ccpcerp.ccpc_erp import mrs_permissions
-from ccpcerp.ccpc_erp.doctype.mrs.mrs import MRS, _build_item_search_text
+from ccpcerp.ccpc_erp.doctype.mrs.mrs import MRS, _build_item_search_text, _default_date_needed
 
 
 class TestMRSWorkflow(TestCase):
+	def test_date_needed_defaults_to_21_days_after_request_date(self):
+		self.assertEqual(_default_date_needed("2026-09-26"), "2026-10-17")
+
+	def test_date_needed_default_preserves_manual_date(self):
+		doc = MagicMock(spec=MRS)
+		doc.is_new.return_value = True
+		doc.request_date = "2026-09-26"
+		doc.items = [
+			frappe._dict(date_needed=None),
+			frappe._dict(date_needed="2026-09-30"),
+		]
+		MRS._set_date_needed_defaults(doc)
+		self.assertEqual(doc.items[0].date_needed, "2026-10-17")
+		self.assertEqual(doc.items[1].date_needed, "2026-09-30")
+
 	def test_item_search_text_contains_code_name_and_description(self):
 		search_text = _build_item_search_text(
 			[
