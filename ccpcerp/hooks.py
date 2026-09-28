@@ -40,6 +40,9 @@ doctype_js = {
 }
 
 doc_events = {
+	"User": {
+		"before_save": "ccpcerp.setup.ensure_operational_requestor_roles_on_user",
+	},
 	"Material Request": {
 		"before_validate": [
 			"ccpcerp.ccpc_erp.equipment_costing.preserve_material_request_work_request",

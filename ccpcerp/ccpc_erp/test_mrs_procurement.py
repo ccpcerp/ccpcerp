@@ -52,6 +52,48 @@ class TestMRSProcurement(TestCase):
 			client_script,
 		)
 
+	def test_plant_supervisor_roles_have_shared_base_authority(self):
+		self.assertEqual(
+			setup.PLANT_SUPERVISOR_ROLES,
+			(
+				"Wet Mill Plant Supervisor",
+				"Dry Mill Plant Supervisor",
+				"Cogen Plant Supervisor",
+				"QA/QC Supervisor",
+				"Feed Mill Plant Supervisor",
+			),
+		)
+		self.assertEqual(
+			set(setup.OPERATIONAL_SUPERVISOR_ROLES),
+			{setup.MAINTENANCE_SUPERVISOR_ROLE, *setup.PLANT_SUPERVISOR_ROLES},
+		)
+		self.assertTrue(set(setup.OPERATIONAL_SUPERVISOR_ROLES).issubset(set(setup.OPERATIONAL_REQUESTOR_SOURCE_ROLES)))
+		self.assertEqual(setup.SUPERVISOR_PERMISSIONS["Material Request"], {"read", "print", "report"})
+		self.assertEqual(setup.SUPERVISOR_DEFAULT_WORKSPACE, "CCPC ERP")
+
+	@patch.object(frappe.db, "exists", return_value=True)
+	def test_plant_supervisor_assignment_adds_requestor_roles(self, _exists):
+		roles = [frappe._dict(role="Wet Mill Plant Supervisor")]
+		doc = MagicMock()
+		doc.name = "wetmill@example.com"
+		doc.user_type = "System User"
+		doc.get.return_value = roles
+		setup.ensure_operational_requestor_roles_on_user(doc)
+		self.assertEqual(
+			[call.args for call in doc.append.call_args_list],
+			[
+				("roles", {"role": setup.MRS_REQUESTOR_ROLE}),
+				("roles", {"role": setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE}),
+			],
+		)
+
+	def test_user_save_hook_keeps_supervisor_requestor_roles_in_sync(self):
+		hooks_source = (Path(__file__).parents[1] / "hooks.py").read_text()
+		self.assertIn(
+			'"before_save": "ccpcerp.setup.ensure_operational_requestor_roles_on_user"',
+			hooks_source,
+		)
+
 	@patch.object(frappe, "get_all", return_value=["CCPC ERP", "Accounting", "Buying", "Stock"])
 	def test_maintenance_supervisor_module_profile_blocks_non_ccpc_modules(self, _get_all):
 		self.assertEqual(
@@ -74,11 +116,11 @@ class TestMRSProcurement(TestCase):
 
 		self.assertEqual(
 			user.module_profile,
-			setup.MAINTENANCE_SUPERVISOR_MODULE_PROFILE,
+			setup.SUPERVISOR_MODULE_PROFILE,
 		)
 		self.assertEqual(
 			user.default_workspace,
-			setup.MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE,
+			setup.SUPERVISOR_DEFAULT_WORKSPACE,
 		)
 		user.save.assert_called_once_with(ignore_permissions=True)
 
@@ -87,6 +129,7 @@ class TestMRSProcurement(TestCase):
 		after_migrate = setup_source.split("def after_migrate():", 1)[1].split("\ndef ", 1)[0]
 		self.assertIn("ensure_maintenance_supervisor_navigation()", after_migrate)
 		self.assertIn("reset_maintenance_supervisor_desktop_layouts()", after_migrate)
+		self.assertIn("ensure_operational_requestor_role_assignments()", after_migrate)
 
 	@patch.object(frappe, "get_roles", return_value=["Maintenance Supervisor"])
 	def test_maintenance_supervisor_boot_only_contains_ccpc_erp(self, _roles):
@@ -101,6 +144,24 @@ class TestMRSProcurement(TestCase):
 		desktop_visibility.filter_boot_desktop_icons(
 			bootinfo,
 			user="maintenance@example.com",
+		)
+		self.assertEqual(
+			[icon.label for icon in bootinfo.desktop_icons],
+			["CCPC ERP"],
+		)
+
+	@patch.object(frappe, "get_roles", return_value=["Dry Mill Plant Supervisor"])
+	def test_plant_supervisor_boot_only_contains_ccpc_erp(self, _roles):
+		bootinfo = frappe._dict(
+			desktop_icons=[
+				frappe._dict(label="Accounting"),
+				frappe._dict(label="CCPC ERP"),
+				frappe._dict(label="Stock"),
+			]
+		)
+		desktop_visibility.filter_boot_desktop_icons(
+			bootinfo,
+			user="drymill@example.com",
 		)
 		self.assertEqual(
 			[icon.label for icon in bootinfo.desktop_icons],

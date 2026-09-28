@@ -10,13 +10,28 @@ from frappe.utils import flt
 
 
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
-MAINTENANCE_SUPERVISOR_MODULE_PROFILE = "CCPC Maintenance Supervisor"
-MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE = "CCPC ERP"
-MAINTENANCE_SUPERVISOR_ALLOWED_MODULES = {"CCPC ERP"}
-MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
-MAINTENANCE_SUPERVISOR_PERMISSIONS = {
+PLANT_SUPERVISOR_ROLES = (
+	"Wet Mill Plant Supervisor",
+	"Dry Mill Plant Supervisor",
+	"Cogen Plant Supervisor",
+	"QA/QC Supervisor",
+	"Feed Mill Plant Supervisor",
+)
+OPERATIONAL_SUPERVISOR_ROLES = (MAINTENANCE_SUPERVISOR_ROLE,) + PLANT_SUPERVISOR_ROLES
+SUPERVISOR_MODULE_PROFILE = "CCPC Operational Supervisor"
+SUPERVISOR_DEFAULT_WORKSPACE = "CCPC ERP"
+SUPERVISOR_ALLOWED_MODULES = {"CCPC ERP"}
+SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
+SUPERVISOR_PERMISSIONS = {
 	"Material Request": {"read", "print", "report"},
 }
+
+# Backward-compatible names used by earlier migrations/tests.
+MAINTENANCE_SUPERVISOR_MODULE_PROFILE = SUPERVISOR_MODULE_PROFILE
+MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE = SUPERVISOR_DEFAULT_WORKSPACE
+MAINTENANCE_SUPERVISOR_ALLOWED_MODULES = SUPERVISOR_ALLOWED_MODULES
+MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = SUPERVISOR_REFERENCE_DOCTYPES
+MAINTENANCE_SUPERVISOR_PERMISSIONS = SUPERVISOR_PERMISSIONS
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
 STOCKROOM_PERSONNEL_PERMISSIONS = {
@@ -63,7 +78,7 @@ MRS_ROLES = (
 	MRS_GM_SIGNATURE_RECORDER_ROLE,
 )
 OPERATIONAL_REQUESTOR_SOURCE_ROLES = (
-	MAINTENANCE_SUPERVISOR_ROLE,
+	*OPERATIONAL_SUPERVISOR_ROLES,
 	STOCKROOM_PERSONNEL_ROLE,
 	PURCHASING_PERSONNEL_ROLE,
 	PURCHASING_SUPERVISOR_ROLE,
@@ -393,6 +408,7 @@ def after_migrate():
 	ensure_maintenance_supervisor_navigation()
 	reset_maintenance_supervisor_desktop_layouts()
 	ensure_mrs_foundation()
+	ensure_operational_requestor_role_assignments()
 	ensure_mrs_workflow()
 	backfill_mrs_display_names()
 	backfill_mrs_item_search_text()
@@ -690,58 +706,26 @@ def _get_department_manager_personnel(department):
 
 
 def ensure_maintenance_supervisor_permissions():
-	"""Keep supervisor request visibility read-only while preserving required reference access."""
-	_ensure_role(MAINTENANCE_SUPERVISOR_ROLE)
+	"""Keep the shared operational-supervisor baseline aligned across all plant supervisor roles."""
+	for role in OPERATIONAL_SUPERVISOR_ROLES:
+		_ensure_role(role)
 
-	for doctype in MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES:
-		filters = {
-			"parent": doctype,
-			"role": MAINTENANCE_SUPERVISOR_ROLE,
-			"permlevel": 0,
-			"if_owner": 0,
-		}
-		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
-		if custom_perm:
-			frappe.db.set_value("Custom DocPerm", custom_perm, "read", 1, update_modified=False)
-		else:
-			add_permission(doctype, MAINTENANCE_SUPERVISOR_ROLE, permlevel=0, ptype="read")
+		for doctype in SUPERVISOR_REFERENCE_DOCTYPES:
+			_ensure_custom_permission(doctype, role, {"read"})
 
-		frappe.clear_cache(doctype=doctype)
-
-	for doctype, rights in MAINTENANCE_SUPERVISOR_PERMISSIONS.items():
-		filters = {
-			"parent": doctype,
-			"role": MAINTENANCE_SUPERVISOR_ROLE,
-			"permlevel": 0,
-			"if_owner": 0,
-		}
-		custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
-		if not custom_perm:
-			add_permission(doctype, MAINTENANCE_SUPERVISOR_ROLE, permlevel=0, ptype="read")
-			custom_perm = frappe.db.get_value("Custom DocPerm", filters, "name")
-
-		values = {
-			right: 1 if right in rights else 0
-			for right in CUSTOM_DOCPERM_RIGHTS
-		}
-		frappe.db.set_value(
-			"Custom DocPerm",
-			custom_perm,
-			values,
-			update_modified=False,
-		)
-		frappe.clear_cache(doctype=doctype)
+		for doctype, rights in SUPERVISOR_PERMISSIONS.items():
+			_ensure_custom_permission(doctype, role, rights)
 
 
 def ensure_maintenance_supervisor_navigation():
-	"""Limit Maintenance Supervisor Desk navigation to CCPC ERP and land there by default."""
+	"""Limit all operational supervisors to the CCPC ERP desk and land there by default."""
 	blocked_modules = _maintenance_supervisor_blocked_modules()
 	profile = (
-		frappe.get_doc("Module Profile", MAINTENANCE_SUPERVISOR_MODULE_PROFILE)
-		if frappe.db.exists("Module Profile", MAINTENANCE_SUPERVISOR_MODULE_PROFILE)
+		frappe.get_doc("Module Profile", SUPERVISOR_MODULE_PROFILE)
+		if frappe.db.exists("Module Profile", SUPERVISOR_MODULE_PROFILE)
 		else frappe.new_doc("Module Profile")
 	)
-	profile.module_profile_name = MAINTENANCE_SUPERVISOR_MODULE_PROFILE
+	profile.module_profile_name = SUPERVISOR_MODULE_PROFILE
 
 	current_blocked = {row.module for row in profile.get("block_modules") or []}
 	if current_blocked != set(blocked_modules):
@@ -777,7 +761,7 @@ def _maintenance_supervisor_user_names():
 			frappe.get_all(
 				"Has Role",
 				filters={
-					"role": MAINTENANCE_SUPERVISOR_ROLE,
+					"role": ["in", list(OPERATIONAL_SUPERVISOR_ROLES)],
 					"parenttype": "User",
 				},
 				pluck="parent",
@@ -802,15 +786,69 @@ def _apply_maintenance_supervisor_navigation(user_name):
 		return
 
 	changed = False
-	if user.module_profile != MAINTENANCE_SUPERVISOR_MODULE_PROFILE:
-		user.module_profile = MAINTENANCE_SUPERVISOR_MODULE_PROFILE
+	if user.module_profile != SUPERVISOR_MODULE_PROFILE:
+		user.module_profile = SUPERVISOR_MODULE_PROFILE
 		changed = True
-	if user.default_workspace != MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE:
-		user.default_workspace = MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE
+	if user.default_workspace != SUPERVISOR_DEFAULT_WORKSPACE:
+		user.default_workspace = SUPERVISOR_DEFAULT_WORKSPACE
 		changed = True
 
 	if changed:
 		user.save(ignore_permissions=True)
+
+
+def ensure_operational_requestor_roles_on_user(doc, method=None):
+	"""Add requestor roles whenever an operational source role is assigned to a System User."""
+	if doc.name in {"Administrator", "Guest"} or doc.user_type != "System User":
+		return
+
+	current_roles = {row.role for row in doc.get("roles") or []}
+	if not current_roles.intersection(OPERATIONAL_REQUESTOR_SOURCE_ROLES):
+		return
+
+	for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE):
+		if role not in current_roles and frappe.db.exists("Role", role):
+			doc.append("roles", {"role": role})
+			current_roles.add(role)
+
+
+def ensure_operational_requestor_role_assignments():
+	"""Backfill requestor roles for existing users holding an operational source role."""
+	_ensure_role(MRS_REQUESTOR_ROLE)
+	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
+
+	users = sorted(
+		set(
+			frappe.get_all(
+				"Has Role",
+				filters={
+					"parenttype": "User",
+					"role": ["in", list(OPERATIONAL_REQUESTOR_SOURCE_ROLES)],
+				},
+				pluck="parent",
+			)
+		)
+	)
+	for user_name in users:
+		if user_name in {"Administrator", "Guest"}:
+			continue
+
+		user = frappe.get_doc("User", user_name)
+		if not user.enabled or user.user_type != "System User":
+			continue
+
+		current_roles = {row.role for row in user.roles}
+		roles_to_add = [
+			role
+			for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE)
+			if role not in current_roles
+		]
+		if not roles_to_add:
+			continue
+
+		user.append_roles(*roles_to_add)
+		user.save(ignore_permissions=True)
+		frappe.clear_cache(user=user_name)
 
 
 def ensure_stockroom_personnel_permissions():
