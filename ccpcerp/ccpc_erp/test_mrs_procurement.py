@@ -9,7 +9,7 @@ from unittest.mock import patch
 import frappe
 
 from ccpcerp import setup
-from ccpcerp.ccpc_erp import mrs_procurement
+from ccpcerp.ccpc_erp import mrs_permissions, mrs_procurement
 
 
 class TestMRSProcurement(TestCase):
@@ -220,6 +220,44 @@ class TestMRSProcurement(TestCase):
 				self.assertEqual(shortcut["link_to"], "MRS")
 				self.assertEqual(shortcut["doc_view"], "List")
 				self.assertEqual(json.loads(shortcut["stats_filter"]), filters)
+
+	@patch.object(mrs_permissions, "_management_user_map", return_value={"plant_manager": "plant@example.com", "coo": "coo@example.com"})
+	@patch.object(frappe, "get_roles", return_value=["Purchase Order Approver", "MRS Requestor"])
+	def test_finance_controller_sees_only_po_approval_shortcut(self, _roles, _management_users):
+		self.assertEqual(
+			mrs_permissions._workspace_approval_shortcuts_for_user("finance@example.com"),
+			{"PO for Approval"},
+		)
+
+	@patch.object(mrs_permissions, "_management_user_map", return_value={"plant_manager": "plant@example.com", "coo": "coo@example.com"})
+	@patch.object(frappe, "get_roles", return_value=["MRS Management Approver", "MRS Requestor"])
+	def test_management_approver_sees_only_own_stage_shortcut(self, _roles, _management_users):
+		self.assertEqual(
+			mrs_permissions._workspace_approval_shortcuts_for_user("plant@example.com"),
+			{"MRS - For Plant Manager Approval"},
+		)
+		self.assertEqual(
+			mrs_permissions._workspace_approval_shortcuts_for_user("coo@example.com"),
+			{"MRS - For Chief Operating Officer Approval"},
+		)
+
+	@patch.object(frappe, "get_roles", return_value=["Department Manager", "MRS Requestor"])
+	def test_department_manager_sees_department_approval_shortcut(self, _roles):
+		self.assertEqual(
+			mrs_permissions._workspace_approval_shortcuts_for_user("manager@example.com"),
+			{"MRS - For Department Manager Approval"},
+		)
+
+	def test_workspace_approval_visibility_client_script_is_loaded(self):
+		app_root = Path(__file__).parents[1]
+		hooks = (app_root / "hooks.py").read_text()
+		client_script = (app_root / "public/js/workspace_approval_shortcuts.js").read_text()
+		self.assertIn(
+			'app_include_js = "/assets/ccpcerp/js/workspace_approval_shortcuts.js"',
+			hooks,
+		)
+		self.assertIn("get_workspace_approval_shortcut_visibility", client_script)
+		self.assertIn("shortcut-widget-box", client_script)
 
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):

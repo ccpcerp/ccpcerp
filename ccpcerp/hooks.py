@@ -136,7 +136,7 @@ doc_events = {
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/ccpcerp/css/ccpcerp.css"
-# app_include_js = "/assets/ccpcerp/js/ccpcerp.js"
+app_include_js = "/assets/ccpcerp/js/workspace_approval_shortcuts.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/ccpcerp/css/ccpcerp.css"

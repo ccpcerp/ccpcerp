@@ -4,6 +4,58 @@
 import frappe
 
 
+WORKSPACE_APPROVAL_SHORTCUTS = {
+	"department_manager": "MRS - For Department Manager Approval",
+	"plant_manager": "MRS - For Plant Manager Approval",
+	"coo": "MRS - For Chief Operating Officer Approval",
+	"purchase_order_approver": "PO for Approval",
+}
+ALL_WORKSPACE_APPROVAL_SHORTCUTS = set(WORKSPACE_APPROVAL_SHORTCUTS.values())
+
+
+
+@frappe.whitelist()
+def get_workspace_approval_shortcut_visibility():
+	"""Return the approval shortcuts relevant to the logged-in user's responsibilities."""
+	return {
+		"allowed": sorted(_workspace_approval_shortcuts_for_user(frappe.session.user)),
+		"managed": sorted(ALL_WORKSPACE_APPROVAL_SHORTCUTS),
+	}
+
+
+def _workspace_approval_shortcuts_for_user(user):
+	roles = set(frappe.get_roles(user))
+	if user == "Administrator" or "System Manager" in roles:
+		return set(ALL_WORKSPACE_APPROVAL_SHORTCUTS)
+
+	allowed = set()
+	if "Department Manager" in roles:
+		allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["department_manager"])
+	if "Purchase Order Approver" in roles:
+		allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["purchase_order_approver"])
+
+	if "MRS Management Approver" in roles:
+		management_users = _management_user_map()
+		if user == management_users.get("plant_manager"):
+			allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["plant_manager"])
+		if user == management_users.get("coo"):
+			allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["coo"])
+
+	return allowed
+
+
+def _management_user_map():
+	settings = frappe.get_single("CCPC Approval Settings")
+	users = {}
+	for stage, personnel_name in (
+		("plant_manager", settings.plant_manager),
+		("coo", settings.coo),
+	):
+		if personnel_name:
+			users[stage] = frappe.db.get_value("CCPC Personnel", personnel_name, "user")
+	return users
+
+
 def get_mrs_permission_query_conditions(user=None):
 	user = user or frappe.session.user
 	if user == "Administrator" or "System Manager" in frappe.get_roles(user):
@@ -76,11 +128,4 @@ def _managed_departments(user):
 
 
 def _management_users():
-	settings = frappe.get_single("CCPC Approval Settings")
-	users = set()
-	for personnel_name in (settings.plant_manager, settings.coo):
-		if personnel_name:
-			user = frappe.db.get_value("CCPC Personnel", personnel_name, "user")
-			if user:
-				users.add(user)
-	return users
+	return {user for user in _management_user_map().values() if user}
