@@ -25,6 +25,6 @@ def _is_restricted_maintenance_supervisor(user):
 
 	roles = set(frappe.get_roles(user))
 	return (
-		bool(roles.intersection(setup.OPERATIONAL_SUPERVISOR_ROLES))
+		bool(roles.intersection(setup.CCPC_ERP_ONLY_DESK_ROLES))
 		and "System Manager" not in roles
 	)

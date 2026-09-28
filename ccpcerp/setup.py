@@ -71,6 +71,15 @@ PURCHASE_ORDER_APPROVER_USERS = ("finance_controller@ccpc.com",)
 PURCHASE_ORDER_WORKFLOW = "CCPC Purchase Order Approval"
 MRS_REQUESTOR_ROLE = "MRS Requestor"
 DEPARTMENT_MANAGER_ROLE = "Department Manager"
+DEPARTMENT_MANAGER_ASSIGNMENT_ROLES = (
+	"Maintenance Manager",
+	"Wet Mill Plant Manager",
+	"Dry Mill Plant Manager",
+	"Cogen Plant Manager",
+	"QA/QC Manager",
+	"Feed Mill Plant Manager",
+)
+CCPC_ERP_ONLY_DESK_ROLES = OPERATIONAL_SUPERVISOR_ROLES + DEPARTMENT_MANAGER_ASSIGNMENT_ROLES
 MRS_MANAGEMENT_APPROVER_ROLE = "MRS Management Approver"
 MRS_GM_SIGNATURE_RECORDER_ROLE = "MRS GM Signature Recorder"
 MRS_ROLES = (
@@ -81,6 +90,7 @@ MRS_ROLES = (
 )
 OPERATIONAL_REQUESTOR_SOURCE_ROLES = (
 	*OPERATIONAL_SUPERVISOR_ROLES,
+	*DEPARTMENT_MANAGER_ASSIGNMENT_ROLES,
 	STOCKROOM_PERSONNEL_ROLE,
 	PURCHASING_PERSONNEL_ROLE,
 	PURCHASING_SUPERVISOR_ROLE,
@@ -407,6 +417,7 @@ WORKFLOW_TRANSITIONS = (
 
 def after_migrate():
 	ensure_maintenance_supervisor_permissions()
+	ensure_department_manager_roles()
 	ensure_maintenance_supervisor_navigation()
 	reset_maintenance_supervisor_desktop_layouts()
 	ensure_mrs_foundation()
@@ -719,6 +730,13 @@ def ensure_maintenance_supervisor_permissions():
 		_ensure_custom_permission(doctype, OPERATIONAL_SUPERVISOR_BASE_ROLE, rights)
 
 
+def ensure_department_manager_roles():
+	"""Create plant-specific manager roles that inherit authority through Department Manager."""
+	_ensure_role(DEPARTMENT_MANAGER_ROLE)
+	for role in DEPARTMENT_MANAGER_ASSIGNMENT_ROLES:
+		_ensure_role(role)
+
+
 def ensure_maintenance_supervisor_navigation():
 	"""Limit all operational supervisors to the CCPC ERP desk and land there by default."""
 	blocked_modules = _maintenance_supervisor_blocked_modules()
@@ -763,7 +781,7 @@ def _maintenance_supervisor_user_names():
 			frappe.get_all(
 				"Has Role",
 				filters={
-					"role": ["in", list(OPERATIONAL_SUPERVISOR_ROLES)],
+					"role": ["in", list(CCPC_ERP_ONLY_DESK_ROLES)],
 					"parenttype": "User",
 				},
 				pluck="parent",
@@ -813,7 +831,15 @@ def ensure_operational_requestor_roles_on_user(doc, method=None):
 			doc.append("roles", {"role": OPERATIONAL_SUPERVISOR_BASE_ROLE})
 			current_roles.add(OPERATIONAL_SUPERVISOR_BASE_ROLE)
 
-	if current_roles.intersection(OPERATIONAL_SUPERVISOR_ROLES):
+	if current_roles.intersection(DEPARTMENT_MANAGER_ASSIGNMENT_ROLES):
+		if (
+			DEPARTMENT_MANAGER_ROLE not in current_roles
+			and frappe.db.exists("Role", DEPARTMENT_MANAGER_ROLE)
+		):
+			doc.append("roles", {"role": DEPARTMENT_MANAGER_ROLE})
+			current_roles.add(DEPARTMENT_MANAGER_ROLE)
+
+	if current_roles.intersection(CCPC_ERP_ONLY_DESK_ROLES):
 		if frappe.db.exists("Module Profile", SUPERVISOR_MODULE_PROFILE):
 			doc.module_profile = SUPERVISOR_MODULE_PROFILE
 		doc.default_workspace = SUPERVISOR_DEFAULT_WORKSPACE
@@ -861,6 +887,12 @@ def ensure_operational_requestor_role_assignments():
 		):
 			roles_to_add.append(OPERATIONAL_SUPERVISOR_BASE_ROLE)
 
+		if (
+			current_roles.intersection(DEPARTMENT_MANAGER_ASSIGNMENT_ROLES)
+			and DEPARTMENT_MANAGER_ROLE not in current_roles
+		):
+			roles_to_add.append(DEPARTMENT_MANAGER_ROLE)
+
 		roles_to_add.extend(
 			role
 			for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE)
@@ -870,7 +902,7 @@ def ensure_operational_requestor_role_assignments():
 			user.append_roles(*roles_to_add)
 
 		changed = bool(roles_to_add)
-		if current_roles.intersection(OPERATIONAL_SUPERVISOR_ROLES):
+		if current_roles.intersection(CCPC_ERP_ONLY_DESK_ROLES):
 			if user.module_profile != SUPERVISOR_MODULE_PROFILE:
 				user.module_profile = SUPERVISOR_MODULE_PROFILE
 				changed = True

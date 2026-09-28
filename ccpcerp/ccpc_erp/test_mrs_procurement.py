@@ -72,6 +72,70 @@ class TestMRSProcurement(TestCase):
 		self.assertEqual(setup.SUPERVISOR_PERMISSIONS["Material Request"], {"read", "print", "report"})
 		self.assertEqual(setup.SUPERVISOR_DEFAULT_WORKSPACE, "CCPC ERP")
 
+	def test_department_manager_specific_roles_use_department_manager_as_base(self):
+		self.assertEqual(
+			setup.DEPARTMENT_MANAGER_ASSIGNMENT_ROLES,
+			(
+				"Maintenance Manager",
+				"Wet Mill Plant Manager",
+				"Dry Mill Plant Manager",
+				"Cogen Plant Manager",
+				"QA/QC Manager",
+				"Feed Mill Plant Manager",
+			),
+		)
+		self.assertTrue(
+			set(setup.DEPARTMENT_MANAGER_ASSIGNMENT_ROLES).issubset(
+				set(setup.OPERATIONAL_REQUESTOR_SOURCE_ROLES)
+			)
+		)
+
+	@patch.object(frappe.db, "exists", return_value=True)
+	def test_department_manager_specific_role_adds_base_and_requestor_roles(self, _exists):
+		roles = [frappe._dict(role="Wet Mill Plant Manager")]
+		doc = MagicMock()
+		doc.name = "wetmill.manager@example.com"
+		doc.user_type = "System User"
+		doc.get.return_value = roles
+
+		setup.ensure_operational_requestor_roles_on_user(doc)
+
+		self.assertEqual(
+			[call.args for call in doc.append.call_args_list],
+			[
+				("roles", {"role": setup.DEPARTMENT_MANAGER_ROLE}),
+				("roles", {"role": setup.MRS_REQUESTOR_ROLE}),
+				("roles", {"role": setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE}),
+			],
+		)
+		self.assertEqual(doc.module_profile, setup.SUPERVISOR_MODULE_PROFILE)
+		self.assertEqual(doc.default_workspace, setup.SUPERVISOR_DEFAULT_WORKSPACE)
+
+	@patch.object(frappe, "get_roles", return_value=["Wet Mill Plant Manager", "Department Manager"])
+	def test_department_manager_specific_role_desktop_only_contains_ccpc_erp(self, _roles):
+		bootinfo = frappe._dict(
+			desktop_icons=[
+				frappe._dict(label="Accounting"),
+				frappe._dict(label="CCPC ERP"),
+				frappe._dict(label="Stock"),
+			]
+		)
+		desktop_visibility.filter_boot_desktop_icons(
+			bootinfo,
+			user="wetmill.manager@example.com",
+		)
+		self.assertEqual(
+			[icon.label for icon in bootinfo.desktop_icons],
+			["CCPC ERP"],
+		)
+
+	@patch.object(frappe, "get_roles", return_value=["Wet Mill Plant Manager", "Department Manager", "MRS Requestor"])
+	def test_department_manager_specific_role_keeps_department_approval_shortcut(self, _roles):
+		self.assertEqual(
+			mrs_permissions._workspace_approval_shortcuts_for_user("wetmill.manager@example.com"),
+			{"MRS - For Department Manager Approval"},
+		)
+
 	@patch.object(frappe.db, "exists", return_value=True)
 	def test_plant_supervisor_assignment_adds_base_and_requestor_roles(self, _exists):
 		roles = [frappe._dict(role="Wet Mill Plant Supervisor")]
@@ -143,6 +207,7 @@ class TestMRSProcurement(TestCase):
 	def test_after_migrate_enforces_maintenance_supervisor_navigation(self):
 		setup_source = (Path(__file__).parents[1] / "setup.py").read_text()
 		after_migrate = setup_source.split("def after_migrate():", 1)[1].split("\ndef ", 1)[0]
+		self.assertIn("ensure_department_manager_roles()", after_migrate)
 		self.assertIn("ensure_maintenance_supervisor_navigation()", after_migrate)
 		self.assertIn("reset_maintenance_supervisor_desktop_layouts()", after_migrate)
 		self.assertIn("ensure_operational_requestor_role_assignments()", after_migrate)
