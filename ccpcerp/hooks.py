@@ -199,6 +199,7 @@ app_include_js = "/assets/ccpcerp/js/workspace_approval_shortcuts.js"
 # after_install = "ccpcerp.install.after_install"
 
 after_migrate = "ccpcerp.setup.after_migrate"
+boot_session = "ccpcerp.ccpc_erp.desktop_visibility.filter_boot_desktop_icons"
 
 # Uninstallation
 # ------------

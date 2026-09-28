@@ -391,6 +391,7 @@ WORKFLOW_TRANSITIONS = (
 def after_migrate():
 	ensure_maintenance_supervisor_permissions()
 	ensure_maintenance_supervisor_navigation()
+	reset_maintenance_supervisor_desktop_layouts()
 	ensure_mrs_foundation()
 	ensure_mrs_workflow()
 	backfill_mrs_display_names()
@@ -754,7 +755,24 @@ def ensure_maintenance_supervisor_navigation():
 	elif profile.is_new():
 		profile.insert(ignore_permissions=True)
 
-	user_names = sorted(
+	for user_name in _maintenance_supervisor_user_names():
+		_apply_maintenance_supervisor_navigation(user_name)
+
+
+def reset_maintenance_supervisor_desktop_layouts():
+	"""Drop saved icon layouts so the role-scoped boot icon list becomes authoritative."""
+	if not frappe.db.table_exists("Desktop Layout"):
+		return
+
+	from frappe.desk.doctype.desktop_icon.desktop_icon import clear_desktop_icons_cache
+
+	for user_name in _maintenance_supervisor_user_names():
+		frappe.delete_doc_if_exists("Desktop Layout", user_name, force=True)
+		clear_desktop_icons_cache(user=user_name)
+
+
+def _maintenance_supervisor_user_names():
+	return sorted(
 		set(
 			frappe.get_all(
 				"Has Role",
@@ -766,8 +784,6 @@ def ensure_maintenance_supervisor_navigation():
 			)
 		)
 	)
-	for user_name in user_names:
-		_apply_maintenance_supervisor_navigation(user_name)
 
 
 def _maintenance_supervisor_blocked_modules():

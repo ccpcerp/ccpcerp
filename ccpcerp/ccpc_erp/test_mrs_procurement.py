@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import frappe
 
 from ccpcerp import setup
-from ccpcerp.ccpc_erp import mrs_permissions, mrs_procurement
+from ccpcerp.ccpc_erp import desktop_visibility, mrs_permissions, mrs_procurement
 
 
 class TestMRSProcurement(TestCase):
@@ -86,6 +86,63 @@ class TestMRSProcurement(TestCase):
 		setup_source = (Path(__file__).parents[1] / "setup.py").read_text()
 		after_migrate = setup_source.split("def after_migrate():", 1)[1].split("\ndef ", 1)[0]
 		self.assertIn("ensure_maintenance_supervisor_navigation()", after_migrate)
+		self.assertIn("reset_maintenance_supervisor_desktop_layouts()", after_migrate)
+
+	@patch.object(frappe, "get_roles", return_value=["Maintenance Supervisor"])
+	def test_maintenance_supervisor_boot_only_contains_ccpc_erp(self, _roles):
+		bootinfo = frappe._dict(
+			desktop_icons=[
+				frappe._dict(label="Organization"),
+				frappe._dict(label="Accounting"),
+				frappe._dict(label="CCPC ERP"),
+				frappe._dict(label="Stock"),
+			]
+		)
+		desktop_visibility.filter_boot_desktop_icons(bootinfo)
+		self.assertEqual(
+			[icon.label for icon in bootinfo.desktop_icons],
+			["CCPC ERP"],
+		)
+
+	@patch.object(frappe, "get_roles", return_value=["Maintenance Supervisor", "System Manager"])
+	def test_system_manager_desktop_is_not_filtered(self, _roles):
+		bootinfo = frappe._dict(
+			desktop_icons=[
+				frappe._dict(label="Accounting"),
+				frappe._dict(label="CCPC ERP"),
+			]
+		)
+		desktop_visibility.filter_boot_desktop_icons(bootinfo)
+		self.assertEqual(
+			[icon.label for icon in bootinfo.desktop_icons],
+			["Accounting", "CCPC ERP"],
+		)
+
+	def test_maintenance_supervisor_desktop_filter_is_registered(self):
+		hooks_source = (Path(__file__).parents[1] / "hooks.py").read_text()
+		self.assertIn(
+			'boot_session = "ccpcerp.ccpc_erp.desktop_visibility.filter_boot_desktop_icons"',
+			hooks_source,
+		)
+
+	@patch("frappe.desk.doctype.desktop_icon.desktop_icon.clear_desktop_icons_cache")
+	@patch.object(frappe, "delete_doc_if_exists")
+	@patch.object(setup, "_maintenance_supervisor_user_names", return_value=["maintenance@example.com"])
+	@patch.object(frappe.db, "table_exists", return_value=True)
+	def test_maintenance_supervisor_saved_desktop_layout_is_reset(
+		self,
+		_table_exists,
+		_user_names,
+		delete_doc_if_exists,
+		clear_desktop_icons_cache,
+	):
+		setup.reset_maintenance_supervisor_desktop_layouts()
+		delete_doc_if_exists.assert_called_once_with(
+			"Desktop Layout",
+			"maintenance@example.com",
+			force=True,
+		)
+		clear_desktop_icons_cache.assert_called_once_with(user="maintenance@example.com")
 
 	def test_purchasing_material_request_permissions(self):
 		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Material Request"]
