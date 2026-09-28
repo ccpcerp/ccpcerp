@@ -52,7 +52,8 @@ class TestMRSProcurement(TestCase):
 			client_script,
 		)
 
-	def test_plant_supervisor_roles_have_shared_base_authority(self):
+	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
+		self.assertEqual(setup.OPERATIONAL_SUPERVISOR_BASE_ROLE, "CCPC Operational Supervisor")
 		self.assertEqual(
 			setup.PLANT_SUPERVISOR_ROLES,
 			(
@@ -64,7 +65,7 @@ class TestMRSProcurement(TestCase):
 			),
 		)
 		self.assertEqual(
-			set(setup.OPERATIONAL_SUPERVISOR_ROLES),
+			set(setup.SUPERVISOR_ASSIGNMENT_ROLES),
 			{setup.MAINTENANCE_SUPERVISOR_ROLE, *setup.PLANT_SUPERVISOR_ROLES},
 		)
 		self.assertTrue(set(setup.OPERATIONAL_SUPERVISOR_ROLES).issubset(set(setup.OPERATIONAL_REQUESTOR_SOURCE_ROLES)))
@@ -72,7 +73,7 @@ class TestMRSProcurement(TestCase):
 		self.assertEqual(setup.SUPERVISOR_DEFAULT_WORKSPACE, "CCPC ERP")
 
 	@patch.object(frappe.db, "exists", return_value=True)
-	def test_plant_supervisor_assignment_adds_requestor_roles(self, _exists):
+	def test_plant_supervisor_assignment_adds_base_and_requestor_roles(self, _exists):
 		roles = [frappe._dict(role="Wet Mill Plant Supervisor")]
 		doc = MagicMock()
 		doc.name = "wetmill@example.com"
@@ -82,9 +83,24 @@ class TestMRSProcurement(TestCase):
 		self.assertEqual(
 			[call.args for call in doc.append.call_args_list],
 			[
+				("roles", {"role": setup.OPERATIONAL_SUPERVISOR_BASE_ROLE}),
 				("roles", {"role": setup.MRS_REQUESTOR_ROLE}),
 				("roles", {"role": setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE}),
 			],
+		)
+		self.assertEqual(doc.module_profile, setup.SUPERVISOR_MODULE_PROFILE)
+		self.assertEqual(doc.default_workspace, setup.SUPERVISOR_DEFAULT_WORKSPACE)
+
+	@patch.object(setup, "_ensure_custom_permission")
+	@patch.object(setup, "_ensure_role")
+	def test_common_supervisor_permissions_live_on_base_role(self, ensure_role, ensure_permission):
+		setup.ensure_maintenance_supervisor_permissions()
+		for role in setup.OPERATIONAL_SUPERVISOR_ROLES:
+			ensure_role.assert_any_call(role)
+		self.assertTrue(ensure_permission.call_args_list)
+		self.assertEqual(
+			{call.args[1] for call in ensure_permission.call_args_list},
+			{setup.OPERATIONAL_SUPERVISOR_BASE_ROLE},
 		)
 
 	def test_user_save_hook_keeps_supervisor_requestor_roles_in_sync(self):

@@ -17,7 +17,9 @@ PLANT_SUPERVISOR_ROLES = (
 	"QA/QC Supervisor",
 	"Feed Mill Plant Supervisor",
 )
-OPERATIONAL_SUPERVISOR_ROLES = (MAINTENANCE_SUPERVISOR_ROLE,) + PLANT_SUPERVISOR_ROLES
+OPERATIONAL_SUPERVISOR_BASE_ROLE = "CCPC Operational Supervisor"
+SUPERVISOR_ASSIGNMENT_ROLES = (MAINTENANCE_SUPERVISOR_ROLE,) + PLANT_SUPERVISOR_ROLES
+OPERATIONAL_SUPERVISOR_ROLES = (OPERATIONAL_SUPERVISOR_BASE_ROLE,) + SUPERVISOR_ASSIGNMENT_ROLES
 SUPERVISOR_MODULE_PROFILE = "CCPC Operational Supervisor"
 SUPERVISOR_DEFAULT_WORKSPACE = "CCPC ERP"
 SUPERVISOR_ALLOWED_MODULES = {"CCPC ERP"}
@@ -706,15 +708,15 @@ def _get_department_manager_personnel(department):
 
 
 def ensure_maintenance_supervisor_permissions():
-	"""Keep the shared operational-supervisor baseline aligned across all plant supervisor roles."""
+	"""Keep common supervisor authority on one visible base role."""
 	for role in OPERATIONAL_SUPERVISOR_ROLES:
 		_ensure_role(role)
 
-		for doctype in SUPERVISOR_REFERENCE_DOCTYPES:
-			_ensure_custom_permission(doctype, role, {"read"})
+	for doctype in SUPERVISOR_REFERENCE_DOCTYPES:
+		_ensure_custom_permission(doctype, OPERATIONAL_SUPERVISOR_BASE_ROLE, {"read"})
 
-		for doctype, rights in SUPERVISOR_PERMISSIONS.items():
-			_ensure_custom_permission(doctype, role, rights)
+	for doctype, rights in SUPERVISOR_PERMISSIONS.items():
+		_ensure_custom_permission(doctype, OPERATIONAL_SUPERVISOR_BASE_ROLE, rights)
 
 
 def ensure_maintenance_supervisor_navigation():
@@ -798,11 +800,24 @@ def _apply_maintenance_supervisor_navigation(user_name):
 
 
 def ensure_operational_requestor_roles_on_user(doc, method=None):
-	"""Add requestor roles whenever an operational source role is assigned to a System User."""
+	"""Keep supervisor base, requestor roles, and CCPC ERP navigation synchronized."""
 	if doc.name in {"Administrator", "Guest"} or doc.user_type != "System User":
 		return
 
 	current_roles = {row.role for row in doc.get("roles") or []}
+	if current_roles.intersection(SUPERVISOR_ASSIGNMENT_ROLES):
+		if (
+			OPERATIONAL_SUPERVISOR_BASE_ROLE not in current_roles
+			and frappe.db.exists("Role", OPERATIONAL_SUPERVISOR_BASE_ROLE)
+		):
+			doc.append("roles", {"role": OPERATIONAL_SUPERVISOR_BASE_ROLE})
+			current_roles.add(OPERATIONAL_SUPERVISOR_BASE_ROLE)
+
+	if current_roles.intersection(OPERATIONAL_SUPERVISOR_ROLES):
+		if frappe.db.exists("Module Profile", SUPERVISOR_MODULE_PROFILE):
+			doc.module_profile = SUPERVISOR_MODULE_PROFILE
+		doc.default_workspace = SUPERVISOR_DEFAULT_WORKSPACE
+
 	if not current_roles.intersection(OPERATIONAL_REQUESTOR_SOURCE_ROLES):
 		return
 
@@ -813,7 +828,8 @@ def ensure_operational_requestor_roles_on_user(doc, method=None):
 
 
 def ensure_operational_requestor_role_assignments():
-	"""Backfill requestor roles for existing users holding an operational source role."""
+	"""Backfill the base supervisor role and requestor roles for existing operational users."""
+	_ensure_role(OPERATIONAL_SUPERVISOR_BASE_ROLE)
 	_ensure_role(MRS_REQUESTOR_ROLE)
 	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
 
@@ -838,17 +854,33 @@ def ensure_operational_requestor_role_assignments():
 			continue
 
 		current_roles = {row.role for row in user.roles}
-		roles_to_add = [
+		roles_to_add = []
+		if (
+			current_roles.intersection(SUPERVISOR_ASSIGNMENT_ROLES)
+			and OPERATIONAL_SUPERVISOR_BASE_ROLE not in current_roles
+		):
+			roles_to_add.append(OPERATIONAL_SUPERVISOR_BASE_ROLE)
+
+		roles_to_add.extend(
 			role
 			for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE)
 			if role not in current_roles
-		]
-		if not roles_to_add:
-			continue
+		)
+		if roles_to_add:
+			user.append_roles(*roles_to_add)
 
-		user.append_roles(*roles_to_add)
-		user.save(ignore_permissions=True)
-		frappe.clear_cache(user=user_name)
+		changed = bool(roles_to_add)
+		if current_roles.intersection(OPERATIONAL_SUPERVISOR_ROLES):
+			if user.module_profile != SUPERVISOR_MODULE_PROFILE:
+				user.module_profile = SUPERVISOR_MODULE_PROFILE
+				changed = True
+			if user.default_workspace != SUPERVISOR_DEFAULT_WORKSPACE:
+				user.default_workspace = SUPERVISOR_DEFAULT_WORKSPACE
+				changed = True
+
+		if changed:
+			user.save(ignore_permissions=True)
+			frappe.clear_cache(user=user_name)
 
 
 def ensure_stockroom_personnel_permissions():
