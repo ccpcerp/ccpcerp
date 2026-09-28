@@ -1,7 +1,7 @@
 {
  "app": "ccpcerp",
  "charts": [],
- "content": "[{\"id\":\"ws001\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Withdrawal Slip\",\"col\":6}},{\"id\":\"ws002\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Equipment List\",\"col\":6}},{\"id\":\"ws005\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS\",\"col\":6}},{\"id\":\"ws003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Work Request\",\"col\":6}},{\"id\":\"ws004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Job Order\",\"col\":6}},{\"id\":\"ws006\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"PO for Approval\",\"col\":6}}]",
+ "content": "[{\"id\":\"ws001\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Withdrawal Slip\",\"col\":6}},{\"id\":\"ws002\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Equipment List\",\"col\":6}},{\"id\":\"ws005\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS\",\"col\":6}},{\"id\":\"ws003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Work Request\",\"col\":6}},{\"id\":\"ws004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Job Order\",\"col\":6}},{\"id\":\"ws006\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"PO for Approval\",\"col\":6}},{\"id\":\"ws007\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Department Manager Approval\",\"col\":6}},{\"id\":\"ws008\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Plant Manager Approval\",\"col\":6}},{\"id\":\"ws009\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Chief Operating Officer Approval\",\"col\":6}}]",
  "creation": "2026-09-18 17:30:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -13,7 +13,7 @@
  "is_hidden": 0,
  "label": "CCPC ERP",
  "links": [],
- "modified": "2026-09-26 17:05:00.000000",
+ "modified": "2026-09-28 08:00:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "CCPC ERP",
@@ -73,6 +73,33 @@
    "label": "PO for Approval",
    "link_to": "Purchase Order",
    "stats_filter": "{\"ccpc_approval_status\":[\"=\",\"Pending Finance Approval\"]}",
+   "type": "DocType"
+  },
+  {
+   "color": "#4F9D69",
+   "doc_view": "List",
+   "icon": "file-text",
+   "label": "MRS - For Department Manager Approval",
+   "link_to": "MRS",
+   "stats_filter": "{\"status\":[\"in\",[\"Pending Requesting Department Manager\",\"Pending Use Department Manager\"]]}",
+   "type": "DocType"
+  },
+  {
+   "color": "#E67E22",
+   "doc_view": "List",
+   "icon": "file-text",
+   "label": "MRS - For Plant Manager Approval",
+   "link_to": "MRS",
+   "stats_filter": "{\"status\":[\"=\",\"Pending Plant Manager\"]}",
+   "type": "DocType"
+  },
+  {
+   "color": "#761ACB",
+   "doc_view": "List",
+   "icon": "file-text",
+   "label": "MRS - For Chief Operating Officer Approval",
+   "link_to": "MRS",
+   "stats_filter": "{\"status\":[\"=\",\"Pending COO\"]}",
    "type": "DocType"
   }
  ],

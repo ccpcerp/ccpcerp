@@ -186,6 +186,41 @@ class TestMRSProcurement(TestCase):
 			{"ccpc_approval_status": ["=", "Pending Finance Approval"]},
 		)
 
+	def test_mrs_management_home_shortcuts_filter_pending_approvals(self):
+		app_root = Path(__file__).parents[1]
+		workspace = json.loads(
+			(app_root / "ccpc_erp/workspace/ccpc_erp/ccpc_erp.json").read_text()
+		)
+		content_labels = {
+			block["data"].get("shortcut_name")
+			for block in json.loads(workspace["content"])
+		}
+		expected = {
+			"MRS - For Department Manager Approval": {
+				"status": [
+					"in",
+					[
+						"Pending Requesting Department Manager",
+						"Pending Use Department Manager",
+					],
+				]
+			},
+			"MRS - For Plant Manager Approval": {
+				"status": ["=", "Pending Plant Manager"]
+			},
+			"MRS - For Chief Operating Officer Approval": {
+				"status": ["=", "Pending COO"]
+			},
+		}
+		self.assertTrue(set(expected).issubset(content_labels))
+		shortcuts = {row["label"]: row for row in workspace["shortcuts"]}
+		for label, filters in expected.items():
+			with self.subTest(label=label):
+				shortcut = shortcuts[label]
+				self.assertEqual(shortcut["link_to"], "MRS")
+				self.assertEqual(shortcut["doc_view"], "List")
+				self.assertEqual(json.loads(shortcut["stats_filter"]), filters)
+
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):
 			with self.subTest(doctype=doctype):
