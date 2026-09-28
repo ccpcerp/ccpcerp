@@ -259,6 +259,81 @@ class TestMRSProcurement(TestCase):
 		self.assertIn("get_workspace_approval_shortcut_visibility", client_script)
 		self.assertIn("shortcut-widget-box", client_script)
 
+	def test_stockroom_expected_deliveries_home_shortcut(self):
+		app_root = Path(__file__).parents[1]
+		workspace = json.loads(
+			(app_root / "ccpc_erp/workspace/ccpc_erp/ccpc_erp.json").read_text()
+		)
+		content_labels = {
+			block["data"].get("shortcut_name")
+			for block in json.loads(workspace["content"])
+		}
+		self.assertIn("MRS - Expected Deliveries", content_labels)
+		shortcut = next(
+			row for row in workspace["shortcuts"] if row["label"] == "MRS - Expected Deliveries"
+		)
+		self.assertEqual(shortcut["link_to"], "MRS")
+		self.assertEqual(shortcut["doc_view"], "List")
+		self.assertEqual(
+			json.loads(shortcut["stats_filter"]),
+			{
+				"procurement_status": [
+					"in",
+					[
+						mrs_procurement.PURCHASE_ORDER_SUBMITTED,
+						mrs_procurement.RECEIVING_IN_PROGRESS,
+						mrs_procurement.PARTIALLY_RECEIVED,
+					],
+				]
+			},
+		)
+
+	@patch.object(frappe, "get_roles", return_value=["Stockroom Personnel", "MRS Requestor"])
+	def test_stockroom_sees_expected_deliveries_shortcut(self, _roles):
+		self.assertEqual(
+			mrs_permissions._workspace_approval_shortcuts_for_user("stockroom@example.com"),
+			{"MRS - Expected Deliveries"},
+		)
+
+	@patch.object(frappe.db, "escape", side_effect=lambda value: f"'{value}'")
+	@patch.object(frappe, "get_roles", return_value=["Stockroom Personnel"])
+	def test_stockroom_mrs_query_includes_delivery_stages(self, _roles, _escape):
+		condition = mrs_permissions.get_mrs_permission_query_conditions("stockroom@example.com")
+		self.assertIn("`tabMRS`.`procurement_status` in", condition)
+		for status in mrs_permissions.STOCKROOM_DELIVERY_STATUSES:
+			self.assertIn(status, condition)
+		self.assertNotIn(mrs_procurement.FULLY_RECEIVED, condition)
+
+	@patch.object(frappe, "get_roles", return_value=["Stockroom Personnel"])
+	def test_stockroom_mrs_access_is_read_only_for_expected_deliveries(self, _roles):
+		doc = frappe._dict(
+			status="Ready for Purchasing",
+			procurement_status=mrs_procurement.PURCHASE_ORDER_SUBMITTED,
+			prepared_by="requestor@example.com",
+		)
+		self.assertTrue(
+			mrs_permissions.has_mrs_permission(
+				doc,
+				user="stockroom@example.com",
+				permission_type="read",
+			)
+		)
+		self.assertFalse(
+			mrs_permissions.has_mrs_permission(
+				doc,
+				user="stockroom@example.com",
+				permission_type="write",
+			)
+		)
+		doc.procurement_status = mrs_procurement.FULLY_RECEIVED
+		self.assertFalse(
+			mrs_permissions.has_mrs_permission(
+				doc,
+				user="stockroom@example.com",
+				permission_type="read",
+			)
+		)
+
 	def test_purchasing_accounting_permissions(self):
 		for doctype in ("Purchase Invoice", "Payment Entry"):
 			with self.subTest(doctype=doctype):

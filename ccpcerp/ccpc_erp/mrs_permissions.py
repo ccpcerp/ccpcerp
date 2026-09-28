@@ -9,8 +9,14 @@ WORKSPACE_APPROVAL_SHORTCUTS = {
 	"plant_manager": "MRS - For Plant Manager Approval",
 	"coo": "MRS - For Chief Operating Officer Approval",
 	"purchase_order_approver": "PO for Approval",
+	"stockroom_expected_deliveries": "MRS - Expected Deliveries",
 }
 ALL_WORKSPACE_APPROVAL_SHORTCUTS = set(WORKSPACE_APPROVAL_SHORTCUTS.values())
+STOCKROOM_DELIVERY_STATUSES = {
+	"Purchase Order Submitted",
+	"Receiving in Progress",
+	"Partially Received",
+}
 
 
 
@@ -33,6 +39,8 @@ def _workspace_approval_shortcuts_for_user(user):
 		allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["department_manager"])
 	if "Purchase Order Approver" in roles:
 		allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["purchase_order_approver"])
+	if "Stockroom Personnel" in roles:
+		allowed.add(WORKSPACE_APPROVAL_SHORTCUTS["stockroom_expected_deliveries"])
 
 	if "MRS Management Approver" in roles:
 		management_users = _management_user_map()
@@ -84,6 +92,12 @@ def get_mrs_permission_query_conditions(user=None):
 	if roles.intersection({"Purchasing Personnel", "Purchasing Supervisor", "Purchase Order Approver"}):
 		conditions.append("`tabMRS`.`status` = 'Ready for Purchasing'")
 
+	if "Stockroom Personnel" in roles:
+		delivery_statuses = ", ".join(
+			frappe.db.escape(status) for status in sorted(STOCKROOM_DELIVERY_STATUSES)
+		)
+		conditions.append(f"`tabMRS`.`procurement_status` in ({delivery_statuses})")
+
 	return " or ".join(f"({condition})" for condition in conditions) if conditions else "1=0"
 
 
@@ -110,6 +124,12 @@ def has_mrs_permission(doc, user=None, permission_type=None):
 	if "MRS GM Signature Recorder" in roles and doc.status in {"Pending General Manager Signature", "Ready for Purchasing"}:
 		return True
 	if roles.intersection({"Purchasing Personnel", "Purchasing Supervisor", "Purchase Order Approver"}) and doc.status == "Ready for Purchasing":
+		return True
+	if (
+		permission_type in (None, "read", "print", "report")
+		and "Stockroom Personnel" in roles
+		and doc.procurement_status in STOCKROOM_DELIVERY_STATUSES
+	):
 		return True
 	return False
 
