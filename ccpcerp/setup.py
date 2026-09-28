@@ -10,6 +10,9 @@ from frappe.utils import flt
 
 
 MAINTENANCE_SUPERVISOR_ROLE = "Maintenance Supervisor"
+MAINTENANCE_SUPERVISOR_MODULE_PROFILE = "CCPC Maintenance Supervisor"
+MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE = "CCPC ERP"
+MAINTENANCE_SUPERVISOR_ALLOWED_MODULES = {"CCPC ERP"}
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM")
 MAINTENANCE_SUPERVISOR_PERMISSIONS = {
 	"Material Request": {"read", "print", "report"},
@@ -387,6 +390,7 @@ WORKFLOW_TRANSITIONS = (
 
 def after_migrate():
 	ensure_maintenance_supervisor_permissions()
+	ensure_maintenance_supervisor_navigation()
 	ensure_mrs_foundation()
 	ensure_mrs_workflow()
 	backfill_mrs_display_names()
@@ -726,6 +730,71 @@ def ensure_maintenance_supervisor_permissions():
 			update_modified=False,
 		)
 		frappe.clear_cache(doctype=doctype)
+
+
+def ensure_maintenance_supervisor_navigation():
+	"""Limit Maintenance Supervisor Desk navigation to CCPC ERP and land there by default."""
+	blocked_modules = _maintenance_supervisor_blocked_modules()
+	profile = (
+		frappe.get_doc("Module Profile", MAINTENANCE_SUPERVISOR_MODULE_PROFILE)
+		if frappe.db.exists("Module Profile", MAINTENANCE_SUPERVISOR_MODULE_PROFILE)
+		else frappe.new_doc("Module Profile")
+	)
+	profile.module_profile_name = MAINTENANCE_SUPERVISOR_MODULE_PROFILE
+
+	current_blocked = {row.module for row in profile.get("block_modules") or []}
+	if current_blocked != set(blocked_modules):
+		profile.set("block_modules", [])
+		for module in blocked_modules:
+			profile.append("block_modules", {"module": module})
+		if profile.is_new():
+			profile.insert(ignore_permissions=True)
+		else:
+			profile.save(ignore_permissions=True)
+	elif profile.is_new():
+		profile.insert(ignore_permissions=True)
+
+	user_names = sorted(
+		set(
+			frappe.get_all(
+				"Has Role",
+				filters={
+					"role": MAINTENANCE_SUPERVISOR_ROLE,
+					"parenttype": "User",
+				},
+				pluck="parent",
+			)
+		)
+	)
+	for user_name in user_names:
+		_apply_maintenance_supervisor_navigation(user_name)
+
+
+def _maintenance_supervisor_blocked_modules():
+	all_modules = set(frappe.get_all("Module Def", pluck="module_name"))
+	return sorted(all_modules - MAINTENANCE_SUPERVISOR_ALLOWED_MODULES)
+
+
+def _apply_maintenance_supervisor_navigation(user_name):
+	if user_name in {"Administrator", "Guest"}:
+		return
+
+	user = frappe.get_doc("User", user_name)
+	if not user.enabled or user.user_type != "System User":
+		return
+	if any(row.role == "System Manager" for row in user.roles):
+		return
+
+	changed = False
+	if user.module_profile != MAINTENANCE_SUPERVISOR_MODULE_PROFILE:
+		user.module_profile = MAINTENANCE_SUPERVISOR_MODULE_PROFILE
+		changed = True
+	if user.default_workspace != MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE:
+		user.default_workspace = MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE
+		changed = True
+
+	if changed:
+		user.save(ignore_permissions=True)
 
 
 def ensure_stockroom_personnel_permissions():

@@ -4,7 +4,7 @@
 import json
 from pathlib import Path
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 
@@ -51,6 +51,41 @@ class TestMRSProcurement(TestCase):
 			'frm.remove_custom_button(__("Purchase Order"), __("Create"))',
 			client_script,
 		)
+
+	@patch.object(frappe, "get_all", return_value=["CCPC ERP", "Accounting", "Buying", "Stock"])
+	def test_maintenance_supervisor_module_profile_blocks_non_ccpc_modules(self, _get_all):
+		self.assertEqual(
+			setup._maintenance_supervisor_blocked_modules(),
+			["Accounting", "Buying", "Stock"],
+		)
+		self.assertEqual(setup.MAINTENANCE_SUPERVISOR_ALLOWED_MODULES, {"CCPC ERP"})
+
+	@patch.object(frappe, "get_doc")
+	def test_maintenance_supervisor_navigation_sets_ccpc_home(self, get_doc):
+		user = MagicMock()
+		user.enabled = 1
+		user.user_type = "System User"
+		user.roles = [frappe._dict(role=setup.MAINTENANCE_SUPERVISOR_ROLE)]
+		user.module_profile = None
+		user.default_workspace = None
+		get_doc.return_value = user
+
+		setup._apply_maintenance_supervisor_navigation("maintenance@example.com")
+
+		self.assertEqual(
+			user.module_profile,
+			setup.MAINTENANCE_SUPERVISOR_MODULE_PROFILE,
+		)
+		self.assertEqual(
+			user.default_workspace,
+			setup.MAINTENANCE_SUPERVISOR_DEFAULT_WORKSPACE,
+		)
+		user.save.assert_called_once_with(ignore_permissions=True)
+
+	def test_after_migrate_enforces_maintenance_supervisor_navigation(self):
+		setup_source = (Path(__file__).parents[1] / "setup.py").read_text()
+		after_migrate = setup_source.split("def after_migrate():", 1)[1].split("\ndef ", 1)[0]
+		self.assertIn("ensure_maintenance_supervisor_navigation()", after_migrate)
 
 	def test_purchasing_material_request_permissions(self):
 		rights = setup.PURCHASING_PERSONNEL_PERMISSIONS["Material Request"]
