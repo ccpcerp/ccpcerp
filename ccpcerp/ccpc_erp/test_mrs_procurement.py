@@ -310,6 +310,7 @@ class TestMRSProcurement(TestCase):
 			status="Ready for Purchasing",
 			procurement_status=mrs_procurement.PURCHASE_ORDER_SUBMITTED,
 			prepared_by="requestor@example.com",
+			is_new=lambda: False,
 		)
 		self.assertTrue(
 			mrs_permissions.has_mrs_permission(
