@@ -6,9 +6,10 @@ import frappe
 from ccpcerp import setup
 
 
-def filter_boot_desktop_icons(bootinfo):
+def filter_boot_desktop_icons(bootinfo, user=None):
 	"""Show only the CCPC ERP desktop tile to Maintenance Supervisor users."""
-	if not _is_restricted_maintenance_supervisor(frappe.session.user):
+	user = user or frappe.session.user
+	if not _is_restricted_maintenance_supervisor(user):
 		return
 
 	bootinfo.desktop_icons = [

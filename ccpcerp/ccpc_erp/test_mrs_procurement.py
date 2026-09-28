@@ -98,7 +98,10 @@ class TestMRSProcurement(TestCase):
 				frappe._dict(label="Stock"),
 			]
 		)
-		desktop_visibility.filter_boot_desktop_icons(bootinfo)
+		desktop_visibility.filter_boot_desktop_icons(
+			bootinfo,
+			user="maintenance@example.com",
+		)
 		self.assertEqual(
 			[icon.label for icon in bootinfo.desktop_icons],
 			["CCPC ERP"],
@@ -112,7 +115,10 @@ class TestMRSProcurement(TestCase):
 				frappe._dict(label="CCPC ERP"),
 			]
 		)
-		desktop_visibility.filter_boot_desktop_icons(bootinfo)
+		desktop_visibility.filter_boot_desktop_icons(
+			bootinfo,
+			user="system.manager@example.com",
+		)
 		self.assertEqual(
 			[icon.label for icon in bootinfo.desktop_icons],
 			["Accounting", "CCPC ERP"],
