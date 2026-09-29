@@ -138,6 +138,22 @@ class TestMRSProcurement(TestCase):
 		self.assertIn('<div class="sig-caption">{{ plant_print_label }}</div>', html)
 		self.assertIn('<div class="sig-caption">{{ coo_print_label }}</div>', html)
 		self.assertIn('<div class="sig-caption">{{ gm_print_label }}</div>', html)
+		self.assertIn(".filled-sig-line", html)
+		self.assertIn("height: 0.8mm", html)
+		self.assertIn("margin-top: 3mm !important", html)
+		self.assertIn('<div class="sig-row verified-row">', html)
+		self.assertIn(
+			'<div class="sig-name">{{ doc.prepared_by_name or "" }}</div>\n          <div class="filled-sig-line"></div>',
+			html,
+		)
+		self.assertIn(
+			'{{ doc.requesting_department_manager_name or "" }}',
+			html,
+		)
+		self.assertIn(
+			'<div class="sig-caption">{{ plant_print_label }}</div>',
+			html,
+		)
 
 	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
 		self.assertEqual(setup.OPERATIONAL_SUPERVISOR_BASE_ROLE, "CCPC Operational Supervisor")
