@@ -90,10 +90,26 @@ class TestMRSProcurement(TestCase):
 			"page-width: 215.9mm",
 			"page-height: 330.2mm",
 			"orientation: Portrait",
+			"margin-top: 6mm",
+			"margin-bottom: 6mm",
+			"margin-left: 6mm",
+			"margin-right: 6mm",
+			"width: 203.9mm",
+			"height: 318.2mm",
+			"height: 158.1mm",
 			"render_mrs_copy",
 			"CUT HERE",
 		):
 			self.assertIn(value, html)
+		self.assertEqual(
+			(
+				print_format["margin_top"],
+				print_format["margin_bottom"],
+				print_format["margin_left"],
+				print_format["margin_right"],
+			),
+			(6, 6, 6, 6),
+		)
 		self.assertEqual(html.count('render_mrs_copy("'), 2)
 		self.assertNotIn("page-size: A4", html)
 		self.assertNotIn("orientation: Landscape", html)
