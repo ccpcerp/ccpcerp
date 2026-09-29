@@ -52,6 +52,46 @@ class TestMRSProcurement(TestCase):
 			client_script,
 		)
 
+	def test_mrs_print_labels_are_configurable_without_changing_workflow(self):
+		settings = json.loads(
+			(Path(__file__).parents[1] / "ccpc_erp/doctype/ccpc_approval_settings/ccpc_approval_settings.json").read_text()
+		)
+		fields = {row["fieldname"]: row for row in settings["fields"]}
+		self.assertEqual(fields["plant_manager_print_label"]["default"], "JPR")
+		self.assertEqual(fields["coo_print_label"]["default"], "JGG")
+		self.assertEqual(fields["general_manager_print_label"]["default"], "Approved by:")
+		for fieldname in (
+			"plant_manager_print_label",
+			"coo_print_label",
+			"general_manager_print_label",
+		):
+			self.assertIn("Print-only", fields[fieldname]["description"])
+
+	def test_mrs_print_format_preserves_controlled_form_layout(self):
+		path = (
+			Path(__file__).parents[1]
+			/ "ccpc_erp/print_format/ccpc_material_requisition_slip/ccpc_material_requisition_slip.json"
+		)
+		print_format = json.loads(path.read_text())
+		self.assertEqual(print_format["doc_type"], "MRS")
+		self.assertEqual(print_format["name"], "CCPC Material Requisition Slip")
+		self.assertEqual(print_format["standard"], "Yes")
+		html = print_format["html"]
+		for value in (
+			"CCPC PUR-F-001",
+			"Revision No.00",
+			"Effectivity Date: August 25, 2023",
+			"requested_qty",
+			"plant_manager_print_label",
+			"coo_print_label",
+			"general_manager_print_label",
+			"Original Copy - Purchasing",
+			"Duplicate - Stockroom",
+			"orientation: Landscape",
+		):
+			self.assertIn(value, html)
+		self.assertNotIn('row.get_formatted("authorized_qty"', html)
+
 	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
 		self.assertEqual(setup.OPERATIONAL_SUPERVISOR_BASE_ROLE, "CCPC Operational Supervisor")
 		self.assertEqual(

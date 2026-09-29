@@ -6,9 +6,12 @@
  "field_order": [
   "management_section",
   "plant_manager",
+  "plant_manager_print_label",
   "coo",
+  "coo_print_label",
   "owner_section",
-  "owner_name"
+  "owner_name",
+  "general_manager_print_label"
  ],
  "fields": [
   {
@@ -37,11 +40,32 @@
    "fieldname": "owner_name",
    "fieldtype": "Data",
    "label": "General Manager Name"
+  },
+  {
+   "fieldname": "plant_manager_print_label",
+   "fieldtype": "Data",
+   "label": "Plant Manager Print Label",
+   "default": "JPR",
+   "description": "Print-only label used on the MRS form. This does not affect approval routing."
+  },
+  {
+   "fieldname": "coo_print_label",
+   "fieldtype": "Data",
+   "label": "COO Print Label",
+   "default": "JGG",
+   "description": "Print-only label used on the MRS form. This does not affect approval routing."
+  },
+  {
+   "fieldname": "general_manager_print_label",
+   "fieldtype": "Data",
+   "label": "General Manager Print Label",
+   "default": "Approved by:",
+   "description": "Print-only label used on the MRS form. This does not affect approval routing."
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-09-24 00:00:00.000000",
+ "modified": "2026-09-29 09:10:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "CCPC Approval Settings",
