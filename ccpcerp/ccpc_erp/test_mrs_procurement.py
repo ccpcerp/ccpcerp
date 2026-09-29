@@ -87,9 +87,16 @@ class TestMRSProcurement(TestCase):
 			"general_manager_print_label",
 			"Original Copy - Purchasing",
 			"Duplicate - Stockroom",
-			"orientation: Landscape",
+			"page-width: 215.9mm",
+			"page-height: 330.2mm",
+			"orientation: Portrait",
+			"render_mrs_copy",
+			"CUT HERE",
 		):
 			self.assertIn(value, html)
+		self.assertEqual(html.count('render_mrs_copy("'), 2)
+		self.assertNotIn("page-size: A4", html)
+		self.assertNotIn("orientation: Landscape", html)
 		self.assertNotIn('row.get_formatted("authorized_qty"', html)
 
 	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
