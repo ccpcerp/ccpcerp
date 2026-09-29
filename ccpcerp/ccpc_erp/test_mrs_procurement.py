@@ -97,6 +97,10 @@ class TestMRSProcurement(TestCase):
 			"width: 203.9mm",
 			"height: 318.2mm",
 			"height: 158.1mm",
+			"font-size: 8pt",
+			"font-size: 11pt",
+			"font-size: 7.6pt",
+			"font-size: 7.4pt",
 			"render_mrs_copy",
 			"CUT HERE",
 		):
@@ -113,6 +117,8 @@ class TestMRSProcurement(TestCase):
 		self.assertEqual(html.count('render_mrs_copy("'), 2)
 		self.assertNotIn("page-size: A4", html)
 		self.assertNotIn("orientation: Landscape", html)
+		self.assertNotIn("font-size: 8.2px", html)
+		self.assertNotIn("font-size: 7.4px", html)
 		self.assertNotIn('row.get_formatted("authorized_qty"', html)
 
 	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
