@@ -122,6 +122,22 @@ class TestMRSProcurement(TestCase):
 		self.assertNotIn("font-size: 8.2px", html)
 		self.assertNotIn("font-size: 7.4px", html)
 		self.assertNotIn('row.get_formatted("authorized_qty"', html)
+		self.assertLess(
+			html.index('{{ doc.use_department or "" }}'),
+			html.index('<div class="sig-caption">Dept. End User</div>'),
+		)
+		self.assertLess(
+			html.index('{{ doc.prepared_by_name or "" }}'),
+			html.index('<div class="sig-caption">Prepared by</div>'),
+		)
+		manager_name_index = html.index('{{ doc.requesting_department_manager_name or "" }}')
+		manager_line_index = html.index('<div class="sig-line"></div>', manager_name_index)
+		manager_caption_index = html.index('<div class="sig-caption">Department Manager</div>')
+		self.assertLess(manager_name_index, manager_line_index)
+		self.assertLess(manager_line_index, manager_caption_index)
+		self.assertIn('<div class="sig-caption">{{ plant_print_label }}</div>', html)
+		self.assertIn('<div class="sig-caption">{{ coo_print_label }}</div>', html)
+		self.assertIn('<div class="sig-caption">{{ gm_print_label }}</div>', html)
 
 	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
 		self.assertEqual(setup.OPERATIONAL_SUPERVISOR_BASE_ROLE, "CCPC Operational Supervisor")
