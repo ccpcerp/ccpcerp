@@ -151,15 +151,32 @@ class TestMRSProcurement(TestCase):
 			html.index('{{ doc.prepared_by_name or "" }}'),
 			html.index('<div class="sig-caption">Prepared by</div>'),
 		)
-		manager_name_index = html.index('{{ doc.requesting_department_manager_name or "" }}')
-		manager_line_index = html.index('<div class="sig-line"></div>', manager_name_index)
-		manager_caption_index = html.index('<div class="sig-caption">Department Manager</div>')
-		self.assertLess(manager_name_index, manager_line_index)
-		self.assertLess(manager_line_index, manager_caption_index)
+		self.assertIn(
+			"{% if doc.use_department_manager_name and doc.use_department != doc.requesting_department %}",
+			html,
+		)
+		self.assertIn(
+			'<div class="sig-caption">Requesting Department Manager</div>',
+			html,
+		)
+		self.assertIn(
+			'<div class="sig-name">{{ doc.use_department_manager_name }}</div>',
+			html,
+		)
+		self.assertIn(
+			'<div class="sig-caption">Use Department Manager</div>',
+			html,
+		)
+		self.assertIn(
+			'<div class="sig-caption">Department Manager</div>',
+			html,
+		)
 		self.assertIn('<div class="sig-caption">{{ plant_print_label }}</div>', html)
 		self.assertIn('<div class="sig-caption">{{ coo_print_label }}</div>', html)
 		self.assertIn('<div class="sig-caption">{{ gm_print_label }}</div>', html)
 		self.assertIn(".filled-sig-line", html)
+		self.assertIn(".manager-entry", html)
+		self.assertIn(".use-manager-entry", html)
 		self.assertIn("height: 0.8mm", html)
 		self.assertIn("margin-top: 3mm !important", html)
 		self.assertIn('<div class="sig-row verified-row">', html)
