@@ -35,6 +35,7 @@ MAINTENANCE_SUPERVISOR_ALLOWED_MODULES = SUPERVISOR_ALLOWED_MODULES
 MAINTENANCE_SUPERVISOR_REFERENCE_DOCTYPES = SUPERVISOR_REFERENCE_DOCTYPES
 MAINTENANCE_SUPERVISOR_PERMISSIONS = SUPERVISOR_PERMISSIONS
 STOCKROOM_PERSONNEL_ROLE = "Stockroom Personnel"
+STOCK_INQUIRY_ROLE = "CCPC Stock Inquiry User"
 STOCKROOM_PERSONNEL_REFERENCE_DOCTYPES = ("Company", "Department", "Warehouse", "Item", "UOM", "Cost Center")
 STOCKROOM_PERSONNEL_PERMISSIONS = {
 	"Stock Settings": {"read"},
@@ -888,7 +889,7 @@ def ensure_operational_requestor_roles_on_user(doc, method=None):
 	if not current_roles.intersection(OPERATIONAL_REQUESTOR_SOURCE_ROLES):
 		return
 
-	for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE):
+	for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE, STOCK_INQUIRY_ROLE):
 		if role not in current_roles and frappe.db.exists("Role", role):
 			doc.append("roles", {"role": role})
 			current_roles.add(role)
@@ -899,6 +900,7 @@ def ensure_operational_requestor_role_assignments():
 	_ensure_role(OPERATIONAL_SUPERVISOR_BASE_ROLE)
 	_ensure_role(MRS_REQUESTOR_ROLE)
 	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
+	_ensure_role(STOCK_INQUIRY_ROLE)
 
 	users = sorted(
 		set(
@@ -936,7 +938,7 @@ def ensure_operational_requestor_role_assignments():
 
 		roles_to_add.extend(
 			role
-			for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE)
+			for role in (MRS_REQUESTOR_ROLE, WITHDRAWAL_SLIP_REQUESTOR_ROLE, STOCK_INQUIRY_ROLE)
 			if role not in current_roles
 		)
 		if roles_to_add:

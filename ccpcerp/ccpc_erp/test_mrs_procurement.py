@@ -304,6 +304,7 @@ class TestMRSProcurement(TestCase):
 				("roles", {"role": setup.DEPARTMENT_MANAGER_ROLE}),
 				("roles", {"role": setup.MRS_REQUESTOR_ROLE}),
 				("roles", {"role": setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE}),
+				("roles", {"role": setup.STOCK_INQUIRY_ROLE}),
 			],
 		)
 		self.assertEqual(doc.module_profile, setup.SUPERVISOR_MODULE_PROFILE)
@@ -348,6 +349,7 @@ class TestMRSProcurement(TestCase):
 				("roles", {"role": setup.OPERATIONAL_SUPERVISOR_BASE_ROLE}),
 				("roles", {"role": setup.MRS_REQUESTOR_ROLE}),
 				("roles", {"role": setup.WITHDRAWAL_SLIP_REQUESTOR_ROLE}),
+				("roles", {"role": setup.STOCK_INQUIRY_ROLE}),
 			],
 		)
 		self.assertEqual(doc.module_profile, setup.SUPERVISOR_MODULE_PROFILE)

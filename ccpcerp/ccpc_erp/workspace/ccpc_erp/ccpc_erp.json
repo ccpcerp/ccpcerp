@@ -1,7 +1,7 @@
 {
  "app": "ccpcerp",
  "charts": [],
- "content": "[{\"id\":\"ws001\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Withdrawal Slip\",\"col\":6}},{\"id\":\"ws002\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Equipment List\",\"col\":6}},{\"id\":\"ws005\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS\",\"col\":6}},{\"id\":\"ws003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Work Request\",\"col\":6}},{\"id\":\"ws004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Job Order\",\"col\":6}},{\"id\":\"ws006\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"PO for Approval\",\"col\":6}},{\"id\":\"ws007\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Department Manager Approval\",\"col\":6}},{\"id\":\"ws008\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Plant Manager Approval\",\"col\":6}},{\"id\":\"ws009\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Chief Operating Officer Approval\",\"col\":6}},{\"id\":\"ws010\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - Expected Deliveries\",\"col\":6}}]",
+ "content": "[{\"id\":\"ws001\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Withdrawal Slip\",\"col\":6}},{\"id\":\"ws002\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Equipment List\",\"col\":6}},{\"id\":\"ws005\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS\",\"col\":6}},{\"id\":\"ws011\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Item Stock Inquiry\",\"col\":6}},{\"id\":\"ws003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Work Request\",\"col\":6}},{\"id\":\"ws004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Job Order\",\"col\":6}},{\"id\":\"ws006\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"PO for Approval\",\"col\":6}},{\"id\":\"ws007\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Department Manager Approval\",\"col\":6}},{\"id\":\"ws008\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Plant Manager Approval\",\"col\":6}},{\"id\":\"ws009\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - For Chief Operating Officer Approval\",\"col\":6}},{\"id\":\"ws010\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"MRS - Expected Deliveries\",\"col\":6}}]",
  "creation": "2026-09-18 17:30:00.000000",
  "custom_blocks": [],
  "docstatus": 0,
@@ -13,7 +13,7 @@
  "is_hidden": 0,
  "label": "CCPC ERP",
  "links": [],
- "modified": "2026-09-28 08:20:00.000000",
+ "modified": "2026-09-30 12:30:00.000000",
  "modified_by": "Administrator",
  "module": "CCPC ERP",
  "name": "CCPC ERP",
@@ -49,6 +49,14 @@
    "label": "MRS",
    "link_to": "MRS",
    "type": "DocType"
+  },
+  {
+   "color": "#2490EF",
+   "icon": "package",
+   "label": "Item Stock Inquiry",
+   "link_to": "CCPC Item Stock Inquiry",
+   "report_ref_doctype": "Item",
+   "type": "Report"
   },
   {
    "color": "#761ACB",
