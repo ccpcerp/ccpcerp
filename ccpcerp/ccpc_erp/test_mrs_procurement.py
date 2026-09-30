@@ -130,8 +130,8 @@ class TestMRSProcurement(TestCase):
 			'{{ render_mrs_copy("Original Copy - Purchasing", "mrs-full-page") }}',
 			html,
 		)
-		short_layout = html.split("{% else %}", 1)[0]
-		long_layout = html.split("{% else %}", 1)[1]
+		layout_switch = html.split("{% if doc.items|length <= 8 %}", 1)[1]
+		short_layout, long_layout = layout_switch.split("{% else %}", 1)
 		self.assertIn("CUT HERE", short_layout)
 		self.assertIn("Duplicate - Stockroom", short_layout)
 		self.assertNotIn("CUT HERE", long_layout)
