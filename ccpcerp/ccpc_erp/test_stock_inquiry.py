@@ -51,6 +51,15 @@ class TestCCPCItemStockInquiry(TestCase):
 		):
 			self.assertNotIn(forbidden, report_source)
 
+	def test_operational_users_cannot_extend_stock_inquiry_columns(self):
+		report_js = (
+			Path(__file__).parents[0]
+			/ "report/ccpc_item_stock_inquiry/ccpc_item_stock_inquiry.js"
+		).read_text()
+		self.assertIn('frappe.user.has_role("System Manager")', report_js)
+		for blocked_action in ("Edit", "Add Column", "Setup Auto Email"):
+			self.assertIn(blocked_action, report_js)
+
 	def test_report_is_restricted_to_stock_inquiry_role(self):
 		path = (
 			Path(__file__).parents[0]
