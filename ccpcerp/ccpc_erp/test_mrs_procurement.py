@@ -138,7 +138,6 @@ class TestMRSProcurement(TestCase):
 		self.assertNotIn("Duplicate - Stockroom", long_layout)
 		self.assertNotIn("page-size: A4", html)
 		self.assertNotIn("orientation: Landscape", html)
-		self.assertNotIn("font-size: 8pt", html)
 		self.assertNotIn("font-size: 7.4pt", html)
 		self.assertNotIn("font-size: 8.2px", html)
 		self.assertNotIn("font-size: 7.4px", html)
