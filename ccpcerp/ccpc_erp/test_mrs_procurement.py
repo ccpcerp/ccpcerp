@@ -103,6 +103,9 @@ class TestMRSProcurement(TestCase):
 			"font-size: 8.5pt",
 			"render_mrs_copy",
 			"CUT HERE",
+			"single-copy-page",
+			"mrs-full-page",
+			"{% if doc.items|length <= 8 %}",
 		):
 			self.assertIn(value, html)
 		self.assertEqual(
@@ -114,7 +117,25 @@ class TestMRSProcurement(TestCase):
 			),
 			(6, 6, 6, 6),
 		)
-		self.assertEqual(html.count('render_mrs_copy("'), 2)
+		self.assertEqual(html.count('render_mrs_copy("'), 3)
+		self.assertIn(
+			'{{ render_mrs_copy("Original Copy - Purchasing", "mrs-copy") }}',
+			html,
+		)
+		self.assertIn(
+			'{{ render_mrs_copy("Duplicate - Stockroom", "mrs-copy") }}',
+			html,
+		)
+		self.assertIn(
+			'{{ render_mrs_copy("Original Copy - Purchasing", "mrs-full-page") }}',
+			html,
+		)
+		short_layout = html.split("{% else %}", 1)[0]
+		long_layout = html.split("{% else %}", 1)[1]
+		self.assertIn("CUT HERE", short_layout)
+		self.assertIn("Duplicate - Stockroom", short_layout)
+		self.assertNotIn("CUT HERE", long_layout)
+		self.assertNotIn("Duplicate - Stockroom", long_layout)
 		self.assertNotIn("page-size: A4", html)
 		self.assertNotIn("orientation: Landscape", html)
 		self.assertNotIn("font-size: 8pt", html)
