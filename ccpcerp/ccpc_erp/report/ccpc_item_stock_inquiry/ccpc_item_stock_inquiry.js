@@ -1,4 +1,15 @@
 frappe.query_reports["CCPC Item Stock Inquiry"] = {
+	onload: (report) => {
+		if (!frappe.user.has_role("System Manager")) {
+			const blocked_actions = [__("Edit"), __("Add Column"), __("Setup Auto Email")];
+			report.page.menu.find(".dropdown-item").each(function () {
+				if (blocked_actions.includes($(this).text().trim())) {
+					$(this).remove();
+				}
+			});
+		}
+	},
+
 	filters: [
 		{
 			fieldname: "company",
