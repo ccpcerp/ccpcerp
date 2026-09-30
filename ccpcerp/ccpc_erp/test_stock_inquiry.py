@@ -57,7 +57,7 @@ class TestCCPCItemStockInquiry(TestCase):
 			/ "report/ccpc_item_stock_inquiry/ccpc_item_stock_inquiry.js"
 		).read_text()
 		self.assertIn('frappe.user.has_role("System Manager")', report_js)
-		for blocked_action in ("Edit", "Add Column", "Setup Auto Email"):
+		for blocked_action in ("Edit", "Add Column", "Setup Auto Email", "User Permissions"):
 			self.assertIn(blocked_action, report_js)
 
 	def test_report_is_restricted_to_stock_inquiry_role(self):
