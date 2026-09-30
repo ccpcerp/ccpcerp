@@ -193,6 +193,63 @@ class TestMRSProcurement(TestCase):
 			html,
 		)
 
+	def test_mrs_default_print_format_is_part_of_after_migrate(self):
+		setup_source = (Path(__file__).parents[1] / "setup.py").read_text()
+		after_migrate = setup_source.split("def after_migrate():", 1)[1].split("\ndef ", 1)[0]
+		self.assertIn("ensure_mrs_default_print_format()", after_migrate)
+		self.assertEqual(setup.MRS_DEFAULT_PRINT_FORMAT, "CCPC Material Requisition Slip")
+
+	@patch.object(frappe, "clear_cache")
+	@patch.object(frappe, "make_property_setter")
+	@patch.object(frappe.db, "get_value", return_value=None)
+	def test_mrs_default_print_format_creates_property_setter(
+		self,
+		_get_value,
+		make_property_setter,
+		clear_cache,
+	):
+		setup.ensure_mrs_default_print_format()
+
+		make_property_setter.assert_called_once_with(
+			{
+				"doctype_or_field": "DocType",
+				"doctype": "MRS",
+				"property": "default_print_format",
+				"value": "CCPC Material Requisition Slip",
+			}
+		)
+		clear_cache.assert_called_once_with(doctype="MRS")
+
+	@patch.object(frappe, "clear_cache")
+	@patch.object(frappe, "make_property_setter")
+	@patch.object(frappe.db, "set_value")
+	@patch.object(
+		frappe.db,
+		"get_value",
+		return_value=frappe._dict(name="MRS-default_print_format", value="Standard"),
+	)
+	def test_mrs_default_print_format_updates_existing_property_setter(
+		self,
+		_get_value,
+		set_value,
+		make_property_setter,
+		clear_cache,
+	):
+		setup.ensure_mrs_default_print_format()
+
+		make_property_setter.assert_not_called()
+		set_value.assert_called_once_with(
+			"Property Setter",
+			"MRS-default_print_format",
+			{
+				"value": "CCPC Material Requisition Slip",
+				"property_type": "Data",
+				"is_system_generated": 1,
+			},
+			update_modified=False,
+		)
+		clear_cache.assert_called_once_with(doctype="MRS")
+
 	def test_plant_supervisor_roles_have_visible_shared_base_authority(self):
 		self.assertEqual(setup.OPERATIONAL_SUPERVISOR_BASE_ROLE, "CCPC Operational Supervisor")
 		self.assertEqual(

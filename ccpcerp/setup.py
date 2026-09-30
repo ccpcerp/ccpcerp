@@ -107,6 +107,7 @@ MRS_REFERENCE_DOCTYPES = (
 	"Work Request",
 )
 MRS_WORKFLOW = "CCPC MRS Workflow"
+MRS_DEFAULT_PRINT_FORMAT = "CCPC Material Requisition Slip"
 
 MRS_WORKFLOW_STATES = (
 	("Draft", MRS_REQUESTOR_ROLE),
@@ -421,6 +422,7 @@ def after_migrate():
 	ensure_maintenance_supervisor_navigation()
 	reset_maintenance_supervisor_desktop_layouts()
 	ensure_mrs_foundation()
+	ensure_mrs_default_print_format()
 	ensure_operational_requestor_role_assignments()
 	ensure_mrs_workflow()
 	backfill_mrs_display_names()
@@ -440,6 +442,45 @@ def after_migrate():
 
 
 
+
+
+def ensure_mrs_default_print_format():
+	"""Make the controlled CCPC MRS form the DocType default without duplicating Property Setters."""
+	filters = {
+		"doctype_or_field": "DocType",
+		"doc_type": "MRS",
+		"property": "default_print_format",
+	}
+	property_setter = frappe.db.get_value(
+		"Property Setter",
+		filters,
+		["name", "value"],
+		as_dict=True,
+	)
+
+	if property_setter:
+		if property_setter.value != MRS_DEFAULT_PRINT_FORMAT:
+			frappe.db.set_value(
+				"Property Setter",
+				property_setter.name,
+				{
+					"value": MRS_DEFAULT_PRINT_FORMAT,
+					"property_type": "Data",
+					"is_system_generated": 1,
+				},
+				update_modified=False,
+			)
+	else:
+		frappe.make_property_setter(
+			{
+				"doctype_or_field": "DocType",
+				"doctype": "MRS",
+				"property": "default_print_format",
+				"value": MRS_DEFAULT_PRINT_FORMAT,
+			}
+		)
+
+	frappe.clear_cache(doctype="MRS")
 
 
 def ensure_mrs_foundation():
