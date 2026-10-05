@@ -1,0 +1,65 @@
+{
+ "app": "ccpcerp",
+ "charts": [],
+ "content": "[{\"id\":\"ws001\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Withdrawal Slip\",\"col\":6}},{\"id\":\"ws002\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Equipment List\",\"col\":6}},{\"id\":\"ws003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Work Request\",\"col\":6}},{\"id\":\"ws004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Job Order\",\"col\":6}}]",
+ "creation": "2026-09-18 17:30:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "wrench",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "CCPC ERP",
+ "links": [],
+ "modified": "2026-09-18 17:30:00.000000",
+ "modified_by": "Administrator",
+ "module": "CCPC ERP",
+ "name": "CCPC ERP",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [],
+ "sequence_id": 1,
+ "shortcuts": [
+  {
+   "color": "#449CF0",
+   "doc_view": "List",
+   "icon": "clipboard-list",
+   "label": "Withdrawal Slip",
+   "link_to": "Withdrawal Slip",
+   "type": "DocType"
+  },
+  {
+   "color": "#2490EF",
+   "doc_view": "List",
+   "icon": "wrench",
+   "label": "Equipment List",
+   "link_to": "Equipment Registry",
+   "type": "DocType"
+  },
+  {
+   "color": "#761ACB",
+   "doc_view": "List",
+   "icon": "file-text",
+   "label": "Work Request",
+   "link_to": "Work Request",
+   "type": "DocType"
+  },
+  {
+   "color": "#EC864B",
+   "doc_view": "List",
+   "icon": "briefcase",
+   "label": "Job Order",
+   "link_to": "Job Order",
+   "type": "DocType"
+  }
+ ],
+ "standard": 1,
+ "title": "CCPC ERP",
+ "type": "Workspace"
+}
