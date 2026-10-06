@@ -40,6 +40,9 @@ doctype_js = {
 }
 
 doc_events = {
+	"Department": {
+		"validate": "ccpcerp.ccpc_erp.doctype.ccpc_personnel.ccpc_personnel.validate_department_manager_company",
+	},
 	"User": {
 		"before_save": "ccpcerp.setup.ensure_operational_requestor_roles_on_user",
 	},
