@@ -10,9 +10,34 @@ from ccpcerp.ccpc_erp.doctype.ccpc_personnel.ccpc_personnel import (
 	CCPCPersonnel,
 	validate_department_manager_company,
 )
+from ccpcerp.setup import backfill_ccpc_personnel_company
 
 
 class TestCCPCPersonnel(TestCase):
+	@patch("ccpcerp.setup.frappe.db.set_value")
+	@patch("ccpcerp.setup.frappe.db.get_value", return_value="Ricor Mills Corporation")
+	@patch(
+		"ccpcerp.setup.frappe.get_all",
+		return_value=[frappe._dict(name="pam1ogn2u3", department="Glucose Plant - RMC")],
+	)
+	@patch("ccpcerp.setup.frappe.db.table_exists", return_value=True)
+	def test_backfill_company_from_home_department(
+		self, table_exists, get_all, get_value, set_value
+	):
+		backfill_ccpc_personnel_company()
+		get_all.assert_called_once_with(
+			"CCPC Personnel",
+			filters={"company": ["is", "not set"], "department": ["is", "set"]},
+			fields=["name", "department"],
+		)
+		set_value.assert_called_once_with(
+			"CCPC Personnel",
+			"pam1ogn2u3",
+			"company",
+			"Ricor Mills Corporation",
+			update_modified=False,
+		)
+
 	@patch(
 		"ccpcerp.ccpc_erp.doctype.ccpc_personnel.ccpc_personnel.frappe.get_cached_value",
 		return_value="Ricor Mills Corporation",
