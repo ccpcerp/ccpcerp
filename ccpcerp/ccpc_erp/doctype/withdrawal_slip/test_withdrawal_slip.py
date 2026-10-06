@@ -400,6 +400,7 @@ class TestWithdrawalSlip(TestCase):
 		doc.company = None
 		doc.equipment = None
 		doc.department = "Production - CCPC"
+		doc.work_for_department = None
 		doc.physical_location = None
 		doc.is_new.return_value = True
 		WithdrawalSlip._apply_job_order_defaults(doc)
