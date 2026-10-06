@@ -75,9 +75,11 @@ class WithdrawalSlip(Document):
 			_("Withdrawal Slip"),
 			require_eligible=True,
 		)
+		self._validate_section_requirement(self.department, self.section, _("Requesting Section"), "department", "section")
 		self._validate_section(self.section, self.department, _("Requesting Section"))
 		if self.work_for_department:
 			validate_department_company(self.work_for_department, frappe.get_cached_value("Department", self.work_for_department, "company"), _("Withdrawal Slip Work For"), require_eligible=True)
+		self._validate_section_requirement(self.work_for_department, self.work_for_section, _("Work For Section"), "work_for_department", "work_for_section")
 		self._validate_section(self.work_for_section, self.work_for_department, _("Work For Section"))
 		self._validate_source_warehouse()
 		self._validate_requested_quantities()
@@ -98,6 +100,21 @@ class WithdrawalSlip(Document):
 		equipment_department = frappe.get_cached_value("Equipment Registry", self.equipment, "department")
 		if equipment_department and not self.work_for_department:
 			self.work_for_department = equipment_department
+
+	def _validate_section_requirement(self, department, section, label, department_field, section_field):
+		if not department or section:
+			return
+		before = None if self.is_new() else self.get_doc_before_save()
+		context_changed = (
+			self.is_new()
+			or not before
+			or before.get(department_field) != department
+			or before.get(section_field) != section
+		)
+		if not context_changed:
+			return
+		if frappe.db.exists("CCPC Section", {"department": department, "disabled": 0}):
+			frappe.throw(_("{0} is required for Department {1}.").format(label, frappe.bold(department)))
 
 	def _validate_section(self, section, department, label):
 		if not section:
