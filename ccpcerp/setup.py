@@ -417,7 +417,66 @@ WORKFLOW_TRANSITIONS = (
 )
 
 
+WITHDRAWAL_SECTION_STRUCTURE = {
+	"Cagayan Corn Products Corporation": {
+		"Maintenance Department": (
+			"Electrical Section", "Mechanical Section", "Instrumentation Section",
+			"Preventive Maintenance Section", "Civil Section", "Welder",
+		),
+		"Wet Mill Plant": (
+			"Corn Receiving Section", "Corn Loading Section", "Steeping Section",
+			"Milling Section", "Refining Section", "Feeds Drying Section",
+			"Starch Drying Section", "Evaporator Section",
+		),
+		"Cogen Plant Department": (
+			"Fuel Handling", "Vicker Boiler", "Rollce Boiler", "Water Treatment Plant", "Cogen Plant",
+		),
+		"Dry Mill Plant": ("Cimbria Corn Receiving Section", "Dry Mill Plant 1", "Dry Mill Plant 2"),
+		"Admin Department": (),
+		"Logistics Department": (),
+		"QA/QC Department": ("QA", "QC"),
+		"Feed Mill Plant": (),
+	},
+	"Ricor Mills Corporation": {
+		"Oil Refinery Plant": ("Oil Refinery Plant 1", "Oil Refinery Plant 2"),
+		"Glucose Plant": (
+			"Liquefaction Section", "Saccharification Section", "Filtration Section",
+			"Decolorization Section", "Ion Exchange Section", "Evaporation Section",
+			"Storage Section", "Chemical Process Section", "Utility Process Section",
+		),
+	},
+}
+
+
+def ensure_withdrawal_section_foundation():
+	"""Seed the confirmed CCPC/RMC department-section structure without restricting other companies."""
+	if not frappe.db.table_exists("CCPC Section"):
+		return
+	for company, departments in WITHDRAWAL_SECTION_STRUCTURE.items():
+		if not frappe.db.exists("Company", company):
+			continue
+		for department_name, sections in departments.items():
+			department = frappe.db.get_value(
+				"Department", {"company": company, "department_name": department_name}, "name"
+			)
+			if not department:
+				doc = frappe.new_doc("Department")
+				doc.department_name = department_name
+				doc.company = company
+				doc.is_group = 0
+				doc.insert(ignore_permissions=True)
+				department = doc.name
+			for section_name in sections:
+				if frappe.db.exists("CCPC Section", {"department": department, "section_name": section_name}):
+					continue
+				section = frappe.new_doc("CCPC Section")
+				section.section_name = section_name
+				section.department = department
+				section.insert(ignore_permissions=True)
+
+
 def after_migrate():
+	ensure_withdrawal_section_foundation()
 	ensure_maintenance_supervisor_permissions()
 	ensure_department_manager_roles()
 	ensure_maintenance_supervisor_navigation()
