@@ -63,8 +63,6 @@ def make_material_issue(withdrawal_slip):
 
 	if stock_entry.meta.has_field("equipment"):
 		stock_entry.equipment = slip.equipment
-	if stock_entry.meta.has_field("department"):
-		stock_entry.department = slip.department
 
 	detail_meta = frappe.get_meta("Stock Entry Detail")
 	for row in slip.get("items") or []:
@@ -93,8 +91,6 @@ def make_material_issue(withdrawal_slip):
 		}
 		if detail_meta.has_field("equipment"):
 			values["equipment"] = slip.equipment
-		if detail_meta.has_field("department"):
-			values["department"] = slip.department
 		stock_entry.append("items", values)
 
 	if not stock_entry.items:
