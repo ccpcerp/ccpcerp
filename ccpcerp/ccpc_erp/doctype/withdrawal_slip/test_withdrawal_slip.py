@@ -776,3 +776,45 @@ class TestWithdrawalSlip(TestCase):
 		self.assertEqual(parent_update["status"], "Fully Issued")
 		self.assertEqual(parent_update["issued_by"], "stockroom@personnel1.com")
 		self.assertEqual(parent_update["issued_by_name"], "Stock Person")
+
+
+	def test_withdrawal_slip_has_separate_issuing_and_requesting_company(self):
+		meta = json.loads(Path(__file__).with_name("withdrawal_slip.json").read_text())
+		fields = {row["fieldname"]: row for row in meta["fields"]}
+		self.assertEqual(fields["company"]["label"], "Issuing Company")
+		self.assertEqual(fields["requesting_company"]["options"], "Company")
+		self.assertEqual(fields["department"]["label"], "Requesting Department")
+		self.assertEqual(fields["section"]["options"], "CCPC Section")
+		self.assertEqual(fields["work_for_section"]["options"], "CCPC Section")
+
+	def test_confirmed_company_section_structure_is_seeded(self):
+		structure = app_setup.WITHDRAWAL_SECTION_STRUCTURE
+		self.assertIn("Cagayan Corn Products Corporation", structure)
+		self.assertIn("Ricor Mills Corporation", structure)
+		self.assertIn(
+			"Starch Drying Section",
+			structure["Cagayan Corn Products Corporation"]["Wet Mill Plant"],
+		)
+		self.assertIn(
+			"Liquefaction Section",
+			structure["Ricor Mills Corporation"]["Glucose Plant"],
+		)
+
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.db.exists")
+	@patch(
+		"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.throw",
+		side_effect=frappe.ValidationError,
+	)
+	def test_configured_department_requires_section_on_new_slip(self, throw, exists):
+		exists.return_value = True
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.is_new.return_value = True
+		with self.assertRaises(frappe.ValidationError):
+			WithdrawalSlip._validate_section_requirement(
+				doc,
+				"Wet Mill Plant - CCPC",
+				None,
+				"Requesting Section",
+				"department",
+				"section",
+			)
