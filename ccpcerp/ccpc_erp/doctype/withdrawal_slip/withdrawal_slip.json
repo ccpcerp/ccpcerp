@@ -12,12 +12,17 @@
   "approving_supervisor",
   "job_order",
   "charge_location_section",
-  "equipment",
-  "equipment_description",
-  "section",
+  "company",
   "source_warehouse",
   "column_break_equipment",
+  "requesting_company",
   "department",
+  "section",
+  "work_for_section_break",
+  "work_for_department",
+  "work_for_section",
+  "equipment",
+  "equipment_description",
   "physical_location",
   "purpose_section",
   "purpose",
@@ -30,8 +35,7 @@
   "issued_by",
   "issued_on",
   "status",
-  "naming_series",
-  "company"
+  "naming_series"
  ],
  "fields": [
   {
@@ -85,16 +89,17 @@
    "fieldtype": "Link",
    "label": "Source Warehouse",
    "options": "Warehouse",
-   "read_only": 1,
+   "read_only": 0,
    "reqd": 1
   },
   {
    "fieldname": "company",
    "fieldtype": "Link",
-   "hidden": 1,
-   "label": "Company",
+   "hidden": 0,
+   "label": "Issuing Company",
    "options": "Company",
-   "reqd": 1
+   "reqd": 1,
+   "read_only": 0
   },
   {
    "fieldname": "charge_location_section",
@@ -120,14 +125,15 @@
   {
    "fieldname": "department",
    "fieldtype": "Link",
-   "label": "Department",
+   "label": "Requesting Department",
    "options": "Department",
    "reqd": 1
   },
   {
    "fieldname": "section",
-   "fieldtype": "Data",
-   "label": "Section"
+   "fieldtype": "Link",
+   "label": "Requesting Section",
+   "options": "CCPC Section"
   },
   {
    "fieldname": "physical_location",
@@ -200,6 +206,30 @@
    "fieldtype": "Datetime",
    "label": "Issued On",
    "read_only": 1
+  },
+  {
+   "fieldname": "requesting_company",
+   "fieldtype": "Link",
+   "label": "Requesting Company",
+   "options": "Company",
+   "reqd": 1
+  },
+  {
+   "fieldname": "work_for_section_break",
+   "fieldtype": "Section Break",
+   "label": "Work / Usage Area"
+  },
+  {
+   "fieldname": "work_for_department",
+   "fieldtype": "Link",
+   "label": "Work For Department",
+   "options": "Department"
+  },
+  {
+   "fieldname": "work_for_section",
+   "fieldtype": "Link",
+   "label": "Work For Section",
+   "options": "CCPC Section"
   }
  ],
  "grid_page_length": 50,
