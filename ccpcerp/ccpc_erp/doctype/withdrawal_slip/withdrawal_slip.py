@@ -9,7 +9,6 @@ from frappe.model.document import Document
 from frappe.utils import cstr, flt, nowdate
 
 from ccpcerp.ccpc_erp.equipment_costing import (
-	set_department_from_equipment,
 	validate_department_company,
 	validate_equipment,
 )
@@ -20,8 +19,11 @@ REQUEST_INTENT_HEADER_FIELDS = (
 	"required_by",
 	"job_order",
 	"equipment",
+	"requesting_company",
 	"department",
 	"section",
+	"work_for_department",
+	"work_for_section",
 	"physical_location",
 	"purpose",
 	"company",
@@ -45,9 +47,10 @@ class WithdrawalSlip(Document):
 			self.required_by = nowdate()
 
 		self._set_company_default()
+		self._set_requesting_company_default()
 		self._apply_job_order_defaults()
 		self._set_company_from_equipment()
-		set_department_from_equipment(self)
+		self._set_work_for_department_from_equipment()
 		self._set_equipment_details()
 		self._set_physical_location_from_equipment()
 		self._set_source_warehouse_default()
@@ -68,10 +71,14 @@ class WithdrawalSlip(Document):
 		)
 		validate_department_company(
 			self.department,
-			self.company,
+			self.requesting_company,
 			_("Withdrawal Slip"),
 			require_eligible=True,
 		)
+		self._validate_section(self.section, self.department, _("Requesting Section"))
+		if self.work_for_department:
+			validate_department_company(self.work_for_department, frappe.get_cached_value("Department", self.work_for_department, "company"), _("Withdrawal Slip Work For"), require_eligible=True)
+		self._validate_section(self.work_for_section, self.work_for_department, _("Work For Section"))
 		self._validate_source_warehouse()
 		self._validate_requested_quantities()
 		self._validate_issue_tracking()
@@ -80,6 +87,32 @@ class WithdrawalSlip(Document):
 		if self.company:
 			return
 		self.company = _get_default_company()
+
+	def _set_requesting_company_default(self):
+		if not self.requesting_company:
+			self.requesting_company = self.company
+
+	def _set_work_for_department_from_equipment(self):
+		if not self.equipment:
+			return
+		equipment_department = frappe.get_cached_value("Equipment Registry", self.equipment, "department")
+		if equipment_department and not self.work_for_department:
+			self.work_for_department = equipment_department
+
+	def _validate_section(self, section, department, label):
+		if not section:
+			return
+		values = frappe.get_cached_value(
+			"CCPC Section", section, ["department", "company", "disabled"], as_dict=True
+		)
+		if not values or values.disabled:
+			frappe.throw(_("{0} {1} is invalid or disabled.").format(label, frappe.bold(section)))
+		if not department or values.department != department:
+			frappe.throw(
+				_("{0} {1} does not belong to Department {2}.").format(
+					label, frappe.bold(section), frappe.bold(department or "")
+				)
+			)
 
 	def _apply_job_order_defaults(self):
 		if not self.job_order:
@@ -101,8 +134,8 @@ class WithdrawalSlip(Document):
 		if context.company:
 			self.company = context.company
 		self.equipment = context.equipment or None
-		if not self.department and context.department:
-			self.department = context.department
+		if not self.work_for_department and context.department:
+			self.work_for_department = context.department
 		if not self.equipment and not self.physical_location and context.asset_location:
 			self.physical_location = context.asset_location
 
@@ -456,6 +489,7 @@ def get_form_defaults():
 	company = frappe.defaults.get_user_default("Company")
 	return {
 		"company": company,
+		"requesting_company": company,
 		"source_warehouse": _get_default_source_warehouse(company),
 	}
 
