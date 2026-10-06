@@ -15,6 +15,7 @@ from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import (
 )
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import (
 	_require_stockroom_user,
+	make_material_issue,
 	sync_withdrawal_slip_issue_status_for_name,
 	validate_withdrawal_slip_stock_entry,
 )
@@ -236,6 +237,58 @@ class TestWithdrawalSlip(TestCase):
 		doc = MagicMock(spec=WithdrawalSlip)
 		before = frappe._dict(status="Stockroom Review")
 		self.assertTrue(WithdrawalSlip._can_edit_stockroom(doc, before))
+
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_submitted_qty_by_slip_item", return_value={})
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._require_stockroom_user")
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_meta")
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.new_doc")
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_all", return_value=[])
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_doc")
+	def test_intercompany_material_issue_does_not_copy_requesting_department(
+		self, get_doc, get_all, new_doc, get_meta, require_stockroom, submitted_qty
+	):
+		slip = MagicMock()
+		slip.name = "WS-INTERCOMPANY"
+		slip.status = "Stockroom Review"
+		slip.received_by = "RMC Receiver"
+		slip.company = "Cagayan Corn Products Corporation"
+		slip.requesting_company = "Ricor Mills Corporation"
+		slip.department = "Maintenance Department - RMC"
+		slip.source_warehouse = "Warehouse 1 - CCPC"
+		slip.equipment = None
+		slip.get.return_value = [
+			frappe._dict(
+				idx=1,
+				name="WSI-1",
+				item_code="ITEM-00001",
+				requested_qty=1,
+				issue_qty=1,
+				uom="Nos",
+				stockroom_remarks="",
+			)
+		]
+		get_doc.return_value = slip
+
+		stock_entry = MagicMock()
+		stock_entry.name = "MAT-STE-0001"
+		stock_entry.meta.has_field.return_value = True
+		stock_entry.items = []
+		stock_entry.append.side_effect = lambda fieldname, values: stock_entry.items.append(
+			frappe._dict(values)
+		)
+		new_doc.return_value = stock_entry
+
+		detail_meta = MagicMock()
+		detail_meta.has_field.return_value = True
+		get_meta.return_value = detail_meta
+
+		result = make_material_issue(slip.name)
+
+		self.assertEqual(stock_entry.company, "Cagayan Corn Products Corporation")
+		self.assertNotEqual(stock_entry.department, "Maintenance Department - RMC")
+		self.assertNotIn("department", stock_entry.items[0])
+		self.assertEqual(result, {"name": "MAT-STE-0001", "existing": 0})
+
 
 	@patch(
 		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_roles",
