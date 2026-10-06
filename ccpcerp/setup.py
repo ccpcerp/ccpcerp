@@ -553,7 +553,7 @@ def ensure_mrs_foundation():
 			"Department": [
 				{
 					"fieldname": "ccpc_department_manager",
-					"label": "CCPC Department Manager",
+					"label": "Department Manager",
 					"fieldtype": "Link",
 					"options": "CCPC Personnel",
 					"insert_after": "parent_department",
