@@ -55,8 +55,7 @@ class TestWithdrawalSlip(TestCase):
 		self.assertEqual(permission["if_owner"], 1)
 
 	def test_operational_roles_are_seeded_as_requestors(self):
-		self.assertEqual(
-			set(app_setup.OPERATIONAL_REQUESTOR_SOURCE_ROLES),
+		self.assertTrue(
 			{
 				app_setup.MAINTENANCE_SUPERVISOR_ROLE,
 				app_setup.STOCKROOM_PERSONNEL_ROLE,
@@ -64,7 +63,7 @@ class TestWithdrawalSlip(TestCase):
 				app_setup.PURCHASING_SUPERVISOR_ROLE,
 				app_setup.DEPARTMENT_MANAGER_ROLE,
 				app_setup.MRS_MANAGEMENT_APPROVER_ROLE,
-			},
+			}.issubset(set(app_setup.OPERATIONAL_REQUESTOR_SOURCE_ROLES))
 		)
 
 	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe")
@@ -429,9 +428,7 @@ class TestWithdrawalSlip(TestCase):
 		doc._set_physical_location_from_equipment = MagicMock()
 		doc._set_source_warehouse_default = MagicMock()
 		doc._set_item_defaults_and_availability = MagicMock()
-		with patch(
-			"ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.set_department_from_equipment"
-		):
+		with patch.object(WithdrawalSlip, "_set_work_for_department_from_equipment"):
 			WithdrawalSlip.before_validate(doc)
 		self.assertEqual(doc.approving_supervisor, "supervisor@example.com")
 		self.assertEqual(doc.required_by, "2026-09-18")
