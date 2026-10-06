@@ -475,8 +475,30 @@ def ensure_withdrawal_section_foundation():
 				section.insert(ignore_permissions=True)
 
 
+def backfill_ccpc_personnel_company():
+	"""Backfill Company from each personnel record's home Department when available."""
+	if not frappe.db.table_exists("CCPC Personnel"):
+		return
+
+	for row in frappe.get_all(
+		"CCPC Personnel",
+		filters={"company": ["is", "not set"], "department": ["is", "set"]},
+		fields=["name", "department"],
+	):
+		company = frappe.db.get_value("Department", row.department, "company")
+		if company:
+			frappe.db.set_value(
+				"CCPC Personnel",
+				row.name,
+				"company",
+				company,
+				update_modified=False,
+			)
+
+
 def after_migrate():
 	ensure_withdrawal_section_foundation()
+	backfill_ccpc_personnel_company()
 	ensure_maintenance_supervisor_permissions()
 	ensure_department_manager_roles()
 	ensure_maintenance_supervisor_navigation()
