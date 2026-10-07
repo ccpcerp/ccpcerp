@@ -8,6 +8,7 @@
   "personnel_name",
   "user",
   "department",
+  "section",
   "company",
   "designation",
   "active"
@@ -34,6 +35,12 @@
    "label": "Department",
    "options": "Department",
    "reqd": 1
+  },
+  {
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "CCPC Section"
   },
   {
    "fieldname": "company",
