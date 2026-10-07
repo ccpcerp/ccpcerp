@@ -179,6 +179,7 @@ async function get_equipment_context(equipment) {
 		await frappe.db.get_value("Equipment Registry", equipment, [
 			"company",
 			"department",
+			"section",
 			"equipment_description",
 			"physical_location",
 			"status",
@@ -196,6 +197,7 @@ async function initialize_equipment_defaults(frm) {
 	frm[withdrawal_equipment_defaults_key] = {
 		equipment: frm.doc.equipment,
 		department: context.department,
+		section: context.section,
 		physical_location: context.physical_location,
 	};
 }
@@ -215,17 +217,19 @@ async function default_from_equipment(frm) {
 		frappe.msgprint(__("Equipment must be Active for a new Withdrawal Slip."));
 		return;
 	}
-	if (frm.doc.company && context.company !== frm.doc.company) {
-		frappe.msgprint(__("Equipment must belong to the Withdrawal Slip Company."));
+	if (frm.doc.requesting_company && context.company !== frm.doc.requesting_company) {
+		frappe.msgprint(__("Equipment must belong to the Requesting Company."));
 		return;
 	}
 
 	const values = {
 		equipment_description: context.equipment_description || "",
 	};
-	if (!frm.doc.company) values.company = context.company;
-	if (!frm.doc.work_for_department && context.department) {
+		if (!frm.doc.work_for_department && context.department) {
 		values.work_for_department = context.department;
+	}
+	if (!frm.doc.work_for_section && context.section) {
+		values.work_for_section = context.section;
 	}
 	if (
 		context.physical_location &&
@@ -238,6 +242,7 @@ async function default_from_equipment(frm) {
 	frm[withdrawal_equipment_defaults_key] = {
 		equipment,
 		department: context.department,
+		section: context.section,
 		physical_location: context.physical_location,
 	};
 }
@@ -318,7 +323,7 @@ frappe.ui.form.on("Withdrawal Slip", {
 
 	setup(frm) {
 		frm.set_query("equipment", () => ({
-			filters: { company: frm.doc.company, status: "Active" },
+			filters: { company: frm.doc.requesting_company, status: "Active" },
 		}));
 		frm.set_query("department", () => ({
 			filters: { company: frm.doc.requesting_company, disabled: 0, is_group: 0 },
