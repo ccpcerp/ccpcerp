@@ -128,7 +128,7 @@
    "fieldname": "assigned_to",
    "fieldtype": "Select",
    "label": "Assigned To",
-   "options": "\nArnold Padernal\nBaron Zosimo\nBienvenedo Dumpa\nCresanto Genelazo\nCyril Catiil\nDarwin Cuay\nDecart Sasil\nDexter Amores\nDolfer Angus\nEarl Jay Sesaldo\nEdgar Laurete\nElbert Perocho\nEleazar Lagat\nElgene Demegillo\nEmerald Lapinig\nFlorante Bacunga\nFrancis Ca\u00f1ada\nFrenel Bentazal\nGerwin Pabiano\nGilbert Tidlos\nGiovanni Babarin\nGlen Mark Neri\nGuelmer Guinita\nHarvey Delos Reyes\nHomer Aguanta\nIan Hamile\nIvan Ray Ablon\nJames Daniel Mansulay\nJanrey Gomonkig\nJan Paolo Lumapay\nJayson Maglana\nJayson Oculam\nJeffrey Suson\nJeoffriy Maamo\nJerry Oliverio\nJeson Altamarino\nJheno Miano\nJhon Carlo Batutay\nJobert Felias\nJohn Martos\nJhon Ernest Cailing\nJulius Lazo\nJuly Tajores\nJun Zedrick Violon\nJun Mugot\nJunmar Sevilla\nJury Jay Jaime\nJustine Jalandoon\nKen Balahay\nKen Timothy Balahay\nKevin Sudaria\nKier Mangmang\nKyle Wahiman\nLarry Caballero\nLeonardo Amora Jr.\nLoel Lumbab\nMaico Jauculan\nMario Tinoy\nMark Dumay\nMark Lumacang\nMarken Mapalo\nMark Panerio\nMarvin Maestrado\nMechael Cagas\nNelson Imbat\nNelson Gerez Jr.\nNicasio Toston\nNoel Lumbab\nOliver Macarulay\nPeter Jaraula\nRavil Villardo\nReynaldo Cabalida\nRic Pahapay\nRoger Patindol\nRomel Talon\nRomeo Palaka\nRonald Caubanan\nRony Arioja\nRoy Toralde\nSaturnino Bedro\nShem Galindo\nSteve Esid\nVince Ave\nWilmar Liponhay"
+   "options": "\nArnold Padernal\nBaron Zosimo\nBienvenedo Dumpa\nCresanto Genelazo\nCyril Catiil\nDarwin Cuay\nDecart Sasil\nDexter Amores\nDolfer Angus\nEarl Jay Sesaldo\nEdgar Laurete\nElbert Perocho\nEleazar Lagat\nElgene Demegillo\nEmerald Lapinig\nFlorante Bacunga\nFrancis Cañada\nFrenel Bentazal\nGerwin Pabiano\nGilbert Tidlos\nGiovanni Babarin\nGlen Mark Neri\nGuelmer Guinita\nHarvey Delos Reyes\nHomer Aguanta\nIan Hamile\nIvan Ray Ablon\nJames Daniel Mansulay\nJanrey Gomonkig\nJan Paolo Lumapay\nJayson Maglana\nJayson Oculam\nJeffrey Suson\nJeoffriy Maamo\nJerry Oliverio\nJeson Altamarino\nJheno Miano\nJhon Carlo Batutay\nJobert Felias\nJohn Martos\nJhon Ernest Cailing\nJulius Lazo\nJuly Tajores\nJun Zedrick Violon\nJun Mugot\nJunmar Sevilla\nJury Jay Jaime\nJustine Jalandoon\nKen Balahay\nKen Timothy Balahay\nKevin Sudaria\nKier Mangmang\nKyle Wahiman\nLarry Caballero\nLeonardo Amora Jr.\nLoel Lumbab\nMaico Jauculan\nMario Tinoy\nMark Dumay\nMark Lumacang\nMarken Mapalo\nMark Panerio\nMarvin Maestrado\nMechael Cagas\nNelson Imbat\nNelson Gerez Jr.\nNicasio Toston\nNoel Lumbab\nOliver Macarulay\nPeter Jaraula\nRavil Villardo\nReynaldo Cabalida\nRic Pahapay\nRoger Patindol\nRomel Talon\nRomeo Palaka\nRonald Caubanan\nRony Arioja\nRoy Toralde\nSaturnino Bedro\nShem Galindo\nSteve Esid\nVince Ave\nWilmar Liponhay"
   },
   {
    "fieldname": "date_assigned",
@@ -251,6 +251,20 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Maintenance Supervisor",
+   "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Stockroom Personnel"
   }
  ],
  "row_format": "Dynamic",

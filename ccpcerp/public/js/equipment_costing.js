@@ -135,10 +135,23 @@ function default_material_request_row(frm, cdt, cdn) {
 	if (Object.keys(values).length) frappe.model.set_value(cdt, cdn, values);
 }
 
+function enforce_ccpc_material_request_procurement(frm) {
+	if (
+		frm.doctype === "Material Request" &&
+		frm.doc.docstatus === 1 &&
+		frm.doc.material_request_type === "Purchase"
+	) {
+		frm.remove_custom_button(__("Purchase Order"), __("Create"));
+	}
+}
+
 Object.keys(equipment_costing_parent_tables).forEach((doctype) => {
 	frappe.ui.form.on(doctype, {
 		setup: setup_equipment_costing_queries,
-		refresh: initialize_equipment_department_form,
+		refresh(frm) {
+			initialize_equipment_department_form(frm);
+			enforce_ccpc_material_request_procurement(frm);
+		},
 		equipment(frm) {
 			return default_department_from_equipment(frm, frm.doctype, frm.doc.name);
 		},

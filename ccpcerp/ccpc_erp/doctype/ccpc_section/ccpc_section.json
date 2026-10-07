@@ -1,0 +1,79 @@
+{
+ "actions": [],
+ "autoname": "format:{section_name} - {department}",
+ "creation": "2026-10-06 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "section_name",
+  "department",
+  "company",
+  "disabled"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_name",
+   "fieldtype": "Data",
+   "label": "Section Name",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Department",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1,
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "module": "CCPC ERP",
+ "name": "CCPC Section",
+ "naming_rule": "Expression",
+ "permissions": [
+  {
+   "role": "System Manager",
+   "read": 1,
+   "write": 1,
+   "create": 1,
+   "delete": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Maintenance Supervisor",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Stockroom Personnel",
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Withdrawal Slip Requestor",
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "section_name",
+ "sort_order": "ASC",
+ "track_changes": 1
+}

@@ -6,10 +6,13 @@ from unittest.mock import MagicMock, patch
 
 import frappe
 
+from ccpcerp.setup import migrate_equipment_area_to_section
+
 from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
 	EquipmentRegistry,
 	has_protected_equipment_history,
 	has_submitted_equipment_use,
+	validate_equipment_section,
 )
 
 
@@ -23,6 +26,7 @@ class TestEquipmentRegistryDepartmentEligibility(TestCase):
 		doc.equipment_number = "EQ-1"
 		doc.company = "Company B"
 		doc.department = "Department B"
+		doc.section = None
 		doc._requires_eligible_department.return_value = True
 		doc.get_doc_before_save.return_value = frappe._dict(company="Company A")
 		with self.assertRaises(frappe.ValidationError):
@@ -49,6 +53,7 @@ class TestEquipmentRegistryDepartmentEligibility(TestCase):
 		doc.equipment_number = "EQ-1"
 		doc.company = "Cagayan Corn Products Corporation"
 		doc.department = "Wet Mill Plant - CCPC"
+		doc.section = None
 		doc._requires_eligible_department.return_value = True
 		doc.get_doc_before_save.return_value = None
 
@@ -110,3 +115,60 @@ class TestEquipmentRegistryAdditionalRules(TestCase):
 	def test_unused_equipment_can_be_renamed(self, exists, get_meta):
 		get_meta.return_value.has_field.return_value = True
 		self.assertFalse(has_submitted_equipment_use("WP-401A"))
+
+
+class TestEquipmentRegistrySection(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.frappe.db.get_value")
+	def test_section_must_match_department_and_company(self, get_value):
+		get_value.return_value = frappe._dict(
+			department="Glucose Plant - RMC", company="Ricor Mills Corporation", disabled=0
+		)
+		validate_equipment_section(
+			"Filtration Section - Glucose Plant - RMC",
+			"Glucose Plant - RMC",
+			"Ricor Mills Corporation",
+		)
+
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.frappe.db.get_value")
+	def test_section_from_other_department_is_rejected(self, get_value):
+		get_value.return_value = frappe._dict(
+			department="Wet Mill Plant - CCPC", company="Cagayan Corn Products Corporation", disabled=0
+		)
+		with self.assertRaises(frappe.ValidationError):
+			validate_equipment_section(
+				"Refining Section - Wet Mill Plant - CCPC",
+				"Glucose Plant - RMC",
+				"Ricor Mills Corporation",
+			)
+
+
+class TestEquipmentAreaMigration(TestCase):
+	@patch("ccpcerp.setup.frappe.db.set_value")
+	@patch("ccpcerp.setup.frappe.db.get_value", return_value="Refining Section - Wet Mill Plant - CCPC")
+	@patch("ccpcerp.setup.frappe.db.sql")
+	@patch("ccpcerp.setup.frappe.db.has_column", return_value=True)
+	@patch("ccpcerp.setup.frappe.get_meta")
+	@patch("ccpcerp.setup.frappe.db.table_exists", return_value=True)
+	def test_legacy_area_backfills_section_after_area_leaves_doctype_meta(
+		self, table_exists, get_meta, has_column, sql, get_value, set_value
+	):
+		get_meta.return_value.has_field.side_effect = lambda fieldname: fieldname == "section"
+		sql.return_value = [
+			frappe._dict(
+				name="WPS-401",
+				company="Cagayan Corn Products Corporation",
+				department="Wet Mill Plant - CCPC",
+				area="Refining Section",
+			)
+		]
+
+		migrate_equipment_area_to_section()
+
+		has_column.assert_called_once_with("Equipment Registry", "area")
+		set_value.assert_called_once_with(
+			"Equipment Registry",
+			"WPS-401",
+			"section",
+			"Refining Section - Wet Mill Plant - CCPC",
+			update_modified=False,
+		)

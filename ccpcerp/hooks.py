@@ -16,6 +16,12 @@ fixtures = [
 					"Material Request-equipment",
 					"Material Request-department",
 					"Material Request-work_request",
+					"Material Request-mrs",
+					"Request for Quotation-mrs",
+					"Supplier Quotation-mrs",
+					"Purchase Order-mrs",
+					"Purchase Order-ccpc_approval_status",
+					"Purchase Receipt-mrs",
 				],
 			]
 		],
@@ -23,6 +29,7 @@ fixtures = [
 ]
 
 doctype_js = {
+	"Purchase Order": "public/js/purchase_order_required_by.js",
 	"Work Request": "public/js/equipment_costing.js",
 	"Job Order": "public/js/equipment_costing.js",
 	"Material Request": "public/js/equipment_costing.js",
@@ -33,6 +40,12 @@ doctype_js = {
 }
 
 doc_events = {
+	"Department": {
+		"validate": "ccpcerp.ccpc_erp.doctype.ccpc_personnel.ccpc_personnel.validate_department_manager_company",
+	},
+	"User": {
+		"before_save": "ccpcerp.setup.ensure_operational_requestor_roles_on_user",
+	},
 	"Material Request": {
 		"before_validate": [
 			"ccpcerp.ccpc_erp.equipment_costing.preserve_material_request_work_request",
@@ -40,11 +53,46 @@ doc_events = {
 		],
 		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_material_request_status",
+	},
+	"Request for Quotation": {
+		"before_validate": "ccpcerp.ccpc_erp.mrs_procurement.set_request_for_quotation_mrs",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_request_for_quotation_status",
+	},
+	"Supplier Quotation": {
+		"before_validate": "ccpcerp.ccpc_erp.mrs_procurement.set_supplier_quotation_mrs",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_supplier_quotation_status",
+	},
+	"Purchase Order": {
+		"before_validate": [
+			"ccpcerp.ccpc_erp.mrs_procurement.set_purchase_order_mrs",
+			"ccpcerp.ccpc_erp.mrs_procurement.validate_purchase_order_source",
+		],
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
+		"on_submit": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_order_status",
 	},
 	"Stock Entry": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
-		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
-		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"validate": [
+			"ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+			"ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_withdrawal_slip_stock_entry",
+		],
+		"before_submit": [
+			"ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+			"ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_withdrawal_slip_stock_entry",
+		],
+		"on_submit": "ccpcerp.ccpc_erp.withdrawal_slip_stock.sync_withdrawal_slip_issue_status",
+		"on_cancel": "ccpcerp.ccpc_erp.withdrawal_slip_stock.sync_withdrawal_slip_issue_status",
 	},
 	"Purchase Invoice": {
 		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
@@ -57,9 +105,19 @@ doc_events = {
 		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 	},
 	"Purchase Receipt": {
-		"before_validate": "ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+		"before_validate": [
+			"ccpcerp.ccpc_erp.equipment_costing.set_equipment_defaults",
+			"ccpcerp.ccpc_erp.mrs_procurement.set_purchase_receipt_mrs",
+		],
 		"validate": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 		"before_submit": "ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
+		"on_update": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
+		"on_submit": [
+			"ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
+			"ccpcerp.ccpc_erp.mrs_procurement.notify_mrs_requestor_of_receipt",
+		],
+		"on_cancel": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
+		"after_delete": "ccpcerp.ccpc_erp.mrs_procurement.sync_purchase_receipt_status",
 	},
 }
 
@@ -84,7 +142,7 @@ doc_events = {
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/ccpcerp/css/ccpcerp.css"
-# app_include_js = "/assets/ccpcerp/js/ccpcerp.js"
+app_include_js = "/assets/ccpcerp/js/workspace_approval_shortcuts.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/ccpcerp/css/ccpcerp.css"
@@ -146,6 +204,9 @@ doc_events = {
 # before_install = "ccpcerp.install.before_install"
 # after_install = "ccpcerp.install.after_install"
 
+after_migrate = "ccpcerp.setup.after_migrate"
+boot_session = "ccpcerp.ccpc_erp.desktop_visibility.filter_boot_desktop_icons"
+
 # Uninstallation
 # ------------
 
@@ -179,6 +240,19 @@ doc_events = {
 # See frappe.core.notifications.get_notification_config
 
 # notification_config = "ccpcerp.notifications.get_notification_config"
+
+permission_query_conditions = {
+	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.get_mrs_permission_query_conditions",
+}
+
+has_permission = {
+	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.has_mrs_permission",
+}
+
+
+extend_doctype_class = {
+	"Purchase Order": "ccpcerp.ccpc_erp.purchase_order_required_by.PurchaseOrderRequiredByMixin",
+}
 
 # Permissions
 # -----------

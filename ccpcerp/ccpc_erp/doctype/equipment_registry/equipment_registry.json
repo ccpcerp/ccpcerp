@@ -12,7 +12,7 @@
   "company",
   "department",
   "status",
-  "area",
+  "section",
   "column_break_7soh",
   "manufacturer",
   "model",
@@ -88,9 +88,10 @@
    "reqd": 1
   },
   {
-   "fieldname": "area",
-   "fieldtype": "Data",
-   "label": "Area"
+   "fieldname": "section",
+   "fieldtype": "Link",
+   "label": "Section",
+   "options": "CCPC Section"
   },
   {
    "fieldname": "motor_power",
@@ -116,7 +117,7 @@
    "fieldname": "capacity_unit",
    "fieldtype": "Select",
    "label": "Capacity Unit",
-   "options": "\nTPH\nkg/hr\nm\u00b3/hr\nL/min\nGPM\nCFM"
+   "options": "\nTPH\nkg/hr\nm³/hr\nL/min\nGPM\nCFM"
   },
   {
    "fieldname": "physical_location",
@@ -169,6 +170,18 @@
    "role": "System Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Maintenance Supervisor"
+  },
+  {
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Stockroom Personnel"
   }
  ],
  "row_format": "Dynamic",

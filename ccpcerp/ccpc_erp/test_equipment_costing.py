@@ -216,7 +216,7 @@ class TestEquipmentCostingRules(TestCase):
 		preserve_material_request_work_request(new_doc)
 		self.assertIsNone(new_doc.work_request)
 
-	def test_material_request_fixture_is_narrow_and_backlink_is_not_unique(self):
+	def test_material_request_fixture_backlinks_are_intentional(self):
 		app_root = Path(__file__).parents[1]
 		fixtures = json.loads((app_root / "fixtures/custom_field.json").read_text())
 		self.assertEqual(
@@ -225,15 +225,57 @@ class TestEquipmentCostingRules(TestCase):
 				"Material Request-equipment",
 				"Material Request-department",
 				"Material Request-work_request",
+				"Material Request-mrs",
+				"Request for Quotation-mrs",
+				"Supplier Quotation-mrs",
+				"Purchase Order-mrs",
+				"Purchase Receipt-mrs",
 			},
 		)
-		backlink = next(field for field in fixtures if field["fieldname"] == "work_request")
+
+		work_request = next(field for field in fixtures if field["fieldname"] == "work_request")
 		self.assertEqual(
-			(backlink["fieldtype"], backlink["options"], backlink["insert_after"]),
+			(work_request["fieldtype"], work_request["options"], work_request["insert_after"]),
 			("Link", "Work Request", "department"),
 		)
-		self.assertEqual(backlink["read_only"], 1)
-		self.assertFalse(backlink.get("unique"))
+		self.assertEqual(work_request["read_only"], 1)
+		self.assertFalse(work_request.get("unique"))
+
+		mrs = next(field for field in fixtures if field["name"] == "Material Request-mrs")
+		self.assertEqual(
+			(mrs["fieldtype"], mrs["options"], mrs["insert_after"]),
+			("Link", "MRS", "work_request"),
+		)
+		self.assertEqual(mrs["read_only"], 1)
+		self.assertEqual(mrs["no_copy"], 1)
+		self.assertEqual(mrs["unique"], 1)
+
+		rfq_mrs = next(field for field in fixtures if field["name"] == "Request for Quotation-mrs")
+		self.assertEqual(
+			(rfq_mrs["fieldtype"], rfq_mrs["options"], rfq_mrs["insert_after"]),
+			("Link", "MRS", "company"),
+		)
+		self.assertEqual(rfq_mrs["read_only"], 1)
+		self.assertEqual(rfq_mrs["no_copy"], 1)
+		self.assertFalse(rfq_mrs.get("unique"))
+
+		sq_mrs = next(field for field in fixtures if field["name"] == "Supplier Quotation-mrs")
+		self.assertEqual(
+			(sq_mrs["fieldtype"], sq_mrs["options"], sq_mrs["insert_after"]),
+			("Link", "MRS", "company"),
+		)
+		self.assertEqual(sq_mrs["read_only"], 1)
+		self.assertEqual(sq_mrs["no_copy"], 1)
+		self.assertFalse(sq_mrs.get("unique"))
+
+		po_mrs = next(field for field in fixtures if field["name"] == "Purchase Order-mrs")
+		self.assertEqual(
+			(po_mrs["fieldtype"], po_mrs["options"], po_mrs["insert_after"]),
+			("Link", "MRS", "company"),
+		)
+		self.assertEqual(po_mrs["read_only"], 1)
+		self.assertEqual(po_mrs["no_copy"], 1)
+		self.assertFalse(po_mrs.get("unique"))
 
 	def test_draft_material_request_deletion_has_no_work_request_hook(self):
 		from ccpcerp import hooks

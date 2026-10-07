@@ -1,0 +1,5 @@
+.page-container[data-page-route="List/MRS"]
+	.list-row-col[data-fieldname="procurement_status"]
+	.indicator-pill {
+	max-width: none;
+}
