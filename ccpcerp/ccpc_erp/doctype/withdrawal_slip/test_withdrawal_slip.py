@@ -477,7 +477,6 @@ class TestWithdrawalSlip(TestCase):
 		doc.required_by = None
 		doc._set_company_default = MagicMock()
 		doc._apply_job_order_defaults = MagicMock()
-		doc._set_company_from_equipment = MagicMock()
 		doc._set_equipment_details = MagicMock()
 		doc._set_physical_location_from_equipment = MagicMock()
 		doc._set_source_warehouse_default = MagicMock()
@@ -869,3 +868,21 @@ class TestWithdrawalSlip(TestCase):
 				"department",
 				"section",
 			)
+
+
+class TestWithdrawalSlipEquipmentWorkForDefaults(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.get_cached_value")
+	def test_rmc_equipment_defaults_work_for_department_and_section(self, get_cached_value):
+		get_cached_value.return_value = frappe._dict(
+			department="Glucose Plant - RMC",
+			section="Filtration Section - Glucose Plant - RMC",
+		)
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.equipment = "G-FP-401A"
+		doc.work_for_department = None
+		doc.work_for_section = None
+
+		WithdrawalSlip._set_work_for_department_from_equipment(doc)
+
+		self.assertEqual(doc.work_for_department, "Glucose Plant - RMC")
+		self.assertEqual(doc.work_for_section, "Filtration Section - Glucose Plant - RMC")
