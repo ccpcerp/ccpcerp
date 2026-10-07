@@ -10,3 +10,4 @@ ccpcerp.patches.v1_0.create_equipment_accounting_dimension
 ccpcerp.patches.v1_0.grant_operational_requestor_roles
 ccpcerp.patches.v1_0.grant_purchase_order_approver_role
 ccpcerp.patches.v1_0.create_intercompany_material_accounts
+ccpcerp.patches.v1_0.create_intercompany_parties
