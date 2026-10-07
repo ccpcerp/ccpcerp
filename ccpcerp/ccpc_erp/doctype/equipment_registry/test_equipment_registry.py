@@ -26,6 +26,7 @@ class TestEquipmentRegistryDepartmentEligibility(TestCase):
 		doc.equipment_number = "EQ-1"
 		doc.company = "Company B"
 		doc.department = "Department B"
+		doc.section = None
 		doc._requires_eligible_department.return_value = True
 		doc.get_doc_before_save.return_value = frappe._dict(company="Company A")
 		with self.assertRaises(frappe.ValidationError):
@@ -52,6 +53,7 @@ class TestEquipmentRegistryDepartmentEligibility(TestCase):
 		doc.equipment_number = "EQ-1"
 		doc.company = "Cagayan Corn Products Corporation"
 		doc.department = "Wet Mill Plant - CCPC"
+		doc.section = None
 		doc._requires_eligible_department.return_value = True
 		doc.get_doc_before_save.return_value = None
 
