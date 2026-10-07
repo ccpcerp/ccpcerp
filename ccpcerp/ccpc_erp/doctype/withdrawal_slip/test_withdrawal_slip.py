@@ -927,3 +927,16 @@ class TestWithdrawalSlipFormDefaults(TestCase):
 		self.assertEqual(defaults["requesting_company"], "Ricor Mills Corporation")
 		self.assertEqual(defaults["department"], "Maintenance Department - RMC")
 		self.assertEqual(defaults["section"], "Electrical Section - Maintenance Department - RMC")
+
+
+class TestWithdrawalSlipClientDefaults(TestCase):
+	def test_new_form_initializer_overrides_legacy_requesting_company_default(self):
+		script = Path(__file__).with_name("withdrawal_slip.js").read_text()
+		self.assertIn(
+			"frm.doc.requesting_company !== defaults.requesting_company",
+			script,
+		)
+		self.assertNotIn(
+			"!frm.doc.requesting_company && defaults.requesting_company",
+			script,
+		)
