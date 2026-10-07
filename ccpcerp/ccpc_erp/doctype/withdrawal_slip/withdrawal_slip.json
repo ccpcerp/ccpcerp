@@ -10,6 +10,7 @@
   "required_by",
   "column_break_request",
   "approving_supervisor",
+  "prepared_by_name",
   "job_order",
   "charge_location_section",
   "company",
@@ -66,6 +67,12 @@
    "options": "User",
    "read_only": 1,
    "reqd": 1
+  },
+  {
+   "fieldname": "prepared_by_name",
+   "fieldtype": "Data",
+   "label": "Prepared By Name",
+   "read_only": 1
   },
   {
    "default": "Today",
