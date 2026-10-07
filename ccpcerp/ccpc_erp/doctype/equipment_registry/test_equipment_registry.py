@@ -10,6 +10,7 @@ from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
 	EquipmentRegistry,
 	has_protected_equipment_history,
 	has_submitted_equipment_use,
+	validate_equipment_section,
 )
 
 
@@ -110,3 +111,28 @@ class TestEquipmentRegistryAdditionalRules(TestCase):
 	def test_unused_equipment_can_be_renamed(self, exists, get_meta):
 		get_meta.return_value.has_field.return_value = True
 		self.assertFalse(has_submitted_equipment_use("WP-401A"))
+
+
+class TestEquipmentRegistrySection(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.frappe.db.get_value")
+	def test_section_must_match_department_and_company(self, get_value):
+		get_value.return_value = frappe._dict(
+			department="Glucose Plant - RMC", company="Ricor Mills Corporation", disabled=0
+		)
+		validate_equipment_section(
+			"Filtration Section - Glucose Plant - RMC",
+			"Glucose Plant - RMC",
+			"Ricor Mills Corporation",
+		)
+
+	@patch("ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry.frappe.db.get_value")
+	def test_section_from_other_department_is_rejected(self, get_value):
+		get_value.return_value = frappe._dict(
+			department="Wet Mill Plant - CCPC", company="Cagayan Corn Products Corporation", disabled=0
+		)
+		with self.assertRaises(frappe.ValidationError):
+			validate_equipment_section(
+				"Refining Section - Wet Mill Plant - CCPC",
+				"Glucose Plant - RMC",
+				"Ricor Mills Corporation",
+			)
