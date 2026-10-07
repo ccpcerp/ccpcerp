@@ -9,6 +9,7 @@ from frappe.model.document import Document
 class CCPCPersonnel(Document):
 	def validate(self):
 		self._set_company_from_department()
+		self._validate_section()
 		if not self.user:
 			return
 
@@ -32,6 +33,18 @@ class CCPCPersonnel(Document):
 			if self.department
 			else None
 		)
+
+
+	def _validate_section(self):
+		if not self.section:
+			return
+		values = frappe.get_cached_value(
+			"CCPC Section", self.section, ["department", "company", "disabled"], as_dict=True
+		)
+		if not values or values.disabled:
+			frappe.throw(_("Section must be an active CCPC Section."))
+		if values.department != self.department or values.company != self.company:
+			frappe.throw(_("Section must belong to the Personnel Department and Company."))
 
 
 def validate_department_manager_company(doc, method=None):
