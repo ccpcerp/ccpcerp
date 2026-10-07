@@ -47,6 +47,7 @@ class WithdrawalSlip(Document):
 			self.required_by = nowdate()
 
 		self._set_company_default()
+		self._set_preparer_defaults()
 		self._set_requesting_company_default()
 		self._apply_job_order_defaults()
 		self._set_work_for_department_from_equipment()
@@ -88,6 +89,25 @@ class WithdrawalSlip(Document):
 		if self.company:
 			return
 		self.company = _get_default_company()
+
+	def _set_preparer_defaults(self):
+		user = self.approving_supervisor or frappe.session.user
+		if not user:
+			return
+		personnel = frappe.db.get_value(
+			"CCPC Personnel", {"user": user, "active": 1},
+			["personnel_name", "company", "department", "section"], as_dict=True
+		)
+		if not personnel:
+			return
+		self.prepared_by_name = personnel.personnel_name
+		if self.is_new():
+			if not self.requesting_company and personnel.company:
+				self.requesting_company = personnel.company
+			if not self.department and personnel.department:
+				self.department = personnel.department
+			if not self.section and personnel.section:
+				self.section = personnel.section
 
 	def _set_requesting_company_default(self):
 		if not self.requesting_company:
