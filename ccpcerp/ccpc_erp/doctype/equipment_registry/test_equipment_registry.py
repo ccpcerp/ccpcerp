@@ -6,6 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import frappe
 
+from ccpcerp.setup import migrate_equipment_area_to_section
+
 from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
 	EquipmentRegistry,
 	has_protected_equipment_history,
@@ -136,3 +138,35 @@ class TestEquipmentRegistrySection(TestCase):
 				"Glucose Plant - RMC",
 				"Ricor Mills Corporation",
 			)
+
+
+class TestEquipmentAreaMigration(TestCase):
+	@patch("ccpcerp.setup.frappe.db.set_value")
+	@patch("ccpcerp.setup.frappe.db.get_value", return_value="Refining Section - Wet Mill Plant - CCPC")
+	@patch("ccpcerp.setup.frappe.db.sql")
+	@patch("ccpcerp.setup.frappe.db.has_column", return_value=True)
+	@patch("ccpcerp.setup.frappe.get_meta")
+	@patch("ccpcerp.setup.frappe.db.table_exists", return_value=True)
+	def test_legacy_area_backfills_section_after_area_leaves_doctype_meta(
+		self, table_exists, get_meta, has_column, sql, get_value, set_value
+	):
+		get_meta.return_value.has_field.side_effect = lambda fieldname: fieldname == "section"
+		sql.return_value = [
+			frappe._dict(
+				name="WPS-401",
+				company="Cagayan Corn Products Corporation",
+				department="Wet Mill Plant - CCPC",
+				area="Refining Section",
+			)
+		]
+
+		migrate_equipment_area_to_section()
+
+		has_column.assert_called_once_with("Equipment Registry", "area")
+		set_value.assert_called_once_with(
+			"Equipment Registry",
+			"WPS-401",
+			"section",
+			"Refining Section - Wet Mill Plant - CCPC",
+			update_modified=False,
+		)
