@@ -529,10 +529,19 @@ def _get_actual_qty(item_code, warehouse):
 @frappe.whitelist()
 def get_form_defaults():
 	company = frappe.defaults.get_user_default("Company")
+	personnel = frappe.db.get_value(
+		"CCPC Personnel",
+		{"user": frappe.session.user, "active": 1},
+		["personnel_name", "company", "department", "section"],
+		as_dict=True,
+	)
 	return {
 		"company": company,
-		"requesting_company": company,
 		"source_warehouse": _get_default_source_warehouse(company),
+		"prepared_by_name": personnel.personnel_name if personnel else None,
+		"requesting_company": personnel.company if personnel and personnel.company else company,
+		"department": personnel.department if personnel else None,
+		"section": personnel.section if personnel else None,
 	}
 
 
