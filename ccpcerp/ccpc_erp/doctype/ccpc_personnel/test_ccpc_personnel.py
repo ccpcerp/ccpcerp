@@ -86,3 +86,28 @@ class TestCCPCPersonnel(TestCase):
 		)
 		with self.assertRaises(frappe.ValidationError):
 			validate_department_manager_company(doc)
+
+
+class TestCCPCPersonnelSection(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.ccpc_personnel.ccpc_personnel.frappe.get_cached_value")
+	def test_home_section_must_match_department_and_company(self, get_cached_value):
+		get_cached_value.return_value = frappe._dict(
+			department="Maintenance Department - RMC", company="Ricor Mills Corporation", disabled=0
+		)
+		doc = MagicMock(spec=CCPCPersonnel)
+		doc.section = "Electrical Section - Maintenance Department - RMC"
+		doc.department = "Maintenance Department - RMC"
+		doc.company = "Ricor Mills Corporation"
+		CCPCPersonnel._validate_section(doc)
+
+	@patch("ccpcerp.ccpc_erp.doctype.ccpc_personnel.ccpc_personnel.frappe.get_cached_value")
+	def test_home_section_from_other_department_is_rejected(self, get_cached_value):
+		get_cached_value.return_value = frappe._dict(
+			department="Glucose Plant - RMC", company="Ricor Mills Corporation", disabled=0
+		)
+		doc = MagicMock(spec=CCPCPersonnel)
+		doc.section = "Filtration Section - Glucose Plant - RMC"
+		doc.department = "Maintenance Department - RMC"
+		doc.company = "Ricor Mills Corporation"
+		with self.assertRaises(frappe.ValidationError):
+			CCPCPersonnel._validate_section(doc)
