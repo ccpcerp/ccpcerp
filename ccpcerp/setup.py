@@ -438,12 +438,14 @@ WITHDRAWAL_SECTION_STRUCTURE = {
 		"Feed Mill Plant": (),
 	},
 	"Ricor Mills Corporation": {
-		"Oil Refinery Plant": ("Oil Refinery Plant 1", "Oil Refinery Plant 2"),
 		"Glucose Plant": (
 			"Liquefaction Section", "Saccharification Section", "Filtration Section",
 			"Decolorization Section", "Ion Exchange Section", "Evaporation Section",
 			"Storage Section", "Chemical Process Section", "Utility Process Section",
 		),
+		"Oil Refinery Plant 1": (),
+		"Oil Refinery Plant 2": (),
+		"Maintenance Department": ("Electrical Section",),
 	},
 }
 
