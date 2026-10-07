@@ -136,9 +136,14 @@ async function initialize_form_defaults(frm) {
 	const defaults = response_message(response);
 	const values = {};
 	if (!frm.doc.company && defaults.company) values.company = defaults.company;
+	if (!frm.doc.prepared_by_name && defaults.prepared_by_name) {
+		values.prepared_by_name = defaults.prepared_by_name;
+	}
 	if (!frm.doc.requesting_company && defaults.requesting_company) {
 		values.requesting_company = defaults.requesting_company;
 	}
+	if (!frm.doc.department && defaults.department) values.department = defaults.department;
+	if (!frm.doc.section && defaults.section) values.section = defaults.section;
 	if (!frm.doc.source_warehouse && defaults.source_warehouse) {
 		values.source_warehouse = defaults.source_warehouse;
 	}
