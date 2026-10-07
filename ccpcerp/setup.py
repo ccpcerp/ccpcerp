@@ -475,6 +475,27 @@ def ensure_withdrawal_section_foundation():
 				section.insert(ignore_permissions=True)
 
 
+def migrate_equipment_area_to_section():
+	"""Copy legacy Area values to matching CCPC Section records without discarding Area data."""
+	if not frappe.db.table_exists("Equipment Registry") or not frappe.db.table_exists("CCPC Section"):
+		return
+	meta = frappe.get_meta("Equipment Registry")
+	if not meta.has_field("area") or not meta.has_field("section"):
+		return
+	for row in frappe.get_all(
+		"Equipment Registry",
+		filters={"section": ["is", "not set"], "area": ["is", "set"]},
+		fields=["name", "company", "department", "area"],
+	):
+		section = frappe.db.get_value(
+			"CCPC Section",
+			{"section_name": row.area, "department": row.department, "company": row.company, "disabled": 0},
+			"name",
+		)
+		if section:
+			frappe.db.set_value("Equipment Registry", row.name, "section", section, update_modified=False)
+
+
 def backfill_ccpc_personnel_company():
 	"""Backfill Company from each personnel record's home Department when available."""
 	if not frappe.db.table_exists("CCPC Personnel"):
@@ -498,6 +519,7 @@ def backfill_ccpc_personnel_company():
 
 def after_migrate():
 	ensure_withdrawal_section_foundation()
+	migrate_equipment_area_to_section()
 	backfill_ccpc_personnel_company()
 	ensure_maintenance_supervisor_permissions()
 	ensure_department_manager_roles()
