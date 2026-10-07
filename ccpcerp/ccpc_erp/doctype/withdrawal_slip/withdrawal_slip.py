@@ -49,7 +49,6 @@ class WithdrawalSlip(Document):
 		self._set_company_default()
 		self._set_requesting_company_default()
 		self._apply_job_order_defaults()
-		self._set_company_from_equipment()
 		self._set_work_for_department_from_equipment()
 		self._set_equipment_details()
 		self._set_physical_location_from_equipment()
@@ -65,7 +64,7 @@ class WithdrawalSlip(Document):
 		self._validate_job_order_context()
 		validate_equipment(
 			self.equipment,
-			self.company,
+			self.requesting_company,
 			require_active=bool(self.equipment),
 			context=_("Withdrawal Slip"),
 		)
@@ -97,9 +96,15 @@ class WithdrawalSlip(Document):
 	def _set_work_for_department_from_equipment(self):
 		if not self.equipment:
 			return
-		equipment_department = frappe.get_cached_value("Equipment Registry", self.equipment, "department")
-		if equipment_department and not self.work_for_department:
-			self.work_for_department = equipment_department
+		equipment_context = frappe.get_cached_value(
+			"Equipment Registry", self.equipment, ["department", "section"], as_dict=True
+		)
+		if not equipment_context:
+			return
+		if equipment_context.department and not self.work_for_department:
+			self.work_for_department = equipment_context.department
+		if equipment_context.section and not self.work_for_section:
+			self.work_for_section = equipment_context.section
 
 	def _validate_section_requirement(self, department, section, label, department_field, section_field):
 		if not department or section:
