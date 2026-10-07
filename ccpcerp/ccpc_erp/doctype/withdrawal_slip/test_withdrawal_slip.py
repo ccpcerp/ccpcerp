@@ -886,3 +886,21 @@ class TestWithdrawalSlipEquipmentWorkForDefaults(TestCase):
 
 		self.assertEqual(doc.work_for_department, "Glucose Plant - RMC")
 		self.assertEqual(doc.work_for_section, "Filtration Section - Glucose Plant - RMC")
+
+
+class TestWithdrawalSlipPersonnelDefaults(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.db.get_value")
+	def test_new_slip_defaults_requesting_context_from_preparer_personnel(self, get_value):
+		get_value.return_value = frappe._dict(personnel_name="RMC Supervisor", company="Ricor Mills Corporation", department="Maintenance Department - RMC", section="Electrical Section - Maintenance Department - RMC")
+		doc = MagicMock(spec=WithdrawalSlip)
+		doc.approving_supervisor = "rmc.user@example.com"
+		doc.prepared_by_name = None
+		doc.requesting_company = None
+		doc.department = None
+		doc.section = None
+		doc.is_new.return_value = True
+		WithdrawalSlip._set_preparer_defaults(doc)
+		self.assertEqual(doc.prepared_by_name, "RMC Supervisor")
+		self.assertEqual(doc.requesting_company, "Ricor Mills Corporation")
+		self.assertEqual(doc.department, "Maintenance Department - RMC")
+		self.assertEqual(doc.section, "Electrical Section - Maintenance Department - RMC")
