@@ -16,6 +16,7 @@ class EquipmentRegistry(Document):
 			_("Equipment Registry"),
 			require_eligible=self._requires_eligible_department(),
 		)
+		validate_equipment_section(self.section, self.department, self.company)
 		if not self.is_new() and self.equipment_number != self.name:
 			frappe.throw(_("Use Rename to correct an Equipment Number."))
 		before = self.get_doc_before_save()
@@ -42,6 +43,18 @@ class EquipmentRegistry(Document):
 					frappe.bold(old)
 				)
 			)
+
+
+def validate_equipment_section(section, department, company):
+	if not section:
+		return
+	section_values = frappe.db.get_value(
+		"CCPC Section", section, ["department", "company", "disabled"], as_dict=True
+	)
+	if not section_values or section_values.disabled:
+		frappe.throw(_("Section must be an active CCPC Section."))
+	if section_values.department != department or section_values.company != company:
+		frappe.throw(_("Section must belong to the selected Department and Company."))
 
 
 def has_protected_equipment_history(equipment):
