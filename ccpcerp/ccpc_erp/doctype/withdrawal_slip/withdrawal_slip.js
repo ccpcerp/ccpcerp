@@ -139,11 +139,15 @@ async function initialize_form_defaults(frm) {
 	if (!frm.doc.prepared_by_name && defaults.prepared_by_name) {
 		values.prepared_by_name = defaults.prepared_by_name;
 	}
-	if (!frm.doc.requesting_company && defaults.requesting_company) {
+	if (defaults.requesting_company && frm.doc.requesting_company !== defaults.requesting_company) {
 		values.requesting_company = defaults.requesting_company;
 	}
-	if (!frm.doc.department && defaults.department) values.department = defaults.department;
-	if (!frm.doc.section && defaults.section) values.section = defaults.section;
+	if (defaults.department && frm.doc.department !== defaults.department) {
+		values.department = defaults.department;
+	}
+	if (defaults.section && frm.doc.section !== defaults.section) {
+		values.section = defaults.section;
+	}
 	if (!frm.doc.source_warehouse && defaults.source_warehouse) {
 		values.source_warehouse = defaults.source_warehouse;
 	}
