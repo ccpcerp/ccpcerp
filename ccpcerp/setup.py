@@ -445,7 +445,7 @@ WITHDRAWAL_SECTION_STRUCTURE = {
 		),
 		"Oil Refinery Plant 1": (),
 		"Oil Refinery Plant 2": (),
-		"Maintenance Department": ("Electrical Section",),
+		"Maintenance Department": (),
 	},
 }
 
