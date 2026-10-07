@@ -904,3 +904,26 @@ class TestWithdrawalSlipPersonnelDefaults(TestCase):
 		self.assertEqual(doc.requesting_company, "Ricor Mills Corporation")
 		self.assertEqual(doc.department, "Maintenance Department - RMC")
 		self.assertEqual(doc.section, "Electrical Section - Maintenance Department - RMC")
+
+
+class TestWithdrawalSlipFormDefaults(TestCase):
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip._get_default_source_warehouse", return_value="Warehouse 1 - CCPC")
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.defaults.get_user_default", return_value="Cagayan Corn Products Corporation")
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.db.get_value")
+	@patch("ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip.frappe.session", create=True)
+	def test_form_defaults_keep_issuer_but_use_personnel_requester(self, session, get_value, user_default, warehouse):
+		from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import get_form_defaults
+		session.user = "rmc.user@example.com"
+		get_value.return_value = frappe._dict(
+			personnel_name="Dindo Anticamara",
+			company="Ricor Mills Corporation",
+			department="Maintenance Department - RMC",
+			section="Electrical Section - Maintenance Department - RMC",
+		)
+		defaults = get_form_defaults()
+		self.assertEqual(defaults["company"], "Cagayan Corn Products Corporation")
+		self.assertEqual(defaults["source_warehouse"], "Warehouse 1 - CCPC")
+		self.assertEqual(defaults["prepared_by_name"], "Dindo Anticamara")
+		self.assertEqual(defaults["requesting_company"], "Ricor Mills Corporation")
+		self.assertEqual(defaults["department"], "Maintenance Department - RMC")
+		self.assertEqual(defaults["section"], "Electrical Section - Maintenance Department - RMC")
