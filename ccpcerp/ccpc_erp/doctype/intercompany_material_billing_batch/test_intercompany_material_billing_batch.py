@@ -460,6 +460,455 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         self.assertEqual(result["finalized_by"], "finance@example.com")
 
 
+    def test_finance_approver_roles_are_allowed(self):
+        cases = [
+            ("Administrator", []),
+            ("finance@example.com", ["Finance Controller"]),
+            ("manager@example.com", ["System Manager"]),
+        ]
+
+        for user, roles in cases:
+            with self.subTest(user=user):
+                doc = batch()
+
+                with (
+                    patch(
+                        f"{MODULE}.frappe.session",
+                        frappe._dict(user=user),
+                    ),
+                    patch(
+                        f"{MODULE}.frappe.get_roles",
+                        return_value=roles,
+                    ),
+                ):
+                    IntercompanyMaterialBillingBatch._require_finance_approver(
+                        doc
+                    )
+
+                doc.check_permission.assert_called_once_with("write")
+
+    def test_non_finance_user_cannot_approve(self):
+        doc = batch()
+
+        with (
+            patch(
+                f"{MODULE}.frappe.session",
+                frappe._dict(user="ordinary@example.com"),
+            ),
+            patch(
+                f"{MODULE}.frappe.get_roles",
+                return_value=["Accounts User"],
+            ),
+            self.assertRaises(frappe.PermissionError),
+        ):
+            IntercompanyMaterialBillingBatch._require_finance_approver(doc)
+
+        doc.check_permission.assert_called_once_with("write")
+
+    def test_approval_requires_under_review_status(self):
+        doc = batch(
+            status="Draft",
+            sales_invoice=None,
+            purchase_invoice=None,
+        )
+
+        with self.assertRaises(frappe.ValidationError):
+            IntercompanyMaterialBillingBatch._require_under_review_for_approval(
+                doc
+            )
+
+    def test_approval_rejects_existing_invoice_references(self):
+        for sales_invoice, purchase_invoice in (
+            ("SINV-1", None),
+            (None, "PINV-1"),
+        ):
+            with self.subTest(
+                sales_invoice=sales_invoice,
+                purchase_invoice=purchase_invoice,
+            ):
+                doc = batch(
+                    status="Under Review",
+                    sales_invoice=sales_invoice,
+                    purchase_invoice=purchase_invoice,
+                )
+
+                with self.assertRaises(frappe.ValidationError):
+                    IntercompanyMaterialBillingBatch._require_under_review_for_approval(
+                        doc
+                    )
+
+    def test_internal_party_requires_exactly_one_enabled_match(self):
+        doc = batch()
+
+        with patch(
+            f"{MODULE}.frappe.get_all",
+            return_value=["Ricor Mills Corporation"],
+        ) as get_all:
+            party = IntercompanyMaterialBillingBatch._get_internal_party(
+                doc,
+                "Customer",
+                "Ricor Mills Corporation",
+            )
+
+        self.assertEqual(party, "Ricor Mills Corporation")
+        get_all.assert_called_once_with(
+            "Customer",
+            filters={
+                "is_internal_customer": 1,
+                "represents_company": "Ricor Mills Corporation",
+                "disabled": 0,
+            },
+            pluck="name",
+        )
+
+        for matches in ([], ["PARTY-1", "PARTY-2"]):
+            with (
+                self.subTest(matches=matches),
+                patch(
+                    f"{MODULE}.frappe.get_all",
+                    return_value=matches,
+                ),
+                self.assertRaises(frappe.ValidationError),
+            ):
+                IntercompanyMaterialBillingBatch._get_internal_party(
+                    doc,
+                    "Customer",
+                    "Ricor Mills Corporation",
+                )
+
+    def test_company_invoice_defaults_use_dedicated_accounts(self):
+        doc = batch()
+
+        company_info = frappe._dict(
+            abbr="RMC",
+            default_currency="PHP",
+            cost_center="Main - RMC",
+        )
+        cost_center = frappe._dict(
+            company="Ricor Mills Corporation",
+            is_group=0,
+            disabled=0,
+        )
+
+        with patch(
+            f"{MODULE}.frappe.db.get_value",
+            side_effect=[company_info, cost_center],
+        ):
+            defaults = (
+                IntercompanyMaterialBillingBatch._get_company_invoice_defaults(
+                    doc,
+                    "Ricor Mills Corporation",
+                )
+            )
+
+        self.assertEqual(defaults.currency, "PHP")
+        self.assertEqual(defaults.cost_center, "Main - RMC")
+        self.assertEqual(
+            defaults.receivable_account,
+            "1312 - Intercompany Receivable - RMC",
+        )
+        self.assertEqual(
+            defaults.payable_account,
+            "2121 - Intercompany Payable - RMC",
+        )
+        self.assertEqual(
+            defaults.expense_account,
+            "5150 - Intercompany Materials Expense - RMC",
+        )
+        self.assertEqual(
+            defaults.income_account,
+            "6050 - Intercompany Material Charges - RMC",
+        )
+
+        self.assertEqual(doc._validate_invoice_account.call_count, 4)
+
+    def test_sales_invoice_builder_uses_frozen_values_without_stock_or_taxes(self):
+        doc = batch(
+            status="Under Review",
+            total_amount=10000,
+        )
+
+        defaults = frappe._dict(
+            currency="PHP",
+            cost_center="Main - CCPC",
+            receivable_account="1312 - Intercompany Receivable - CCPC",
+            income_account="6050 - Intercompany Material Charges - CCPC",
+        )
+
+        invoice = MagicMock()
+
+        with patch(
+            f"{MODULE}.frappe.get_doc",
+            return_value=invoice,
+        ) as get_doc:
+            result = IntercompanyMaterialBillingBatch._build_sales_invoice(
+                doc,
+                "Ricor Mills Corporation",
+                defaults,
+            )
+
+        self.assertIs(result, invoice)
+
+        values = get_doc.call_args.args[0]
+        self.assertEqual(values["doctype"], "Sales Invoice")
+        self.assertEqual(
+            values["company"],
+            "Cagayan Corn Products Corporation",
+        )
+        self.assertEqual(values["customer"], "Ricor Mills Corporation")
+        self.assertEqual(
+            getdate(values["posting_date"]),
+            getdate("2026-10-31"),
+        )
+        self.assertEqual(
+            values["debit_to"],
+            "1312 - Intercompany Receivable - CCPC",
+        )
+        self.assertEqual(values["update_stock"], 0)
+        self.assertIsNone(values["taxes_and_charges"])
+        self.assertEqual(values["taxes"], [])
+
+        self.assertEqual(len(values["items"]), 1)
+        item = values["items"][0]
+        self.assertEqual(item["item_code"], "ITEM-00010")
+        self.assertEqual(item["qty"], 1)
+        self.assertEqual(item["uom"], "Nos")
+        self.assertEqual(item["rate"], 10000)
+        self.assertEqual(
+            item["income_account"],
+            "6050 - Intercompany Material Charges - CCPC",
+        )
+        self.assertEqual(item["cost_center"], "Main - CCPC")
+        self.assertNotIn("department", item)
+        self.assertNotIn("equipment", item)
+        self.assertNotIn("warehouse", item)
+
+    def test_purchase_invoice_builder_uses_frozen_values_and_requesting_dimensions(self):
+        doc = batch(
+            status="Under Review",
+            total_amount=10000,
+        )
+
+        defaults = frappe._dict(
+            currency="PHP",
+            cost_center="Main - RMC",
+            payable_account="2121 - Intercompany Payable - RMC",
+            expense_account="5150 - Intercompany Materials Expense - RMC",
+        )
+
+        invoice = MagicMock()
+
+        with patch(
+            f"{MODULE}.frappe.get_doc",
+            return_value=invoice,
+        ) as get_doc:
+            result = IntercompanyMaterialBillingBatch._build_purchase_invoice(
+                doc,
+                "Cagayan Corn Products Corporation",
+                defaults,
+                "SINV-2026-00001",
+            )
+
+        self.assertIs(result, invoice)
+
+        values = get_doc.call_args.args[0]
+        self.assertEqual(values["doctype"], "Purchase Invoice")
+        self.assertEqual(
+            values["company"],
+            "Ricor Mills Corporation",
+        )
+        self.assertEqual(
+            values["supplier"],
+            "Cagayan Corn Products Corporation",
+        )
+        self.assertEqual(
+            getdate(values["posting_date"]),
+            getdate("2026-10-31"),
+        )
+        self.assertEqual(
+            values["credit_to"],
+            "2121 - Intercompany Payable - RMC",
+        )
+        self.assertEqual(values["update_stock"], 0)
+        self.assertIsNone(values["taxes_and_charges"])
+        self.assertEqual(values["taxes"], [])
+        self.assertEqual(
+            values["inter_company_invoice_reference"],
+            "SINV-2026-00001",
+        )
+
+        self.assertEqual(len(values["items"]), 1)
+        item = values["items"][0]
+        self.assertEqual(item["item_code"], "ITEM-00010")
+        self.assertEqual(item["qty"], 1)
+        self.assertEqual(item["uom"], "Nos")
+        self.assertEqual(item["rate"], 10000)
+        self.assertEqual(
+            item["expense_account"],
+            "5150 - Intercompany Materials Expense - RMC",
+        )
+        self.assertEqual(item["cost_center"], "Main - RMC")
+        self.assertEqual(item["department"], "Maintenance - RMC")
+        self.assertEqual(item["equipment"], "EQ-1")
+        self.assertNotIn("warehouse", item)
+
+    def test_generated_invoice_guard_rejects_invalid_generated_document(self):
+        doc = batch(total_amount=10000)
+
+        invoice = frappe._dict(
+            doctype="Sales Invoice",
+            name="SINV-1",
+            docstatus=0,
+            update_stock=0,
+            taxes=[],
+            grand_total=10000,
+        )
+
+        IntercompanyMaterialBillingBatch._validate_generated_invoice(
+            doc,
+            invoice,
+        )
+
+        cases = (
+            ("submitted", {"docstatus": 1}),
+            ("stock movement", {"update_stock": 1}),
+            ("automatic taxes", {"taxes": [frappe._dict(charge_type="On Net Total")]}),
+            ("wrong total", {"grand_total": 9999}),
+        )
+
+        for label, changes in cases:
+            with self.subTest(label=label):
+                candidate = frappe._dict(invoice.copy())
+                candidate.update(changes)
+
+                with self.assertRaises(frappe.ValidationError):
+                    IntercompanyMaterialBillingBatch._validate_generated_invoice(
+                        doc,
+                        candidate,
+                    )
+
+    def test_approval_creates_cross_linked_draft_invoices_and_marks_batch_approved(self):
+        doc = batch(
+            status="Under Review",
+            finalized_on="2026-11-01 08:00:00",
+            finalized_by="finance@example.com",
+            total_amount=10000,
+            sales_invoice=None,
+            purchase_invoice=None,
+            approved_by=None,
+            approved_on=None,
+        )
+
+        issuing_defaults = frappe._dict(
+            currency="PHP",
+            cost_center="Main - CCPC",
+            receivable_account="1312 - Intercompany Receivable - CCPC",
+            income_account="6050 - Intercompany Material Charges - CCPC",
+        )
+        requesting_defaults = frappe._dict(
+            currency="PHP",
+            cost_center="Main - RMC",
+            payable_account="2121 - Intercompany Payable - RMC",
+            expense_account="5150 - Intercompany Materials Expense - RMC",
+        )
+
+        doc._get_company_invoice_defaults.side_effect = [
+            issuing_defaults,
+            requesting_defaults,
+        ]
+        doc._get_internal_party.side_effect = [
+            "Ricor Mills Corporation",
+            "Cagayan Corn Products Corporation",
+        ]
+
+        sales_invoice = MagicMock()
+        sales_invoice.name = "SINV-2026-00001"
+
+        purchase_invoice = MagicMock()
+        purchase_invoice.name = "PINV-2026-00001"
+
+        doc._build_sales_invoice.return_value = sales_invoice
+        doc._build_purchase_invoice.return_value = purchase_invoice
+
+        with (
+            patch(
+                f"{MODULE}.frappe.session",
+                frappe._dict(user="finance@example.com"),
+            ),
+            patch(
+                f"{MODULE}.now_datetime",
+                return_value="2026-11-01 09:00:00",
+            ),
+        ):
+            result = (
+                IntercompanyMaterialBillingBatch.approve_and_create_invoices(
+                    doc
+                )
+            )
+
+        doc._require_finance_approver.assert_called_once_with()
+        doc._require_under_review_for_approval.assert_called_once_with()
+        doc._validate_finalization_state.assert_called_once_with()
+        doc._validate_items.assert_called_once_with()
+        doc._validate_nonempty_finalized_batch.assert_called_once_with()
+        doc._set_totals.assert_called_once_with()
+
+        self.assertEqual(
+            doc._get_company_invoice_defaults.call_args_list[0].args,
+            ("Cagayan Corn Products Corporation",),
+        )
+        self.assertEqual(
+            doc._get_company_invoice_defaults.call_args_list[1].args,
+            ("Ricor Mills Corporation",),
+        )
+
+        doc._build_sales_invoice.assert_called_once_with(
+            "Ricor Mills Corporation",
+            issuing_defaults,
+        )
+        doc._build_purchase_invoice.assert_called_once_with(
+            "Cagayan Corn Products Corporation",
+            requesting_defaults,
+            "SINV-2026-00001",
+        )
+
+        sales_invoice.insert.assert_called_once_with(
+            ignore_permissions=True
+        )
+        purchase_invoice.insert.assert_called_once_with(
+            ignore_permissions=True
+        )
+
+        self.assertEqual(
+            sales_invoice.inter_company_invoice_reference,
+            "PINV-2026-00001",
+        )
+        sales_invoice.save.assert_called_once_with(
+            ignore_permissions=True
+        )
+
+        self.assertEqual(doc.status, "Approved")
+        self.assertEqual(doc.approved_by, "finance@example.com")
+        self.assertEqual(doc.approved_on, "2026-11-01 09:00:00")
+        self.assertEqual(doc.sales_invoice, "SINV-2026-00001")
+        self.assertEqual(doc.purchase_invoice, "PINV-2026-00001")
+        doc.save.assert_called_once_with()
+
+        self.assertEqual(result["status"], "Approved")
+        self.assertEqual(
+            result["sales_invoice"],
+            "SINV-2026-00001",
+        )
+        self.assertEqual(
+            result["purchase_invoice"],
+            "PINV-2026-00001",
+        )
+        self.assertEqual(
+            getdate(result["posting_date"]),
+            getdate("2026-10-31"),
+        )
+        self.assertEqual(result["total_amount"], 10000)
+
     def test_empty_draft_batch_is_allowed(self):
         doc = batch(status="Draft", items=[])
 

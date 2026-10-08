@@ -38,6 +38,7 @@ const {
     can_manage_intercompany_billing,
     refresh_preview,
     finalize_month,
+    approve_and_create_invoices,
 } = require("./intercompany_material_billing_batch.js");
 
 
@@ -117,10 +118,21 @@ async function run() {
     handlers.refresh(newBatch);
     assert.equal(newBatch.buttons.length, 0);
 
-    // Under Review batches are frozen from refresh actions.
+    // Under Review batches show only the approval action.
     const underReview = form({ status: "Under Review" });
     handlers.refresh(underReview);
-    assert.equal(underReview.buttons.length, 0);
+
+    assert.deepEqual(
+        underReview.buttons.map((button) => [button.label, button.group]),
+        [
+            ["Approve & Create Invoices", "Actions"],
+        ]
+    );
+
+    // Approved batches should not show billing actions.
+    const approved = form({ status: "Approved" });
+    handlers.refresh(approved);
+    assert.equal(approved.buttons.length, 0);
 
     // Non-finance users should not see actions.
     frappe.user_roles = [];
@@ -177,6 +189,41 @@ async function run() {
     assert.equal(alerts.length, 1);
     assert.match(alerts[0].message, /4 line\(s\)/);
     assert.match(alerts[0].message, /20000/);
+
+    // Approval requires confirmation, creates both Draft invoices, then reloads.
+    alerts = [];
+    confirmMessage = null;
+
+    const approvalBatch = form({
+        status: "Under Review",
+        dirty: true,
+        callResults: {
+            approve_and_create_invoices: {
+                status: "Approved",
+                sales_invoice: "SINV-2026-00001",
+                purchase_invoice: "PINV-2026-00001",
+                posting_date: "2026-10-31",
+                total_amount: 20000,
+            },
+        },
+    });
+
+    await approve_and_create_invoices(approvalBatch);
+
+    assert.equal(approvalBatch.saved, 1);
+    assert.match(confirmMessage, /matching Draft Sales Invoice and Purchase Invoice/);
+
+    // frappe.confirm callback is async; allow it to complete.
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(
+        approvalBatch.calls,
+        ["approve_and_create_invoices"]
+    );
+    assert.equal(approvalBatch.reloaded, 1);
+    assert.equal(alerts.length, 1);
+    assert.match(alerts[0].message, /SINV-2026-00001/);
+    assert.match(alerts[0].message, /PINV-2026-00001/);
 }
 
 run().catch((error) => {
