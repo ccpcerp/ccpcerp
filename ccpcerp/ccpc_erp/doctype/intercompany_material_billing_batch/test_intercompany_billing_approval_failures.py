@@ -7,10 +7,16 @@ require a separately approved DEVELOPMENT database integration test.
 """
 
 from unittest import TestCase
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.intercompany_material_billing_batch import (
     IntercompanyMaterialBillingBatch,
+)
+
+
+MODULE = (
+    "ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch."
+    "intercompany_material_billing_batch"
 )
 
 
@@ -96,7 +102,14 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
             "injected batch save failure"
         )
 
-        with self.assertRaisesRegex(RuntimeError, "injected batch save failure"):
+        with (
+            patch(
+                f"{MODULE}.frappe.session",
+                MagicMock(user="finance@example.com"),
+            ),
+            patch(f"{MODULE}.now_datetime", return_value="2026-10-12 10:00:00"),
+            self.assertRaisesRegex(RuntimeError, "injected batch save failure"),
+        ):
             self.approve()
 
         self.sales_invoice.insert.assert_called_once_with(ignore_permissions=True)
