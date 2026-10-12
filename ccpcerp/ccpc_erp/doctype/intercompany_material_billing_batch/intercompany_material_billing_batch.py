@@ -1,6 +1,8 @@
 # Copyright (c) 2026, CCPC and contributors
 # For license information, please see license.txt
 
+from collections import Counter
+
 import frappe
 from frappe import _
 from frappe.model.document import Document
@@ -8,18 +10,131 @@ from frappe.utils import flt, get_first_day, get_last_day, getdate, now_datetime
 
 
 EPSILON = 0.000001
+ER_CHECKREAD = 1020
+BILLING_SCOPE_FIELDS = (
+    "issuing_company",
+    "requesting_company",
+    "billing_month",
+)
+APPROVAL_PROTECTED_FIELDS = (
+    "sales_invoice",
+    "purchase_invoice",
+    "approved_by",
+    "approved_on",
+)
+FINALIZATION_AUDIT_FIELDS = (
+    "last_refreshed_on",
+    "finalized_on",
+    "finalized_by",
+)
+_AUTHORIZED_WORKFLOW_TRANSITION = object()
+_WORKFLOW_TRANSITION_FLAG = "_intercompany_material_billing_workflow_transition"
+_AUTHORIZED_ITEM_REBUILD = object()
+_ITEM_REBUILD_FLAG = "_intercompany_material_billing_item_rebuild"
+
+
+def get_wrapped_database_errno(error):
+    """Return the errno from a database exception wrapped by Frappe."""
+    original = error.__cause__
+    if original is None and error.args and isinstance(error.args[0], BaseException):
+        original = error.args[0]
+    return original.args[0] if original and original.args else None
 
 
 class IntercompanyMaterialBillingBatch(Document):
+    def on_trash(self):
+        persisted, has_items = self._get_locked_deletion_state()
+        protected_values = (
+            persisted.sales_invoice,
+            persisted.purchase_invoice,
+            persisted.approved_by,
+            persisted.approved_on,
+            persisted.last_refreshed_on,
+            persisted.finalized_on,
+            persisted.finalized_by,
+        )
+
+        if (
+            persisted.status != "Draft"
+            or persisted.docstatus != 0
+            or has_items
+            or any(value is not None and type(value) is not str for value in protected_values)
+            or any(type(value) is str and value != "" for value in protected_values)
+        ):
+            frappe.throw(_("Only an empty, unprocessed Draft billing batch can be deleted."))
+
+    def before_discard(self):
+        frappe.throw(
+            _(
+                "Intercompany Material Billing Batches cannot use the standard "
+                "Discard action. Use the controlled billing batch cancellation process."
+            )
+        )
+
+    def _get_locked_deletion_state(self):
+        persisted_rows = frappe.db.sql(
+            """
+            SELECT
+                status,
+                docstatus,
+                sales_invoice,
+                purchase_invoice,
+                approved_by,
+                approved_on,
+                last_refreshed_on,
+                finalized_on,
+                finalized_by
+            FROM `tabIntercompany Material Billing Batch`
+            WHERE name = %s
+            FOR UPDATE
+            """,
+            (self.name,),
+            as_dict=True,
+        )
+        if not persisted_rows:
+            frappe.throw(
+                _(
+                    "The persisted billing batch state could not be verified. "
+                    "Deletion was not performed."
+                )
+            )
+
+        item_rows = frappe.db.sql(
+            """
+            SELECT name
+            FROM `tabIntercompany Material Billing Item`
+            WHERE parent = %(parent)s
+              AND parenttype = %(parenttype)s
+              AND parentfield = %(parentfield)s
+            LIMIT 1
+            FOR UPDATE
+            """,
+            {
+                "parent": self.name,
+                "parenttype": "Intercompany Material Billing Batch",
+                "parentfield": "items",
+            },
+            as_dict=True,
+        )
+        return persisted_rows[0], bool(item_rows)
+
     def before_validate(self):
         self._set_billing_period()
 
     def validate(self):
         self._validate_companies()
+        self._validate_billing_scope_immutability()
+        self._validate_status_transition()
+        self._validate_finalization_audit_immutability()
+        self._validate_approval_fields_immutability()
+        self._validate_source_membership_immutability()
+        validate_source_claims = self._source_membership_may_change()
+        if validate_source_claims:
+            self._acquire_billing_scope_lock()
         self._validate_batch_uniqueness()
         self._validate_month_end_approval()
         self._validate_finalization_state()
-        self._validate_items()
+        self._validate_items(validate_source_claims=validate_source_claims)
         self._validate_nonempty_finalized_batch()
         self._set_totals()
 
@@ -41,7 +156,333 @@ class IntercompanyMaterialBillingBatch(Document):
                 _("Issuing Company and Requesting Company must be different.")
             )
 
+    def _validate_billing_scope_immutability(self):
+        if self.is_new():
+            return
+
+        before = self.get_doc_before_save()
+        if not before:
+            self._throw_unverified_saved_state()
+
+        for fieldname in BILLING_SCOPE_FIELDS:
+            current_value = self.get(fieldname)
+            previous_value = before.get(fieldname)
+
+            if fieldname == "billing_month":
+                current_value = getdate(current_value) if current_value else None
+                previous_value = getdate(previous_value) if previous_value else None
+
+            if current_value != previous_value:
+                frappe.throw(
+                    _("{0} cannot be changed after the billing batch is created.").format(
+                        frappe.bold(self.meta.get_label(fieldname))
+                    )
+                )
+
+    def _validate_status_transition(self):
+        if self.is_new():
+            if self.status != "Draft":
+                frappe.throw(_("A new billing batch must start in Draft status."))
+            return
+
+        before = self.get_doc_before_save()
+        if not before:
+            self._throw_unverified_saved_state()
+
+        previous_status = before.status
+        current_status = self.status
+
+        if previous_status == current_status:
+            return
+
+        transition = (previous_status, current_status)
+        if transition in {
+            ("Draft", "Under Review"),
+            ("Under Review", "Approved"),
+        } and self._workflow_transition_is_authorized(*transition):
+            return
+
+        if transition in {
+            ("Draft", "Cancelled"),
+            ("Under Review", "Cancelled"),
+        }:
+            populated_fields = [
+                fieldname
+                for fieldname in APPROVAL_PROTECTED_FIELDS
+                if self.get(fieldname) or before.get(fieldname)
+            ]
+            if populated_fields:
+                frappe.throw(
+                    _(
+                        "A billing batch with invoice or approval information "
+                        "cannot be cancelled."
+                    )
+                )
+            return
+
+        if previous_status == "Cancelled":
+            frappe.throw(_("A cancelled billing batch cannot be reactivated."))
+
+        frappe.throw(
+            _("Billing batch status cannot be changed from {0} to {1}.").format(
+                frappe.bold(previous_status),
+                frappe.bold(current_status),
+            )
+        )
+
+    def _validate_approval_fields_immutability(self):
+        if self.is_new():
+            changed_fields = [
+                fieldname
+                for fieldname in APPROVAL_PROTECTED_FIELDS
+                if self.get(fieldname)
+            ]
+            if changed_fields:
+                self._throw_protected_approval_fields(changed_fields)
+            return
+
+        before = self.get_doc_before_save()
+        if not before:
+            self._throw_unverified_saved_state()
+
+        changed_fields = [
+            fieldname
+            for fieldname in APPROVAL_PROTECTED_FIELDS
+            if str(self.get(fieldname) or "") != str(before.get(fieldname) or "")
+        ]
+        if not changed_fields:
+            return
+
+        if self._workflow_transition_is_authorized("Under Review", "Approved"):
+            return
+
+        self._throw_protected_approval_fields(changed_fields)
+
+    def _throw_protected_approval_fields(self, fieldnames):
+        labels = ", ".join(
+            frappe.bold(self.meta.get_label(fieldname) or fieldname)
+            for fieldname in fieldnames
+        )
+        frappe.throw(
+            _("Approval and invoice fields cannot be changed directly: {0}.").format(
+                labels
+            )
+        )
+
+    def _validate_finalization_audit_immutability(self):
+        if self.is_new():
+            changed_fields = [
+                fieldname
+                for fieldname in FINALIZATION_AUDIT_FIELDS
+                if self.get(fieldname)
+            ]
+            if changed_fields:
+                self._throw_protected_finalization_audit_fields(changed_fields)
+            return
+
+        before = self.get_doc_before_save()
+        if not before:
+            self._throw_unverified_saved_state()
+
+        changed_fields = [
+            fieldname
+            for fieldname in FINALIZATION_AUDIT_FIELDS
+            if str(self.get(fieldname) or "") != str(before.get(fieldname) or "")
+        ]
+        if not changed_fields:
+            return
+
+        if self._finalization_audit_update_is_authorized(before):
+            if self.status == "Draft" and (
+                self.finalized_on or self.finalized_by
+            ):
+                frappe.throw(
+                    _(
+                        "Refresh Preview must leave Finalized On and Finalized By empty."
+                    )
+                )
+            return
+
+        self._throw_protected_finalization_audit_fields(changed_fields)
+
+    def _throw_protected_finalization_audit_fields(self, fieldnames):
+        labels = ", ".join(
+            frappe.bold(self.meta.get_label(fieldname) or fieldname)
+            for fieldname in fieldnames
+        )
+        frappe.throw(
+            _(
+                "Refresh and finalization audit fields cannot be changed directly: {0}."
+            ).format(labels)
+        )
+
+    def _finalization_audit_update_is_authorized(self, before):
+        if self.flags.get(_ITEM_REBUILD_FLAG) is not _AUTHORIZED_ITEM_REBUILD:
+            return False
+
+        if before.status == "Draft" and self.status == "Draft":
+            return self.flags.get(_WORKFLOW_TRANSITION_FLAG) is None
+
+        return (
+            before.status == "Draft"
+            and self.status == "Under Review"
+            and self._workflow_transition_is_authorized("Draft", "Under Review")
+        )
+
+    def _workflow_transition_is_authorized(self, previous_status, current_status):
+        authorization = self.flags.get(_WORKFLOW_TRANSITION_FLAG)
+        return (
+            isinstance(authorization, tuple)
+            and len(authorization) == 3
+            and authorization[0] is _AUTHORIZED_WORKFLOW_TRANSITION
+            and authorization[1:] == (previous_status, current_status)
+        )
+
+    def _validate_source_membership_immutability(self):
+        if self.is_new():
+            return
+
+        if self.flags.get(_ITEM_REBUILD_FLAG) is _AUTHORIZED_ITEM_REBUILD:
+            return
+
+        before = self.get_doc_before_save()
+        if not before:
+            self._throw_unverified_saved_state()
+
+        current_membership = Counter(
+            row.stock_entry_detail for row in (self.get("items") or [])
+        )
+        previous_membership = Counter(
+            row.stock_entry_detail for row in (before.get("items") or [])
+        )
+
+        if current_membership != previous_membership:
+            frappe.throw(
+                _(
+                    "Source Stock Entry Detail membership cannot be changed after "
+                    "the billing batch is created. Use Refresh Preview or Finalize "
+                    "Month to rebuild billing items."
+                )
+            )
+
+    def _throw_unverified_saved_state(self):
+        frappe.throw(
+            _(
+                "The previous billing batch state could not be verified. "
+                "Please reload and retry in a new request."
+            )
+        )
+
+    def _source_membership_may_change(self):
+        return self.is_new() or (
+            self.flags.get(_ITEM_REBUILD_FLAG) is _AUTHORIZED_ITEM_REBUILD
+        )
+
+    def _acquire_billing_scope_lock(self, company=None):
+        company = company or self.issuing_company
+        if not company:
+            return
+
+        rows = frappe.db.sql(
+            """
+            SELECT name
+            FROM `tabCompany`
+            WHERE name = %s
+            FOR UPDATE
+            """,
+            (company,),
+            as_dict=True,
+        )
+
+        if not rows:
+            frappe.throw(
+                _("Issuing Company {0} does not exist.").format(
+                    frappe.bold(company)
+                )
+            )
+
+        return rows[0].name
+
+    def _lock_and_reload_for_mutation(self):
+        if not self.name or self.is_new():
+            frappe.throw(
+                _("Billing batch must be saved before this action can be performed.")
+            )
+
+        # Use the issuer to acquire the shared Company lock FIRST. This
+        # read can be snapshot-based, so recheck it against the locked row.
+        issuing_company = frappe.db.get_value(
+            "Intercompany Material Billing Batch",
+            self.name,
+            "issuing_company",
+        )
+        if not issuing_company:
+            frappe.throw(
+                _("Billing batch {0} no longer exists.").format(
+                    frappe.bold(self.name)
+                )
+            )
+
+        self._acquire_billing_scope_lock(issuing_company)
+        locked_rows = frappe.db.sql(
+            """
+            SELECT issuing_company, modified, status, sales_invoice, purchase_invoice
+            FROM `tabIntercompany Material Billing Batch`
+            WHERE name = %s
+            FOR UPDATE
+            """,
+            (self.name,),
+            as_dict=True,
+        )
+        if not locked_rows:
+            frappe.throw(
+                _("Billing batch {0} no longer exists.").format(
+                    frappe.bold(self.name)
+                )
+            )
+
+        locked_state = locked_rows[0]
+        if locked_state.issuing_company != issuing_company:
+            frappe.throw(
+                _(
+                    "Issuing Company changed while this billing action was starting. "
+                    "Please retry the action in a new request."
+                )
+            )
+
+        previous_for_update = self.flags.for_update
+        self.flags.for_update = True
+        try:
+            self.reload()
+        finally:
+            self.flags.for_update = previous_for_update
+
+        # With MariaDB REPEATABLE-READ, reload() may return an OLD snapshot
+        # even after a locking read. Never act on inconsistent loaded state.
+        verified_fields = (
+            "issuing_company",
+            "modified",
+            "status",
+            "sales_invoice",
+            "purchase_invoice",
+        )
+        if any(
+            str(getattr(self, field, None)) != str(locked_state.get(field))
+            for field in verified_fields
+        ):
+            frappe.throw(
+                _(
+                    "Billing batch changed in another transaction. "
+                    "Please reload the page and retry the action in a new request."
+                )
+            )
+
+        self.check_permission("write")
+
     def _validate_batch_uniqueness(self):
+        if not self.is_new() or self.status == "Cancelled":
+            return
+
         if not (
             self.issuing_company
             and self.requesting_company
@@ -49,16 +490,29 @@ class IntercompanyMaterialBillingBatch(Document):
         ):
             return
 
-        existing = frappe.db.exists(
-            "Intercompany Material Billing Batch",
-            {
-                "issuing_company": self.issuing_company,
-                "requesting_company": self.requesting_company,
-                "billing_month": self.billing_month,
-                "status": ["!=", "Cancelled"],
-                "name": ["!=", self.name or ""],
-            },
-        )
+        try:
+            existing = frappe.db.get_value(
+                "Intercompany Material Billing Batch",
+                {
+                    "issuing_company": self.issuing_company,
+                    "requesting_company": self.requesting_company,
+                    "billing_month": self.billing_month,
+                    "status": ["!=", "Cancelled"],
+                    "name": ["!=", self.name or ""],
+                },
+                "name",
+                order_by=None,
+                for_update=True,
+            )
+        except frappe.QueryDeadlockError as error:
+            if get_wrapped_database_errno(error) == ER_CHECKREAD:
+                frappe.throw(
+                    _(
+                        "Another billing batch changed concurrently. Nothing was saved. "
+                        "Please reload and retry in a new request."
+                    )
+                )
+            raise
 
         if existing:
             frappe.throw(
@@ -73,7 +527,7 @@ class IntercompanyMaterialBillingBatch(Document):
                 )
             )
 
-    def _validate_items(self):
+    def _validate_items(self, validate_source_claims=True):
         seen = set()
 
         for row in self.get("items") or []:
@@ -92,7 +546,8 @@ class IntercompanyMaterialBillingBatch(Document):
 
             seen.add(row.stock_entry_detail)
 
-            self._validate_not_billed_elsewhere(row)
+            if validate_source_claims:
+                self._validate_not_billed_elsewhere(row)
             source = self._get_source_context(row)
             self._validate_source_context(row, source)
             self._validate_snapshot(row, source)
@@ -137,30 +592,8 @@ class IntercompanyMaterialBillingBatch(Document):
             frappe.throw(_("Finalized By is required after the final month-end refresh."))
 
     def _validate_not_billed_elsewhere(self, row):
-        filters = {
-            "stock_entry_detail": row.stock_entry_detail,
-            "parenttype": "Intercompany Material Billing Batch",
-        }
-
-        if self.name:
-            filters["parent"] = ["!=", self.name]
-
-        matches = frappe.get_all(
-            "Intercompany Material Billing Item",
-            filters=filters,
-            fields=["name", "parent"],
-        )
-
-        for match in matches:
-            status = frappe.db.get_value(
-                "Intercompany Material Billing Batch",
-                match.parent,
-                "status",
-            )
-
-            if status == "Cancelled":
-                continue
-
+        claimed_by = self._get_active_source_claim(row.stock_entry_detail)
+        if claimed_by:
             frappe.throw(
                 _(
                     "Row {0}: Stock Entry Detail {1} is already assigned "
@@ -168,7 +601,7 @@ class IntercompanyMaterialBillingBatch(Document):
                 ).format(
                     row.idx,
                     frappe.bold(row.stock_entry_detail),
-                    frappe.bold(match.parent),
+                    frappe.bold(claimed_by),
                 )
             )
 
@@ -527,30 +960,74 @@ class IntercompanyMaterialBillingBatch(Document):
         ]
 
     def _source_row_is_claimed_elsewhere(self, stock_entry_detail):
-        filters = {
-            "stock_entry_detail": stock_entry_detail,
-            "parenttype": "Intercompany Material Billing Batch",
-        }
+        return bool(self._get_active_source_claim(stock_entry_detail))
 
-        if self.name:
-            filters["parent"] = ["!=", self.name]
-
-        matches = frappe.get_all(
-            "Intercompany Material Billing Item",
-            filters=filters,
-            fields=["parent"],
-        )
-
-        for match in matches:
-            status = frappe.db.get_value(
-                "Intercompany Material Billing Batch",
-                match.parent,
-                "status",
+    def _get_active_source_claim(self, stock_entry_detail):
+        try:
+            matches = frappe.db.sql(
+                """
+                SELECT item.parent
+                FROM `tabIntercompany Material Billing Item` item
+                INNER JOIN `tabIntercompany Material Billing Batch` batch
+                    ON batch.name = item.parent
+                   AND item.parenttype = 'Intercompany Material Billing Batch'
+                WHERE item.stock_entry_detail = %(stock_entry_detail)s
+                  AND item.parent != %(current_batch)s
+                  AND batch.status != 'Cancelled'
+                LIMIT 1
+                FOR UPDATE
+                """,
+                {
+                    "stock_entry_detail": stock_entry_detail,
+                    "current_batch": self.name or "",
+                },
+                as_dict=True,
             )
-            if status != "Cancelled":
-                return True
+        except frappe.QueryDeadlockError as error:
+            if get_wrapped_database_errno(error) == ER_CHECKREAD:
+                frappe.throw(
+                    _(
+                        "Another billing batch changed concurrently. Nothing was saved. "
+                        "Please reload and retry in a new request."
+                    )
+                )
+            raise
 
-        return False
+        return matches[0].parent if matches else None
+
+    def _save_authorized_item_rebuild(self):
+        previous_authorization = self.flags.get(_ITEM_REBUILD_FLAG)
+        self.flags[_ITEM_REBUILD_FLAG] = _AUTHORIZED_ITEM_REBUILD
+        try:
+            self.save()
+        finally:
+            if previous_authorization is None:
+                self.flags.pop(_ITEM_REBUILD_FLAG, None)
+            else:
+                self.flags[_ITEM_REBUILD_FLAG] = previous_authorization
+
+    def _save_authorized_workflow_transition(
+        self,
+        previous_status,
+        current_status,
+        save_method=None,
+    ):
+        previous_authorization = self.flags.get(_WORKFLOW_TRANSITION_FLAG)
+        self.flags[_WORKFLOW_TRANSITION_FLAG] = (
+            _AUTHORIZED_WORKFLOW_TRANSITION,
+            previous_status,
+            current_status,
+        )
+        try:
+            if save_method is None:
+                self.save()
+            else:
+                save_method()
+        finally:
+            if previous_authorization is None:
+                self.flags.pop(_WORKFLOW_TRANSITION_FLAG, None)
+            else:
+                self.flags[_WORKFLOW_TRANSITION_FLAG] = previous_authorization
 
     def _rebuild_items_from_sources(self):
         source_rows = self._get_eligible_source_rows()
@@ -588,6 +1065,7 @@ class IntercompanyMaterialBillingBatch(Document):
     @frappe.whitelist()
     def refresh_preview(self):
         self.check_permission("write")
+        self._lock_and_reload_for_mutation()
         self._require_draft_refresh()
         self._set_billing_period()
 
@@ -596,7 +1074,7 @@ class IntercompanyMaterialBillingBatch(Document):
         self.last_refreshed_on = now_datetime()
         self.finalized_on = None
         self.finalized_by = None
-        self.save()
+        self._save_authorized_item_rebuild()
 
         return {
             "name": self.name,
@@ -608,6 +1086,7 @@ class IntercompanyMaterialBillingBatch(Document):
     @frappe.whitelist()
     def finalize_month(self):
         self.check_permission("write")
+        self._lock_and_reload_for_mutation()
         self._require_draft_refresh()
         self._set_billing_period()
 
@@ -628,7 +1107,11 @@ class IntercompanyMaterialBillingBatch(Document):
         self.finalized_on = now
         self.finalized_by = frappe.session.user
         self.status = "Under Review"
-        self.save()
+        self._save_authorized_workflow_transition(
+            "Draft",
+            "Under Review",
+            save_method=self._save_authorized_item_rebuild,
+        )
 
         return {
             "name": self.name,
@@ -959,6 +1442,7 @@ class IntercompanyMaterialBillingBatch(Document):
     @frappe.whitelist()
     def approve_and_create_invoices(self):
         self._require_finance_approver()
+        self._lock_and_reload_for_mutation()
         self._require_under_review_for_approval()
 
         self._set_billing_period()
@@ -1007,7 +1491,10 @@ class IntercompanyMaterialBillingBatch(Document):
         self.sales_invoice = sales_invoice.name
         self.purchase_invoice = purchase_invoice.name
         self.status = "Approved"
-        self.save()
+        self._save_authorized_workflow_transition(
+            "Under Review",
+            "Approved",
+        )
 
         return {
             "name": self.name,

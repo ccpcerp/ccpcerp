@@ -252,7 +252,13 @@ has_permission = {
 
 extend_doctype_class = {
 	"Purchase Order": "ccpcerp.ccpc_erp.purchase_order_required_by.PurchaseOrderRequiredByMixin",
+	"Transaction Deletion Record": (
+		"ccpcerp.ccpc_erp.transaction_deletion_protection."
+		"TransactionDeletionProtectionMixin"
+	),
 }
+
+company_data_to_be_ignored = ["Intercompany Material Billing Batch"]
 
 # Permissions
 # -----------
