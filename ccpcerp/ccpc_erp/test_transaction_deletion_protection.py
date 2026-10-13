@@ -1,5 +1,5 @@
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import frappe
 
@@ -67,6 +67,12 @@ def affected(invoice_name="SINV-1", batch_name="ICMB-1", **values):
 
 class TestTransactionDeletionProtection(TestCase):
     def setUp(self):
+        # Standalone unittest does not bind Frappe's database LocalProxy.
+        # Use a per-test mock and restore the original proxy afterward.
+        original_db = frappe.__dict__["db"]
+        frappe.__dict__["db"] = MagicMock()
+        self.addCleanup(frappe.__dict__.__setitem__, "db", original_db)
+
         self.enterContext(
             patch(f"{MODULE}.frappe.throw", side_effect=raise_validation_error)
         )
