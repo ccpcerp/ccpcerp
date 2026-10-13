@@ -156,6 +156,13 @@ def batch(**values):
 
 class TestIntercompanyMaterialBillingBatch(TestCase):
     def setUp(self):
+        # Standalone unittest does not bind Frappe's LocalProxy database.
+        # Replace it only for this test and restore it on cleanup so
+        # nested patch(...frappe.db.sql/get_value) works without a site.
+        original_db = frappe.__dict__["db"]
+        frappe.__dict__["db"] = MagicMock()
+        self.addCleanup(frappe.__dict__.__setitem__, "db", original_db)
+
         translation = patch(f"{MODULE}._", side_effect=lambda value: value)
         translation.start()
         self.addCleanup(translation.stop)
