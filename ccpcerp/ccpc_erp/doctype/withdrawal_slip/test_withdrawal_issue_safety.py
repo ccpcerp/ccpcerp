@@ -38,6 +38,7 @@ class TestWithdrawalIssueSafety(TestCase):
 		query, args = sql.call_args.args
 		self.assertIn("FOR UPDATE", query)
 		self.assertIn("`tabWithdrawal Slip`", query)
+		self.assertIn("owner, approving_supervisor", query)
 		self.assertEqual(args, ("WS-1",))
 		self.assertTrue(sql.call_args.kwargs["as_dict"])
 
@@ -188,7 +189,7 @@ class TestWithdrawalIssueSafety(TestCase):
 		get_doc.return_value = slip
 		entry = frappe._dict(withdrawal_slip="WS-1", docstatus=1)
 
-		with self.assertRaises(frappe.ValidationError):
+		with patch(f"{MODULE}._assert_independent_issuer"), self.assertRaises(frappe.ValidationError):
 			validate_withdrawal_slip_stock_entry(entry, method="before_submit")
 
 		lock.assert_called_once_with("WS-1")
