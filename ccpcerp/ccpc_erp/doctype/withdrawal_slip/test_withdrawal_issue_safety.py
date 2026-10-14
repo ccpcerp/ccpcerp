@@ -23,6 +23,14 @@ MODULE = "ccpcerp.ccpc_erp.withdrawal_slip_stock"
 
 
 class TestWithdrawalIssueSafety(TestCase):
+	def setUp(self):
+		# These mocked tests intentionally avoid frappe.init()/connect().
+		# Replace the module's translation helper so fail-closed branches
+		# do not attempt to load Redis translations or initialize a logger.
+		translator = patch(f"{MODULE}._", side_effect=lambda message: message)
+		translator.start()
+		self.addCleanup(translator.stop)
+
 	@patch(f"{MODULE}.frappe.db.sql")
 	def test_parent_lock_uses_current_read(self, sql):
 		sql.return_value = [frappe._dict(status="Stockroom Review")]
