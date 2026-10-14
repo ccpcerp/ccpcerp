@@ -96,30 +96,23 @@ class TestWithdrawalIssueSafety(TestCase):
 		stock_entry.submit.assert_called_once_with()
 		self.assertEqual(result, {"name": "MAT-STE-1", "submitted": 1})
 
-	@patch(f"{MODULE}.frappe.get_doc")
+	@patch(f"{MODULE}.frappe.throw", side_effect=frappe.ValidationError)
+	@patch(f"{MODULE}._build_material_issue")
 	@patch(f"{MODULE}._get_existing_draft_names", return_value=["MAT-STE-1"])
 	@patch(f"{MODULE}._assert_no_submitted_material_issue")
 	@patch(f"{MODULE}._get_issuable_slip")
 	@patch(f"{MODULE}._lock_withdrawal_slip")
 	@patch(f"{MODULE}._require_stockroom_user")
-	def test_existing_single_draft_is_validated_and_submitted(
-		self, stockroom, lock, get_slip, submitted, drafts, get_doc
+	def test_single_preexisting_draft_is_never_privilege_submitted(
+		self, stockroom, lock, get_slip, submitted, drafts, build, throw
 	):
 		get_slip.return_value = frappe._dict(name="WS-1")
-		stock_entry = MagicMock()
-		stock_entry.name = "MAT-STE-1"
-		stock_entry.withdrawal_slip = "WS-1"
-		stock_entry.docstatus = 0
-		stock_entry.flags = frappe._dict()
-		get_doc.return_value = stock_entry
 
-		result = issue_withdrawal_slip("WS-1")
+		with self.assertRaises(frappe.ValidationError):
+			issue_withdrawal_slip("WS-1")
 
-		get_doc.assert_called_once_with("Stock Entry", "MAT-STE-1")
-		stock_entry.insert.assert_not_called()
-		stock_entry.submit.assert_called_once()
-		self.assertTrue(stock_entry.flags.ignore_permissions)
-		self.assertEqual(result["submitted"], 1)
+		build.assert_not_called()
+		throw.assert_called_once()
 
 	@patch(f"{MODULE}.frappe.throw", side_effect=frappe.ValidationError)
 	@patch(f"{MODULE}._build_material_issue")
