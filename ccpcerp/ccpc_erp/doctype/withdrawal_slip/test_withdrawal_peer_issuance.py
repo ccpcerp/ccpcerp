@@ -57,6 +57,63 @@ class TestWithdrawalPeerIssuance(TestCase):
         self.session.user = "pedro@example.test"
         _assert_independent_issuer(self.locked("supervisor@example.test"))
 
+    @patch(f"{MODULE}.frappe.get_doc")
+    def test_peer_can_reach_issuable_slip_after_locked_identity_check(self, get_doc):
+        self.session.user = "pedro@example.test"
+        locked = self.locked("juan@example.test")
+        slip = frappe._dict(locked)
+        slip.name = "WS-PEER"
+        slip.check_permission = MagicMock()
+        get_doc.return_value = slip
+
+        result = _get_issuable_slip("WS-PEER", locked)
+
+        self.assertIs(result, slip)
+        slip.check_permission.assert_called_once_with("write")
+
+    @patch(f"{MODULE}.frappe.get_doc")
+    def test_supervisor_prepared_slip_can_reach_peer_submission(self, get_doc):
+        self.session.user = "pedro@example.test"
+        locked = self.locked("supervisor@example.test")
+        slip = frappe._dict(locked)
+        slip.name = "WS-PROXY"
+        slip.check_permission = MagicMock()
+        get_doc.return_value = slip
+
+        entry = MagicMock()
+        entry.name = "STE-PEER"
+        entry.flags = frappe._dict()
+
+        with (patch(f"{MODULE}._require_stockroom_user"),
+              patch(f"{MODULE}._lock_withdrawal_slip", return_value=locked),
+              patch(f"{MODULE}._assert_no_submitted_material_issue"),
+              patch(f"{MODULE}._get_existing_draft_names", return_value=[]),
+              patch(f"{MODULE}._build_material_issue", return_value=entry)):
+            result = issue_withdrawal_slip("WS-PROXY")
+
+        self.assertEqual(result, {"name": "STE-PEER", "submitted": 1})
+        self.assertTrue(entry.flags.ignore_permissions)
+        entry.insert.assert_called_once_with(ignore_permissions=True)
+        entry.submit.assert_called_once()
+
+    @patch(f"{MODULE}.frappe.get_doc")
+    def test_peer_before_submit_reaches_duplicate_issue_backstop(self, get_doc):
+        self.session.user = "pedro@example.test"
+        locked = self.locked("juan@example.test")
+        slip = frappe._dict(locked)
+        slip.name = "WS-PEER"
+        get_doc.return_value = slip
+        entry = frappe._dict(withdrawal_slip="WS-PEER", docstatus=1)
+
+        with (patch(f"{MODULE}._require_stockroom_user"),
+              patch(f"{MODULE}._lock_withdrawal_slip", return_value=locked),
+              patch(f"{MODULE}._assert_no_submitted_material_issue",
+                    side_effect=frappe.ValidationError) as duplicate):
+            with self.assertRaises(frappe.ValidationError):
+                validate_withdrawal_slip_stock_entry(entry, method="before_submit")
+
+        duplicate.assert_called_once_with("WS-PEER")
+
     def test_guest_and_unset_identity_are_denied(self):
         for issuer in (None, "Guest"):
             with self.subTest(issuer=issuer):
