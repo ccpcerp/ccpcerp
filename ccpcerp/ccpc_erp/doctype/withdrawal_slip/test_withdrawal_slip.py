@@ -673,6 +673,7 @@ class TestWithdrawalSlip(TestCase):
 			company="CCPC",
 			source_warehouse="Warehouse 1 - CCPC",
 		)),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_independent_issuer"),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
 			self.assertRaises(frappe.ValidationError),
 		):
@@ -744,6 +745,7 @@ class TestWithdrawalSlip(TestCase):
 			company="CCPC",
 			source_warehouse="Warehouse 1 - CCPC",
 		)),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_independent_issuer"),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
 		):
 			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
