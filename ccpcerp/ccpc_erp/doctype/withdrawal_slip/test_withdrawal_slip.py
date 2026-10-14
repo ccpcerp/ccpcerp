@@ -666,7 +666,16 @@ class TestWithdrawalSlip(TestCase):
 				)
 			],
 		)
-		with self.assertRaises(frappe.ValidationError):
+		with (
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._lock_withdrawal_slip", return_value=frappe._dict(
+			status="Stockroom Review",
+			received_by="Pedro Santos",
+			company="CCPC",
+			source_warehouse="Warehouse 1 - CCPC",
+		)),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+			self.assertRaises(frappe.ValidationError),
+		):
 			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._require_stockroom_user")
@@ -728,7 +737,16 @@ class TestWithdrawalSlip(TestCase):
 				)
 			],
 		)
-		validate_withdrawal_slip_stock_entry(doc, method="before_submit")
+		with (
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._lock_withdrawal_slip", return_value=frappe._dict(
+			status="Stockroom Review",
+			received_by="Pedro Santos",
+			company="CCPC",
+			source_warehouse="Warehouse 1 - CCPC",
+		)),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+		):
+			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 		self.assertEqual(doc.withdrawal_slip_issued_by, "stockroom@personnel1.com")
 
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
