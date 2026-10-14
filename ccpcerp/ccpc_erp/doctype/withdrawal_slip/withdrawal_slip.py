@@ -252,6 +252,8 @@ class WithdrawalSlip(Document):
 		before = self.get_doc_before_save()
 		if before and before.approving_supervisor != self.approving_supervisor:
 			frappe.throw(_("Prepared By cannot be changed after the Withdrawal Slip is saved."))
+		if before and before.owner != self.owner:
+			frappe.throw(_("Withdrawal Slip creator cannot be changed after the document is saved."))
 
 	def _validate_job_order_context(self):
 		if not self.job_order:
