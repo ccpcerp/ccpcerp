@@ -124,7 +124,7 @@ def _build_material_issue(slip):
 	return stock_entry
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def make_material_issue(withdrawal_slip):
 	"""Legacy draft action, only for users with regular Stock Entry creation rights."""
 	_require_stockroom_user()
@@ -149,7 +149,7 @@ def make_material_issue(withdrawal_slip):
 	return {"name": stock_entry.name, "existing": 0}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def issue_withdrawal_slip(withdrawal_slip):
 	"""Atomically submit one slip-bound Material Issue without broad Stock Entry roles.
 
