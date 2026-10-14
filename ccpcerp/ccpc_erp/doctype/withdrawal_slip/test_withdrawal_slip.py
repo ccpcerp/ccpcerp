@@ -282,7 +282,14 @@ class TestWithdrawalSlip(TestCase):
 		detail_meta.has_field.return_value = True
 		get_meta.return_value = detail_meta
 
-		result = make_material_issue(slip.name)
+		with (
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.has_permission", return_value=True),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._lock_withdrawal_slip"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_issuable_slip", return_value=slip),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_existing_draft_names", return_value=[]),
+		):
+			result = make_material_issue(slip.name)
 
 		self.assertEqual(stock_entry.company, "Cagayan Corn Products Corporation")
 		self.assertNotEqual(stock_entry.department, "Maintenance Department - RMC")
