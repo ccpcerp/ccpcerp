@@ -162,20 +162,18 @@ def issue_withdrawal_slip(withdrawal_slip):
 	_assert_no_submitted_material_issue(slip.name)
 
 	drafts = _get_existing_draft_names(slip.name)
-	if len(drafts) > 1:
-		frappe.throw(_("Multiple draft Material Issues exist for this Withdrawal Slip."))
 	if drafts:
-		stock_entry = frappe.get_doc("Stock Entry", drafts[0])
-		if stock_entry.withdrawal_slip != slip.name or stock_entry.docstatus != 0:
-			frappe.throw(_("Existing draft Material Issue is not valid for this Withdrawal Slip."))
-	else:
-		stock_entry = _build_material_issue(slip)
+		frappe.throw(
+			_("Withdrawal Slip {0} already has a draft Material Issue. Have an authorized Stock Entry user review or discard that draft before issuing.").format(
+				frappe.bold(slip.name)
+			)
+		)
 
-	# This scoped privilege applies only to this server-constructed/linked document
-	# after verifying the caller's Stockroom role, Slip write access and row lock.
+	# Never elevate permissions on a pre-existing user-editable Stock Entry draft:
+	# it could carry expense account, costing or other posting-related overrides.
+	stock_entry = _build_material_issue(slip)
 	stock_entry.flags.ignore_permissions = True
-	if not drafts:
-		stock_entry.insert(ignore_permissions=True)
+	stock_entry.insert(ignore_permissions=True)
 	stock_entry.submit()  # Runs normal Stock Entry validators, stock ledger and GL hooks.
 	return {"name": stock_entry.name, "submitted": 1}
 
