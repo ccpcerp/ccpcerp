@@ -616,11 +616,22 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             issuer_sid, issuer_token = create_cookie_session(ISSUER)
             issuer = make_client(issuer_sid)
             get_denied = call(issuer, "get")
-            self.assertNotEqual(get_denied.status_code, 200)
+            self.assertEqual(get_denied.status_code, 403)
+            self.assertEqual((get_denied.get_json() or {}).get("exc_type"), "PermissionError")
             missing_csrf = call(issuer, "post")
-            self.assertNotEqual(missing_csrf.status_code, 200)
+            self.assertEqual(missing_csrf.status_code, 403)
+            self.assertEqual(
+                (missing_csrf.get_json() or {}).get("exc_type"),
+                "CSRFTokenError",
+                "Missing CSRF must fail specifically in Frappe's request-security layer",
+            )
             invalid_csrf = call(issuer, "post", "incorrect-ci-token")
-            self.assertNotEqual(invalid_csrf.status_code, 200)
+            self.assertEqual(invalid_csrf.status_code, 403)
+            self.assertEqual(
+                (invalid_csrf.get_json() or {}).get("exc_type"),
+                "CSRFTokenError",
+                "Wrong CSRF must fail specifically in Frappe's request-security layer",
+            )
 
             # Correct method + genuine session + valid CSRF token should
             # execute Stock Entry submission via actual Frappe request/commit.
