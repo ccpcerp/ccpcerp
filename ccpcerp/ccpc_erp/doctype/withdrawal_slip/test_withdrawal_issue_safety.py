@@ -253,6 +253,38 @@ class TestWithdrawalIssueSafety(TestCase):
 		stockroom.assert_not_called()
 		throw.assert_not_called()
 
+
+	@patch(f"{MODULE}._require_stockroom_user")
+	@patch(f"{MODULE}.frappe.throw", side_effect=frappe.ValidationError)
+	def test_unlinked_child_slip_provenance_is_rejected(self, throw, stockroom):
+		for status, method in ((0, "validate"), (1, "before_submit")):
+			with self.subTest(status=status, method=method):
+				doc = MagicMock()
+				doc.docstatus = status
+				doc.get.side_effect = lambda key: (
+					[frappe._dict(withdrawal_slip_item="WSI-FORGED")]
+					if key == "items" else None
+				)
+				with self.assertRaises(frappe.ValidationError):
+					validate_withdrawal_slip_stock_entry(doc, method=method)
+				doc.get_doc_before_save.assert_not_called()
+		stockroom.assert_not_called()
+		self.assertEqual(throw.call_count, 2)
+
+	@patch(f"{MODULE}._require_stockroom_user")
+	@patch(f"{MODULE}.frappe.throw", side_effect=frappe.ValidationError)
+	def test_unlinked_entry_with_clean_child_provenance_is_unchanged(self, throw, stockroom):
+		for rows in ([], [frappe._dict(withdrawal_slip_item=None)]):
+			with self.subTest(rows=rows):
+				doc = MagicMock()
+				doc.docstatus = 0
+				doc.is_new.return_value = True
+				doc.get.side_effect = lambda key: rows if key == "items" else None
+				validate_withdrawal_slip_stock_entry(doc, method="validate")
+				doc.get_doc_before_save.assert_not_called()
+		stockroom.assert_not_called()
+		throw.assert_not_called()
+
 	@patch(f"{MODULE}._require_stockroom_user")
 	def test_cancelled_stock_entry_exits_without_link_preflight(self, stockroom):
 		doc = MagicMock()
