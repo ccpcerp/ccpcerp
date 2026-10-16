@@ -214,7 +214,15 @@ def issue_withdrawal_slip(withdrawal_slip):
 
 
 def validate_withdrawal_slip_stock_entry(doc, method=None):
-	if not doc.get("withdrawal_slip") or doc.docstatus not in (0, 1):
+	if doc.docstatus not in (0, 1):
+		return
+	if not doc.get("withdrawal_slip"):
+		# A previously linked draft must not escape Slip provenance checks by
+		# clearing its header link before validation or submission.
+		if not doc.is_new():
+			before = doc.get_doc_before_save()
+			if before and before.get("withdrawal_slip"):
+				frappe.throw(_("Withdrawal Slip reference cannot be changed after the Stock Entry is saved."))
 		return
 
 	_require_stockroom_user()
