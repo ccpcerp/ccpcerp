@@ -1,6 +1,7 @@
 # Copyright (c) 2026, CCPC and contributors
 # For license information, please see license.txt
 
+import logging
 from collections import defaultdict
 
 import frappe
@@ -12,6 +13,16 @@ from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import _get_actual
 
 ISSUABLE_STATES = {"Stockroom Review"}
 EPSILON = 0.000001
+
+
+def _clear_withdrawal_slip_cache_after_commit():
+	"""Best-effort cache refresh: never report a committed stock issue as failed."""
+	try:
+		frappe.clear_cache(doctype="Withdrawal Slip")
+	except Exception:
+		# The Stock Entry / ledger SQL is already committed at this point.
+		# A cache outage must not provoke an ambiguous retry of a successful issue.
+		logging.getLogger(__name__).exception("Post-commit Withdrawal Slip cache refresh failed")
 
 
 def _lock_withdrawal_slip(withdrawal_slip):
@@ -380,7 +391,7 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 	)
 	# Defer the explicit cache invalidation until the stock/GL transaction commits.
 	# A full rollback discards the callback; SQL rollback cannot reverse Redis effects.
-	frappe.db.after_commit.add(lambda: frappe.clear_cache(doctype="Withdrawal Slip"))
+	frappe.db.after_commit.add(_clear_withdrawal_slip_cache_after_commit)
 
 
 def _get_submitted_qty_by_slip_item(withdrawal_slip):
