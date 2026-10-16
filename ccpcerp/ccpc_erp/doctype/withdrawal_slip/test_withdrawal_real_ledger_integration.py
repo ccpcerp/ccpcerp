@@ -7,8 +7,10 @@ installed and ERPNext bootstrap test fixtures. NEVER run it on CCPC's existing
 DEVELOPMENT or PRODUCTION sites. It uses synthetic _Test Company data only.
 """
 
+import multiprocessing
 import os
 from contextlib import closing
+from queue import Empty
 
 import frappe
 from frappe.utils import flt
@@ -17,6 +19,9 @@ from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.tests.utils import ERPNextTestSuite
 
+from ccpcerp.ccpc_erp.doctype.withdrawal_slip.ci_concurrent_issue_worker import (
+    _ci_concurrent_issue_worker,
+)
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import issue_withdrawal_slip
 
 
@@ -30,6 +35,7 @@ QTY_ISSUED = 1
 UNIT_RATE = 100
 
 
+
 class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
     """Real database/ledger assertion; fixture bypasses APPROVAL workflow only."""
 
@@ -37,12 +43,12 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
-        if self._testMethodName.startswith(("test_y_", "test_z_")):
+        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_")):
             if not (
                 os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
                 and os.environ.get("GITHUB_HEAD_REF")
-                == "review/withdrawal-transaction-boundary-ci-2026-10-16"
+                == "review/withdrawal-concurrent-issue-ci-2026-10-16"
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
                 and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
             ):
@@ -393,3 +399,124 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertAlmostEqual(visible["debits"], visible["credits"], places=2)
         self.assertAlmostEqual(visible["credits"], -visible["sle_value"], places=2)
         self.assertAlmostEqual(visible["bin_qty"], QTY_RECEIVED - QTY_ISSUED, places=5)
+
+
+    def test_zz_two_independent_issuers_only_one_ledger_submission(self):
+        """Force two independent Frappe processes against one held parent row lock.
+
+        The parent first commits isolated synthetic fixture data and then holds
+        SELECT ... FOR UPDATE on the Slip row. The children each report that
+        they reached the ORIGINAL production lock method before release.
+        After releasing, only one must commit the linked Stock Entry/SLE/GL.
+        """
+        # setUp() rejects non-CI or wrong-branch invocation BEFORE fixture work.
+        if os.environ.get("CCPC_ALLOW_CONCURRENCY_PROBE") != "isolated-only":
+            raise RuntimeError("Explicit isolated concurrent-issue CI flag required")
+        frappe.set_user("Administrator")
+        frappe.db.commit()  # Unique fake _Test Company fixture, CI site only.
+        site = frappe.local.site
+        sites_path = os.path.abspath(frappe.local.sites_path)
+
+        # The coordinator holds the parent row, so neither worker can
+        # finish its SELECT ... FOR UPDATE before BOTH reach the lock path.
+        locked = frappe.db.sql(
+            "SELECT name FROM `tabWithdrawal Slip` WHERE name=%s FOR UPDATE",
+            (self.slip_name,),
+        )
+        self.assertEqual(locked[0][0], self.slip_name)
+
+        context = multiprocessing.get_context("spawn")
+        queue = context.Queue()
+        children = [
+            context.Process(
+                target=_ci_concurrent_issue_worker,
+                args=(i, site, sites_path, self.slip_name, ISSUER, queue),
+                daemon=False,
+            )
+            for i in (1, 2)
+        ]
+        released = False
+        results = []
+        try:
+            for child in children:
+                child.start()
+
+            attempts = {}
+            while len(attempts) != 2:
+                try:
+                    message = queue.get(timeout=35)
+                except Empty as exc:
+                    raise AssertionError("Two issuers did not both reach the row-lock path") from exc
+                if message[0] != "attempt":
+                    raise AssertionError("Issuer exited before reaching the lock: " + repr(message))
+                self.assertNotIn(message[1], attempts)
+                attempts[message[1]] = message[2]
+            self.assertEqual(set(attempts), {1, 2})
+            self.assertEqual(len(set(attempts.values())), 2)
+            coordinator_conn_id = int(frappe.db.sql("SELECT CONNECTION_ID()")[0][0])
+            self.assertNotIn(coordinator_conn_id, attempts.values())
+
+            # Fail if the lock was bypassed: no issuer may complete while
+            # the coordinator still holds the parent Slip row for update.
+            for child in children:
+                self.assertTrue(child.is_alive(), "Issuer exited while Slip row was locked")
+            self.assertEqual(
+                frappe.db.count(
+                    "Stock Entry",
+                    {"withdrawal_slip": self.slip_name, "docstatus": 1},
+                ),
+                0,
+            )
+
+            # Coordinator does no writes after its fixture commit, so a
+            # full rollback simply RELEASES its SELECT FOR UPDATE lock.
+            frappe.db.rollback()
+            released = True
+            while len(results) != 2:
+                try:
+                    message = queue.get(timeout=35)
+                except Empty as exc:
+                    raise AssertionError("Concurrent workers failed to finish in time") from exc
+                self.assertIn(message[0], {"success", "rejected", "error"})
+                results.append(message)
+
+            for child in children:
+                child.join(timeout=10)
+                self.assertEqual(child.exitcode, 0)
+        finally:
+            if not released:
+                frappe.db.rollback()
+            for child in children:
+                if child.is_alive():
+                    child.terminate()  # Own ephemeral CI worker only.
+                    child.join(timeout=5)
+            queue.close()
+            queue.join_thread()
+
+        successes = [x for x in results if x[0] == "success"]
+        rejected = [x for x in results if x[0] == "rejected"]
+        errors = [x for x in results if x[0] == "error"]
+        self.assertFalse(errors, "A worker failed outside expected validation: " + repr(errors))
+        self.assertEqual(len(successes), 1, repr(results))
+        self.assertEqual(len(rejected), 1, repr(results))
+        entry_name = successes[0][2]
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}),
+            1,
+        )
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name}),
+            1,
+        )
+        verified = self._independent_sql_snapshot(entry_name)
+        self.assertEqual(verified["entry_count"], 1)
+        self.assertEqual(verified["sle_count"], 1)
+        self.assertAlmostEqual(verified["sle_qty"], -QTY_ISSUED, places=5)
+        self.assertAlmostEqual(verified["sle_value"], -(QTY_ISSUED * UNIT_RATE), places=2)
+        self.assertAlmostEqual(verified["bin_qty"], QTY_RECEIVED - QTY_ISSUED, places=5)
+        self.assertGreaterEqual(verified["gl_count"], 2)
+        self.assertAlmostEqual(verified["debits"], verified["credits"], places=2)
+        self.assertAlmostEqual(verified["credits"], -verified["sle_value"], places=2)
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        self.assertEqual(slip.status, "Fully Issued")
+        self.assertAlmostEqual(flt(slip.items[0].issued_qty), QTY_ISSUED, places=5)
