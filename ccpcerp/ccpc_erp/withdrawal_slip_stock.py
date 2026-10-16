@@ -217,6 +217,11 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	if doc.docstatus not in (0, 1):
 		return
 	if not doc.get("withdrawal_slip"):
+		# An unlinked Stock Entry must not claim Withdrawal Slip item provenance.
+		# Otherwise Stock Entry Detail rows could misleadingly reference a Slip
+		# without the header-level permissions and quantity controls running.
+		if any(row.get("withdrawal_slip_item") for row in (doc.get("items") or [])):
+			frappe.throw(_("A Stock Entry with Withdrawal Slip items must be linked to its Withdrawal Slip."))
 		# A previously linked draft must not escape Slip provenance checks by
 		# clearing its header link before validation or submission.
 		if not doc.is_new():
