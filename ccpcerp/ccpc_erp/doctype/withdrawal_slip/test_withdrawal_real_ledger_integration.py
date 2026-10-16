@@ -43,16 +43,20 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
-        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_", "test_zzz_")):
+        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
             if not (
                 os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
                 and os.environ.get("GITHUB_HEAD_REF")
-                == "review/withdrawal-http-csrf-ci-2026-10-16"
+                == "review/withdrawal-cancellation-ledger-ci-2026-10-16"
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
                 and (
                     not self._testMethodName.startswith("test_zzz_")
                     or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only"
+                )
+                and (
+                    not self._testMethodName.startswith("test_zzzz_")
+                    or os.environ.get("CCPC_ALLOW_CANCELLATION_PROBE") == "isolated-only"
                 )
                 and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
             ):
@@ -664,3 +668,86 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertAlmostEqual(verified["debits"], verified["credits"], places=2)
         self.assertAlmostEqual(verified["credits"], -verified["sle_value"], places=2)
         self.assertEqual(frappe.db.get_value("Withdrawal Slip", slip_name, "status"), "Fully Issued")
+
+
+    def test_zzzz_real_cancel_reverses_stock_gl_and_restores_slip(self):
+        """Real ERPNext cancellation must reverse stock and GL as one unit.
+
+        This deliberately COMMITs only a uniquely generated synthetic CI
+        fixture, its Material Issue, and its cancellation, to validate
+        independent connection durability after the reversal. No shared sites.
+        """
+        if os.environ.get("CCPC_ALLOW_CANCELLATION_PROBE") != "isolated-only":
+            raise RuntimeError("Explicit disposable cancellation CI probe flag required")
+
+        frappe.set_user(ISSUER)
+        posted = issue_withdrawal_slip(self.slip_name)
+        entry_name = posted["name"]
+        self.assertEqual(posted["submitted"], 1)
+        self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED - QTY_ISSUED, places=5)
+        self.assertEqual(frappe.db.get_value("Withdrawal Slip", self.slip_name, "status"), "Fully Issued")
+        frappe.db.commit()  # Only this fresh GitHub-hosted synthetic CI site.
+
+        issued = self._independent_sql_snapshot(entry_name)
+        self.assertEqual(issued["entry_count"], 1)
+        self.assertEqual(issued["sle_count"], 1)
+        self.assertAlmostEqual(issued["sle_qty"], -QTY_ISSUED, places=5)
+        self.assertAlmostEqual(issued["sle_value"], -(QTY_ISSUED * UNIT_RATE), places=2)
+        self.assertAlmostEqual(issued["bin_qty"], QTY_RECEIVED - QTY_ISSUED, places=5)
+        self.assertGreaterEqual(issued["gl_count"], 2)
+        self.assertAlmostEqual(issued["debits"], issued["credits"], places=2)
+        self.assertAlmostEqual(issued["credits"], -issued["sle_value"], places=2)
+
+        # Actual Stock Entry.cancel(), not a mocked ledger or a direct
+        # docstatus mutation. ERPNext's on_cancel and CCPC's installed hook
+        # must both execute in the same MariaDB transaction.
+        frappe.set_user("Administrator")
+        entry = frappe.get_doc("Stock Entry", entry_name)
+        entry.cancel()
+        self.assertEqual(entry.docstatus, 2)
+        self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED, places=5)
+
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        self.assertEqual(slip.status, "Stockroom Review")
+        self.assertAlmostEqual(flt(slip.items[0].issued_qty), 0, places=5)
+        self.assertAlmostEqual(flt(slip.items[0].shortage_qty), 0, places=5)
+        self.assertAlmostEqual(flt(slip.items[0].net_used_qty), 0, places=5)
+        self.assertFalse(slip.issued_by)
+        self.assertFalse(slip.issued_on)
+
+        # Cancellation should retain an auditable original SLE plus a
+        # reversing SLE, whose per-voucher net qty/value are zero.
+        sle = frappe.get_all(
+            "Stock Ledger Entry",
+            filters={"voucher_type": "Stock Entry", "voucher_no": entry_name},
+            fields=["actual_qty", "stock_value_difference", "is_cancelled"],
+        )
+        self.assertGreaterEqual(len(sle), 2, "Missing auditable stock reversal")
+        self.assertTrue(any(flt(row.actual_qty) < 0 for row in sle))
+        self.assertTrue(any(flt(row.actual_qty) > 0 for row in sle))
+        self.assertAlmostEqual(sum(flt(row.actual_qty) for row in sle), 0, places=5)
+        self.assertAlmostEqual(sum(flt(row.stock_value_difference) for row in sle), 0, places=2)
+
+        # For immutable and legacy GL policies, debit-minus-credit summed
+        # per account must be zero across the issue plus cancellation.
+        gl = frappe.get_all(
+            "GL Entry",
+            filters={"voucher_type": "Stock Entry", "voucher_no": entry_name},
+            fields=["account", "debit", "credit", "is_cancelled"],
+        )
+        self.assertGreaterEqual(len(gl), 4, "Missing auditable GL reversal")
+        by_account = {}
+        for row in gl:
+            by_account[row.account] = by_account.get(row.account, 0.0) + flt(row.debit) - flt(row.credit)
+        self.assertGreaterEqual(len(by_account), 2)
+        for account, balance in by_account.items():
+            self.assertAlmostEqual(balance, 0, places=2, msg=f"Unreversed GL account: {account}")
+
+        frappe.db.commit()  # Only disposable synthetic CI records.
+        final = self._independent_sql_snapshot(entry_name)
+        self.assertEqual(final["entry_count"], 0)
+        self.assertEqual(final["sle_count"], 0)
+        self.assertEqual(final["gl_count"], 0)
+        self.assertAlmostEqual(final["bin_qty"], QTY_RECEIVED, places=5)
+        self.assertEqual(frappe.db.get_value("Stock Entry", entry_name, "docstatus"), 2)
+        self.assertEqual(frappe.db.get_value("Withdrawal Slip", self.slip_name, "status"), "Stockroom Review")
