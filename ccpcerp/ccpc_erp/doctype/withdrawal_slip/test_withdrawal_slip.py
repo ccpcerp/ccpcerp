@@ -751,7 +751,7 @@ class TestWithdrawalSlip(TestCase):
 			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 		self.assertEqual(doc.withdrawal_slip_issued_by, "stockroom@personnel1.com")
 
-	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.after_commit.add")
+	@patch("frappe.utils.CallbackManager.add")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_user_full_name", return_value="Stock Person")
 	@patch(
@@ -804,7 +804,7 @@ class TestWithdrawalSlip(TestCase):
 		after_commit.call_args.args[0]()
 		clear_cache.assert_called_once_with(doctype="Withdrawal Slip")
 
-	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.after_commit.add")
+	@patch("frappe.utils.CallbackManager.add")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_user_full_name", return_value="Stock Person")
 	@patch(
@@ -867,7 +867,7 @@ class TestWithdrawalSlip(TestCase):
 		clear_cache.assert_called_once_with(doctype="Withdrawal Slip")
 
 
-	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.after_commit.add")
+	@patch("frappe.utils.CallbackManager.add")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
 	@patch(
 		"ccpcerp.ccpc_erp.withdrawal_slip_stock._get_submitted_qty_by_slip_item",
