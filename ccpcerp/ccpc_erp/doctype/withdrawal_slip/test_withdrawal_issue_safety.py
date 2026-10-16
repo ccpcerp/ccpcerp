@@ -213,3 +213,51 @@ class TestWithdrawalIssueSafety(TestCase):
 		with self.assertRaises(frappe.ValidationError):
 			_get_issuable_slip("WS-1", fresh)
 		stale.check_permission.assert_called_once_with("write")
+
+
+	@patch(f"{MODULE}._require_stockroom_user")
+	@patch(f"{MODULE}.frappe.throw", side_effect=frappe.ValidationError)
+	def test_cleared_saved_withdrawal_link_rejected_before_stock_checks(self, throw, stockroom):
+		# An existing linked Stock Entry must not become an unlinked draft,
+		# or silently bypass the peer and quantity guards at before_submit.
+		for status, method in ((0, "validate"), (1, "before_submit")):
+			with self.subTest(status=status, method=method):
+				doc = MagicMock()
+				doc.docstatus = status
+				doc.get.return_value = None
+				doc.is_new.return_value = False
+				doc.get_doc_before_save.return_value = frappe._dict(
+					withdrawal_slip="WS-ALREADY-LINKED"
+				)
+				with self.assertRaises(frappe.ValidationError):
+					validate_withdrawal_slip_stock_entry(doc, method=method)
+				doc.get_doc_before_save.assert_called_once()
+			stockroom.assert_not_called()
+		self.assertEqual(throw.call_count, 2)
+
+	@patch(f"{MODULE}._require_stockroom_user")
+	@patch(f"{MODULE}.frappe.throw", side_effect=frappe.ValidationError)
+	def test_ordinary_unlinked_stock_entry_still_allowed(self, throw, stockroom):
+		for is_new in (True, False):
+			with self.subTest(is_new=is_new):
+				doc = MagicMock()
+				doc.docstatus = 0
+				doc.get.return_value = None
+				doc.is_new.return_value = is_new
+				doc.get_doc_before_save.return_value = frappe._dict(withdrawal_slip=None)
+				validate_withdrawal_slip_stock_entry(doc, method="validate")
+				if is_new:
+					doc.get_doc_before_save.assert_not_called()
+				else:
+					doc.get_doc_before_save.assert_called_once()
+		stockroom.assert_not_called()
+		throw.assert_not_called()
+
+	@patch(f"{MODULE}._require_stockroom_user")
+	def test_cancelled_stock_entry_exits_without_link_preflight(self, stockroom):
+		doc = MagicMock()
+		doc.docstatus = 2
+		validate_withdrawal_slip_stock_entry(doc, method="validate")
+		doc.get.assert_not_called()
+		doc.get_doc_before_save.assert_not_called()
+		stockroom.assert_not_called()
