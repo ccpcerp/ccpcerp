@@ -334,7 +334,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 )
                 gl_count, debits, credits = cursor.fetchone()
                 cursor.execute(
-                    "SELECT actual_qty FROM `tabBin` WHERE item_code=%s AND warehouse=%s",
+                    "SELECT actual_qty, stock_value FROM `tabBin` WHERE item_code=%s AND warehouse=%s",
                     (self.item.name, WAREHOUSE),
                 )
                 bin_row = cursor.fetchone()
@@ -347,6 +347,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             "debits": flt(debits),
             "credits": flt(credits),
             "bin_qty": flt(bin_row[0]) if bin_row else 0,
+            "bin_value": flt(bin_row[1]) if bin_row else 0,
         }
 
     def test_y_rollback_hides_and_discards_real_issue_across_sessions(self):
@@ -680,6 +681,10 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         if os.environ.get("CCPC_ALLOW_CANCELLATION_PROBE") != "isolated-only":
             raise RuntimeError("Explicit disposable cancellation CI probe flag required")
 
+        initial_stock_value = flt(
+            frappe.db.get_value("Bin", {"item_code": self.item.name, "warehouse": WAREHOUSE}, "stock_value")
+        )
+        self.assertAlmostEqual(initial_stock_value, QTY_RECEIVED * UNIT_RATE, places=2)
         frappe.set_user(ISSUER)
         posted = issue_withdrawal_slip(self.slip_name)
         entry_name = posted["name"]
@@ -694,6 +699,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertAlmostEqual(issued["sle_qty"], -QTY_ISSUED, places=5)
         self.assertAlmostEqual(issued["sle_value"], -(QTY_ISSUED * UNIT_RATE), places=2)
         self.assertAlmostEqual(issued["bin_qty"], QTY_RECEIVED - QTY_ISSUED, places=5)
+        self.assertAlmostEqual(issued["bin_value"], initial_stock_value + issued["sle_value"], places=2)
         self.assertGreaterEqual(issued["gl_count"], 2)
         self.assertAlmostEqual(issued["debits"], issued["credits"], places=2)
         self.assertAlmostEqual(issued["credits"], -issued["sle_value"], places=2)
@@ -706,6 +712,10 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         entry.cancel()
         self.assertEqual(entry.docstatus, 2)
         self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED, places=5)
+        restored_stock_value = flt(
+            frappe.db.get_value("Bin", {"item_code": self.item.name, "warehouse": WAREHOUSE}, "stock_value")
+        )
+        self.assertAlmostEqual(restored_stock_value, initial_stock_value, places=2)
 
         slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
         self.assertEqual(slip.status, "Stockroom Review")
@@ -726,7 +736,12 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertTrue(any(flt(row.actual_qty) < 0 for row in sle))
         self.assertTrue(any(flt(row.actual_qty) > 0 for row in sle))
         self.assertAlmostEqual(sum(flt(row.actual_qty) for row in sle), 0, places=5)
-        self.assertAlmostEqual(sum(flt(row.stock_value_difference) for row in sle), 0, places=2)
+        # In Frappe/ERPNext v16 cancelled historical SLE preserve their
+        # original stock_value_difference; reversal SLE can hold zero despite
+        # restoring the actual current Bin valuation. The active Bin.stock_value
+        # and per-account GL reversals are the accounting invariants, NOT a
+        # simple sum of cancelled historical SLE valuation fields.
+        self.assertTrue(all(int(row.is_cancelled) == 1 for row in sle))
 
         # For immutable and legacy GL policies, debit-minus-credit summed
         # per account must be zero across the issue plus cancellation.
@@ -749,5 +764,6 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertEqual(final["sle_count"], 0)
         self.assertEqual(final["gl_count"], 0)
         self.assertAlmostEqual(final["bin_qty"], QTY_RECEIVED, places=5)
+        self.assertAlmostEqual(final["bin_value"], initial_stock_value, places=2)
         self.assertEqual(frappe.db.get_value("Stock Entry", entry_name, "docstatus"), 2)
         self.assertEqual(frappe.db.get_value("Withdrawal Slip", self.slip_name, "status"), "Stockroom Review")
