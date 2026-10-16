@@ -1,6 +1,6 @@
-# One-off, owner-approved isolated Frappe v16 test gate for Withdrawal Slip.
+# Owner-approved second-stage disposable-site stock and GL integration gate.
 # Intentionally no push, schedule, deploy, self-hosted runner, or production access.
-name: Withdrawal Slip - isolated Frappe regression
+name: Withdrawal Slip - isolated real ledger integration
 
 on:
   pull_request:
@@ -23,7 +23,7 @@ jobs:
   frappe-regression:
     # The CI branch has no production credentials, and only this approved same-repo
     # PR may spend hosted-runner minutes. No third-party fork code.
-    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-isolated-frappe-ci-2026-10-16' }}
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-real-ledger-integration-2026-10-16' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -178,7 +178,16 @@ jobs:
           done
           exit "$failed"
 
-      - name: Report source-only scope of this first pass
+      - name: Execute two real database and Stock/GL integration tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          echo "::group::Actual Material Issue posting, SLE/GL/Bin, duplicate and peer-denial checks"
+          bench --site "$TEST_SITE" run-tests --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration
+          echo "::endgroup::"
+
+      - name: Report both test scopes
         if: always()
         shell: bash
         run: |
@@ -187,7 +196,7 @@ jobs:
             echo "Runner: GitHub-hosted Ubuntu 24.04; disposable MariaDB and Redis."
             echo "App checkout SHA: $GITHUB_SHA"
             echo "Baseline feature commit: $FEATURE_BASE"
-            echo "Test scope: 72 mostly mocked methods, executed via installed Frappe if setup reaches them."
-            echo "Not tested: true concurrent Material Issue posting, durable Stock/GL accounting, real HTTP authorization, CCPC server runtime, recovery."
+            echo "Scope: 72 mocked Frappe regressions PLUS 2 real MariaDB Material Issue/Stock/GL integration methods (only if step completed)."
+            echo "Still not tested by this CI: two-connection concurrency, durable independent commit, full HTTP/CSRF, shared-server runtime, and recovery."
             echo "Production status: NO-GO regardless of this job's result."
           } >> "$GITHUB_STEP_SUMMARY"
