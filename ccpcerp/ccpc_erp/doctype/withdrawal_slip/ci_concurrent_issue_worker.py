@@ -21,7 +21,7 @@ def _ci_concurrent_issue_worker(slot, site, sites_path, slip_name, issuer, resul
             os.environ.get("GITHUB_ACTIONS") == "true"
             and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
             and os.environ.get("GITHUB_HEAD_REF")
-            == "review/withdrawal-http-csrf-ci-2026-10-16"
+            == "review/withdrawal-cancellation-ledger-ci-2026-10-16"
             and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
             and os.environ.get("CCPC_ALLOW_CONCURRENCY_PROBE") == "isolated-only"
             and site == "ci-withdrawal.localhost"
