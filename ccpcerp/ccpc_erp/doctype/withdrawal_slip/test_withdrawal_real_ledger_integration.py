@@ -474,7 +474,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # The coordinator holds the parent row, so neither worker can
         # finish its SELECT ... FOR UPDATE before BOTH reach the lock path.
         locked = frappe.db.sql(
-            "SELECT name FROM \`tabWithdrawal Slip\` WHERE name=%s FOR UPDATE",
+            "SELECT name FROM `tabWithdrawal Slip` WHERE name=%s FOR UPDATE",
             (self.slip_name,),
         )
         self.assertEqual(locked[0][0], self.slip_name)
