@@ -43,14 +43,20 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
 
         # ERPNext's Stock Entry test-record loader does not seed Department.
         # Create the leaf department within THIS disposable test transaction.
-        self.department = frappe.get_doc(
-            {
-                "doctype": "Department",
-                "department_name": DEPARTMENT,
-                "company": COMPANY,
-                "is_group": 0,
-            }
-        ).insert(ignore_permissions=True).name
+        # Some ERPNext nested-set setup writes may cross test boundaries.
+        # The site is disposable, but repeated tests must still be idempotent.
+        self.department = frappe.db.get_value(
+            "Department", {"department_name": DEPARTMENT, "company": COMPANY}, "name"
+        )
+        if not self.department:
+            self.department = frappe.get_doc(
+                {
+                    "doctype": "Department",
+                    "department_name": DEPARTMENT,
+                    "company": COMPANY,
+                    "is_group": 0,
+                }
+            ).insert(ignore_permissions=True).name
         self.assertEqual(frappe.db.get_value("Department", self.department, "company"), COMPANY)
         self.assertTrue(frappe.db.exists("Role", "Stockroom Personnel"))
 
