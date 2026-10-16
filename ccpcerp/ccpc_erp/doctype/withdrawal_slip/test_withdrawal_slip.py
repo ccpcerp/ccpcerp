@@ -282,7 +282,14 @@ class TestWithdrawalSlip(TestCase):
 		detail_meta.has_field.return_value = True
 		get_meta.return_value = detail_meta
 
-		result = make_material_issue(slip.name)
+		with (
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.has_permission", return_value=True),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._lock_withdrawal_slip"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_issuable_slip", return_value=slip),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_existing_draft_names", return_value=[]),
+		):
+			result = make_material_issue(slip.name)
 
 		self.assertEqual(stock_entry.company, "Cagayan Corn Products Corporation")
 		self.assertNotEqual(stock_entry.department, "Maintenance Department - RMC")
@@ -659,7 +666,17 @@ class TestWithdrawalSlip(TestCase):
 				)
 			],
 		)
-		with self.assertRaises(frappe.ValidationError):
+		with (
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._lock_withdrawal_slip", return_value=frappe._dict(
+			status="Stockroom Review",
+			received_by="Pedro Santos",
+			company="CCPC",
+			source_warehouse="Warehouse 1 - CCPC",
+		)),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_independent_issuer"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+			self.assertRaises(frappe.ValidationError),
+		):
 			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._require_stockroom_user")
@@ -721,9 +738,20 @@ class TestWithdrawalSlip(TestCase):
 				)
 			],
 		)
-		validate_withdrawal_slip_stock_entry(doc, method="before_submit")
+		with (
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._lock_withdrawal_slip", return_value=frappe._dict(
+			status="Stockroom Review",
+			received_by="Pedro Santos",
+			company="CCPC",
+			source_warehouse="Warehouse 1 - CCPC",
+		)),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_independent_issuer"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+		):
+			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 		self.assertEqual(doc.withdrawal_slip_issued_by, "stockroom@personnel1.com")
 
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.after_commit.add")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_user_full_name", return_value="Stock Person")
 	@patch(
@@ -741,7 +769,7 @@ class TestWithdrawalSlip(TestCase):
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.set_value")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_doc")
 	def test_reduced_issue_marks_withdrawal_slip_issued_with_shortage(
-		self, get_doc, set_value, submitted_qty, latest, full_name, clear_cache
+		self, get_doc, set_value, submitted_qty, latest, full_name, clear_cache, after_commit
 	):
 		get_doc.return_value = frappe._dict(
 			name="WS-1",
@@ -770,7 +798,13 @@ class TestWithdrawalSlip(TestCase):
 			if call.args[0] == "Withdrawal Slip"
 		)
 		self.assertEqual(parent_update["status"], "Issued with Shortage")
+		# The SQL status update may still be rolled back; never clear Redis early.
+		clear_cache.assert_not_called()
+		after_commit.assert_called_once()
+		after_commit.call_args.args[0]()
+		clear_cache.assert_called_once_with(doctype="Withdrawal Slip")
 
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.after_commit.add")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_user_full_name", return_value="Stock Person")
 	@patch(
@@ -788,7 +822,7 @@ class TestWithdrawalSlip(TestCase):
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.set_value")
 	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_doc")
 	def test_full_issue_marks_withdrawal_slip_fully_issued(
-		self, get_doc, set_value, submitted_qty, latest, full_name, clear_cache
+		self, get_doc, set_value, submitted_qty, latest, full_name, clear_cache, after_commit
 	):
 		get_doc.return_value = frappe._dict(
 			name="WS-1",
@@ -826,6 +860,54 @@ class TestWithdrawalSlip(TestCase):
 		self.assertEqual(parent_update["status"], "Fully Issued")
 		self.assertEqual(parent_update["issued_by"], "stockroom@personnel1.com")
 		self.assertEqual(parent_update["issued_by_name"], "Stock Person")
+		# The SQL status update may still be rolled back; never clear Redis early.
+		clear_cache.assert_not_called()
+		after_commit.assert_called_once()
+		after_commit.call_args.args[0]()
+		clear_cache.assert_called_once_with(doctype="Withdrawal Slip")
+
+
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.after_commit.add")
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache")
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock._get_submitted_qty_by_slip_item",
+		return_value={},
+	)
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.db.set_value",
+		side_effect=RuntimeError("simulated SQL failure"),
+	)
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.get_doc")
+	def test_issue_status_failed_sql_write_does_not_schedule_cache_clear(
+		self, get_doc, set_value, submitted_qty, clear_cache, after_commit
+	):
+		get_doc.return_value = frappe._dict(
+			name="WS-1",
+			items=[frappe._dict(name="WSI-1", requested_qty=2, returned_qty=0)],
+		)
+		with self.assertRaisesRegex(RuntimeError, "simulated SQL failure"):
+			sync_withdrawal_slip_issue_status_for_name("WS-1")
+		set_value.assert_called_once()
+		clear_cache.assert_not_called()
+		after_commit.assert_not_called()
+
+
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.logging.getLogger")
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache",
+		side_effect=RuntimeError("simulated Redis outage"),
+	)
+	def test_cache_refresh_outage_does_not_raise_after_commit(self, clear_cache, logger):
+		from ccpcerp.ccpc_erp.withdrawal_slip_stock import (
+			_clear_withdrawal_slip_cache_after_commit,
+		)
+
+		# A post-commit callback error must not turn a committed issue into an
+		# apparent failed POST which users might retry.
+		_clear_withdrawal_slip_cache_after_commit()
+		clear_cache.assert_called_once_with(doctype="Withdrawal Slip")
+		logger.assert_called_once_with("ccpcerp.ccpc_erp.withdrawal_slip_stock")
+		logger.return_value.exception.assert_called_once()
 
 
 	def test_withdrawal_slip_has_separate_issuing_and_requesting_company(self):

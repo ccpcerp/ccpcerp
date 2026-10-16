@@ -1,6 +1,7 @@
 # Copyright (c) 2026, CCPC and contributors
 # For license information, please see license.txt
 
+import logging
 from collections import defaultdict
 
 import frappe
@@ -14,13 +15,89 @@ ISSUABLE_STATES = {"Stockroom Review"}
 EPSILON = 0.000001
 
 
-@frappe.whitelist()
-def make_material_issue(withdrawal_slip):
-	_require_stockroom_user()
+def _clear_withdrawal_slip_cache_after_commit():
+	"""Best-effort cache refresh: never report a committed stock issue as failed."""
+	try:
+		frappe.clear_cache(doctype="Withdrawal Slip")
+	except Exception:
+		# The Stock Entry / ledger SQL is already committed at this point.
+		# A cache outage must not provoke an ambiguous retry of a successful issue.
+		logging.getLogger(__name__).exception("Post-commit Withdrawal Slip cache refresh failed")
 
+
+def _lock_withdrawal_slip(withdrawal_slip):
+	"""Serialize issue creation and submission on the same parent row."""
+	rows = frappe.db.sql(
+		"""SELECT status, received_by, company, source_warehouse,
+		owner, approving_supervisor
+		FROM `tabWithdrawal Slip` WHERE name = %s FOR UPDATE""",
+		(withdrawal_slip,),
+		as_dict=True,
+	)
+	if not rows:
+		frappe.throw(_("Withdrawal Slip {0} does not exist.").format(frappe.bold(withdrawal_slip)))
+	return rows[0]
+
+
+def _get_existing_draft_names(withdrawal_slip):
+	"""Use a locking/current read, not a possibly stale transaction snapshot."""
+	rows = frappe.db.sql(
+		"""SELECT name FROM `tabStock Entry`
+		WHERE withdrawal_slip = %s AND docstatus = 0
+		ORDER BY creation DESC FOR UPDATE""",
+		(withdrawal_slip,),
+		as_dict=True,
+	)
+	return [row.name for row in rows]
+
+
+def _assert_no_submitted_material_issue(withdrawal_slip):
+	"""Detect any submitted issue, even one with missing child provenance rows."""
+	rows = frappe.db.sql(
+		"""SELECT name FROM `tabStock Entry`
+		WHERE withdrawal_slip = %s AND docstatus = 1
+		LIMIT 1 FOR UPDATE""",
+		(withdrawal_slip,),
+		as_dict=True,
+	)
+	if rows:
+		frappe.throw(
+			_("Withdrawal Slip {0} already has a submitted Material Issue.").format(
+				frappe.bold(withdrawal_slip)
+			)
+		)
+
+
+def _assert_independent_issuer(locked):
+	"""Enforce peer issuance using locked ERPNext account identities."""
+	owner = locked.get("owner")
+	prepared_by = locked.get("approving_supervisor")
+	if not owner or not prepared_by or owner != prepared_by:
+		frappe.throw(
+			_("The Withdrawal Slip creator and Prepared By must match before issuing materials."),
+			frappe.PermissionError,
+		)
+
+	issuer = frappe.session.user
+	if not issuer or issuer in ("Guest", "Administrator"):
+		frappe.throw(_("A signed-in Stockroom employee is required."), frappe.PermissionError)
+	if "Stockroom Personnel" not in frappe.get_roles(issuer):
+		frappe.throw(_("Only assigned Stockroom personnel may issue materials."), frappe.PermissionError)
+	if issuer == owner:
+		frappe.throw(
+			_("A different authorized Stockroom employee must issue materials for this Withdrawal Slip."),
+			frappe.PermissionError,
+		)
+
+
+def _get_issuable_slip(withdrawal_slip, locked):
 	slip = frappe.get_doc("Withdrawal Slip", withdrawal_slip)
 	slip.check_permission("write")
-
+	# A previous nonlocking read may have opened a REPEATABLE READ snapshot.
+	# Never issue from a stale Slip document after acquiring the row lock.
+	for fieldname in ("status", "received_by", "company", "source_warehouse", "owner", "approving_supervisor"):
+		if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
+			frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 	if slip.status not in ISSUABLE_STATES:
 		frappe.throw(
 			_("Withdrawal Slip {0} must be in Stockroom Review before stock can be issued.").format(
@@ -29,28 +106,12 @@ def make_material_issue(withdrawal_slip):
 		)
 	if not slip.received_by:
 		frappe.throw(_("Received By is required before creating a Material Issue."))
+	_assert_independent_issuer(locked)
+	return slip
 
-	existing = frappe.get_all(
-		"Stock Entry",
-		filters={
-			"withdrawal_slip": slip.name,
-			"docstatus": 0,
-		},
-		pluck="name",
-		order_by="creation desc",
-		limit_page_length=1,
-	)
-	if existing:
-		return {"name": existing[0], "existing": 1}
 
-	submitted_qty = _get_submitted_qty_by_slip_item(slip.name)
-	if any(flt(qty) > EPSILON for qty in submitted_qty.values()):
-		frappe.throw(
-			_("Withdrawal Slip {0} already has submitted stock issue quantities.").format(
-				frappe.bold(slip.name)
-			)
-		)
-
+def _build_material_issue(slip):
+	"""Construct the only Stock Entry eligible for scoped stockroom posting."""
 	stock_entry = frappe.new_doc("Stock Entry")
 	stock_entry.company = slip.company
 	stock_entry.purpose = "Material Issue"
@@ -95,17 +156,89 @@ def make_material_issue(withdrawal_slip):
 
 	if not stock_entry.items:
 		frappe.throw(_("Withdrawal Slip {0} has no items to issue.").format(slip.name))
+	return stock_entry
 
+
+@frappe.whitelist(methods=["POST"])
+def make_material_issue(withdrawal_slip):
+	"""Legacy draft action, only for users with regular Stock Entry creation rights."""
+	_require_stockroom_user()
+	if not frappe.has_permission("Stock Entry", "create"):
+		frappe.throw(
+			_("Use Issue Materials on the Withdrawal Slip to post stock with stockroom authorization."),
+			frappe.PermissionError,
+		)
+
+	locked = _lock_withdrawal_slip(withdrawal_slip)
+	slip = _get_issuable_slip(withdrawal_slip, locked)
+	_assert_no_submitted_material_issue(slip.name)
+
+	drafts = _get_existing_draft_names(slip.name)
+	if len(drafts) > 1:
+		frappe.throw(_("Multiple draft Material Issues exist for this Withdrawal Slip."))
+	if drafts:
+		return {"name": drafts[0], "existing": 1}
+
+	stock_entry = _build_material_issue(slip)
 	stock_entry.insert()
 	return {"name": stock_entry.name, "existing": 0}
 
 
+@frappe.whitelist(methods=["POST"])
+def issue_withdrawal_slip(withdrawal_slip):
+	"""Atomically submit one slip-bound Material Issue without broad Stock Entry roles.
+
+	A normal POST request owns the transaction. Do not commit or catch exceptions:
+	Frappe must roll back the inserted draft and any ledger/status changes on failure.
+	"""
+	_require_stockroom_user()
+	locked = _lock_withdrawal_slip(withdrawal_slip)
+	slip = _get_issuable_slip(withdrawal_slip, locked)
+	_assert_no_submitted_material_issue(slip.name)
+
+	drafts = _get_existing_draft_names(slip.name)
+	if drafts:
+		frappe.throw(
+			_("Withdrawal Slip {0} already has a draft Material Issue. Have an authorized Stock Entry user review or discard that draft before issuing.").format(
+				frappe.bold(slip.name)
+			)
+		)
+
+	# Never elevate permissions on a pre-existing user-editable Stock Entry draft:
+	# it could carry expense account, costing or other posting-related overrides.
+	stock_entry = _build_material_issue(slip)
+	stock_entry.flags.ignore_permissions = True
+	stock_entry.insert(ignore_permissions=True)
+	stock_entry.submit()  # Runs normal Stock Entry validators, stock ledger and GL hooks.
+	return {"name": stock_entry.name, "submitted": 1}
+
+
 def validate_withdrawal_slip_stock_entry(doc, method=None):
-	if not doc.get("withdrawal_slip") or doc.docstatus not in (0, 1):
+	if doc.docstatus not in (0, 1):
+		return
+	if not doc.get("withdrawal_slip"):
+		# An unlinked Stock Entry must not claim Withdrawal Slip item provenance.
+		# Otherwise Stock Entry Detail rows could misleadingly reference a Slip
+		# without the header-level permissions and quantity controls running.
+		if any(row.get("withdrawal_slip_item") for row in (doc.get("items") or [])):
+			frappe.throw(_("A Stock Entry with Withdrawal Slip items must be linked to its Withdrawal Slip."))
+		# A previously linked draft must not escape Slip provenance checks by
+		# clearing its header link before validation or submission.
+		if not doc.is_new():
+			before = doc.get_doc_before_save()
+			if before and before.get("withdrawal_slip"):
+				frappe.throw(_("Withdrawal Slip reference cannot be changed after the Stock Entry is saved."))
 		return
 
 	_require_stockroom_user()
+	locked = _lock_withdrawal_slip(doc.withdrawal_slip) if method == "before_submit" else None
 	slip = frappe.get_doc("Withdrawal Slip", doc.withdrawal_slip)
+	if locked:
+		for fieldname in ("status", "received_by", "company", "source_warehouse", "owner", "approving_supervisor"):
+			if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
+				frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
+		_assert_independent_issuer(locked)
+		_assert_no_submitted_material_issue(slip.name)
 
 	if slip.status not in ISSUABLE_STATES:
 		frappe.throw(
@@ -269,7 +402,9 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 			"issued_on": issued_on,
 		},
 	)
-	frappe.clear_cache(doctype="Withdrawal Slip")
+	# Defer the explicit cache invalidation until the stock/GL transaction commits.
+	# A full rollback discards the callback; SQL rollback cannot reverse Redis effects.
+	frappe.db.after_commit.add(_clear_withdrawal_slip_cache_after_commit)
 
 
 def _get_submitted_qty_by_slip_item(withdrawal_slip):

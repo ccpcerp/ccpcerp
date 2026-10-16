@@ -101,31 +101,33 @@ function can_create_material_issue(frm) {
 	);
 }
 
-async function create_material_issue(frm) {
+async function issue_withdrawal_slip(frm) {
 	if (!frm.doc.received_by) {
-		frappe.msgprint(__("Enter Received By before creating a Material Issue."));
+		frappe.msgprint(__("Enter Received By before issuing materials."));
 		return;
 	}
 	if (frm.is_dirty()) {
 		await frm.save();
 	}
 
-	const response = await frappe.call({
-		method: "ccpcerp.ccpc_erp.withdrawal_slip_stock.make_material_issue",
-		args: { withdrawal_slip: frm.doc.name },
-		freeze: true,
-		freeze_message: __("Preparing Material Issue..."),
-	});
-	const result = response_message(response) || {};
-	if (!result.name) return;
-
-	if (result.existing) {
-		frappe.show_alert({
-			message: __("Opening the existing draft Material Issue."),
-			indicator: "blue",
-		});
-	}
-	frappe.set_route("Form", "Stock Entry", result.name);
+	frappe.confirm(
+		__("Submit a Material Issue now? This will reduce stock and create accounting entries."),
+		async () => {
+			const response = await frappe.call({
+				method: "ccpcerp.ccpc_erp.withdrawal_slip_stock.issue_withdrawal_slip",
+				args: { withdrawal_slip: frm.doc.name },
+				freeze: true,
+				freeze_message: __("Posting Material Issue..."),
+			});
+			const result = response_message(response) || {};
+			if (!result.submitted || !result.name) return;
+			await frm.reload_doc();
+			frappe.show_alert({
+				message: __("Material Issue {0} was submitted.", [result.name]),
+				indicator: "green",
+			});
+		}
+	);
 }
 
 async function initialize_form_defaults(frm) {
@@ -316,9 +318,9 @@ frappe.ui.form.on("Withdrawal Slip", {
 		apply_form_permissions(frm);
 		if (can_create_material_issue(frm)) {
 			frm.add_custom_button(
-				__("Create Material Issue"),
-				() => create_material_issue(frm),
-				__("Create")
+				__("Issue Materials"),
+				() => issue_withdrawal_slip(frm),
+				__("Stockroom")
 			);
 		}
 	},
