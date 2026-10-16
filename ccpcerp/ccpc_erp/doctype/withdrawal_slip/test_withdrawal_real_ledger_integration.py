@@ -74,8 +74,19 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Turn it on exclusively in the test transaction to exercise real GL.
         frappe.db.set_value("Company", COMPANY, "enable_perpetual_inventory", 1)
         frappe.clear_cache(doctype="Company")
+        # ERPNext v16's is_perpetual_inventory_enabled caches this separately
+        # in frappe.local and does NOT reread it on clear_cache(doctype=...).
+        from erpnext import is_perpetual_inventory_enabled
+
+        if hasattr(frappe.local, "enable_perpetual_inventory"):
+            frappe.local.enable_perpetual_inventory.pop(COMPANY, None)
         self.assertEqual(
             int(frappe.db.get_value("Company", COMPANY, "enable_perpetual_inventory")), 1
+        )
+        self.assertEqual(
+            int(is_perpetual_inventory_enabled(COMPANY)),
+            1,
+            "ERPNext must actually treat this disposable company as perpetual-inventory",
         )
 
         if not frappe.db.exists("User", ISSUER):
