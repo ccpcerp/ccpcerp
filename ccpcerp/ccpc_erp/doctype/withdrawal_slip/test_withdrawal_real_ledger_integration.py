@@ -619,14 +619,14 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             self.assertEqual(get_denied.status_code, 403)
             self.assertEqual((get_denied.get_json() or {}).get("exc_type"), "PermissionError")
             missing_csrf = call(issuer, "post")
-            self.assertEqual(missing_csrf.status_code, 403)
+            self.assertEqual(missing_csrf.status_code, 400)
             self.assertEqual(
                 (missing_csrf.get_json() or {}).get("exc_type"),
                 "CSRFTokenError",
                 "Missing CSRF must fail specifically in Frappe's request-security layer",
             )
             invalid_csrf = call(issuer, "post", "incorrect-ci-token")
-            self.assertEqual(invalid_csrf.status_code, 403)
+            self.assertEqual(invalid_csrf.status_code, 400)
             self.assertEqual(
                 (invalid_csrf.get_json() or {}).get("exc_type"),
                 "CSRFTokenError",
