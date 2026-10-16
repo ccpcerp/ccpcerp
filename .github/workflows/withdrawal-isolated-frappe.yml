@@ -1,12 +1,12 @@
-# Owner-approved third-stage disposable SQL transaction boundary gate.
+# Owner-approved fourth-stage disposable two-issuer MariaDB concurrency gate.
 # Intentionally no push, schedule, deploy, self-hosted runner, or production access.
-name: Withdrawal Slip - isolated transaction boundary
+name: Withdrawal Slip - isolated concurrent issue
 
 on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches:
-      - review/withdrawal-real-ledger-integration-2026-10-16
+      - review/withdrawal-transaction-boundary-ci-2026-10-16
     paths:
       - .github/workflows/withdrawal-isolated-frappe.yml
       - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
@@ -23,7 +23,7 @@ jobs:
   frappe-regression:
     # The CI branch has no production credentials, and only this approved same-repo
     # PR may spend hosted-runner minutes. No third-party fork code.
-    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-transaction-boundary-ci-2026-10-16' }}
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-concurrent-issue-ci-2026-10-16' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -182,14 +182,15 @@ jobs:
           done
           exit "$failed"
 
-      - name: Execute four real Stock/GL and SQL transaction boundary tests
+      - name: Execute five real Stock/GL, SQL boundary and two-issuer concurrency tests
         env:
           CCPC_ALLOW_COMMIT_PROBE: isolated-only
+          CCPC_ALLOW_CONCURRENCY_PROBE: isolated-only
         shell: bash
         run: |
           set -euo pipefail
           cd "$BENCH_DIR"
-          echo "::group::Real SLE/GL issue, SQL rollback and separately committed readback"
+          echo "::group::Real SLE/GL, rollback, commit and concurrent dual-issuer lock check"
           bench --site "$TEST_SITE" run-tests --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration
           echo "::endgroup::"
 
@@ -202,7 +203,7 @@ jobs:
             echo "Runner: GitHub-hosted Ubuntu 24.04; disposable MariaDB and Redis."
             echo "App checkout SHA: $GITHUB_SHA"
             echo "Baseline feature commit: $FEATURE_BASE"
-            echo "Scope: 72 mocked Frappe regressions PLUS 4 real MariaDB Material Issue/Stock/GL/transaction methods (only if step completed)."
-            echo "Still not tested by this CI: simultaneous POST lock contention/duplicate prevention, full HTTP/CSRF, shared-server runtime, and backup recovery."
+            echo "Scope: 72 mocked Frappe regressions PLUS 5 real MariaDB Material Issue/Stock/GL/transaction/dual-issuer methods (only if step completed)."
+            echo "Still not tested by this CI: real HTTP session/CSRF, external Redis worker retry effects, shared-server runtime, and backup recovery."
             echo "Production status: NO-GO regardless of this job's result."
           } >> "$GITHUB_STEP_SUMMARY"
