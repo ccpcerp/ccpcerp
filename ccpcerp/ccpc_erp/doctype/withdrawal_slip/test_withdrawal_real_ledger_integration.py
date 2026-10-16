@@ -7,6 +7,9 @@ installed and ERPNext bootstrap test fixtures. NEVER run it on CCPC's existing
 DEVELOPMENT or PRODUCTION sites. It uses synthetic _Test Company data only.
 """
 
+import os
+from contextlib import closing
+
 import frappe
 from frappe.utils import flt
 
@@ -31,6 +34,22 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
     """Real database/ledger assertion; fixture bypasses APPROVAL workflow only."""
 
     def setUp(self):
+        # Two methods below deliberately commit/roll back SQL. Block them at
+        # FIRST contact, before loading or changing *any* ERPNext test records,
+        # unless this is the specifically approved disposable Actions site.
+        if self._testMethodName.startswith(("test_y_", "test_z_")):
+            if not (
+                os.environ.get("GITHUB_ACTIONS") == "true"
+                and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
+                and os.environ.get("GITHUB_HEAD_REF")
+                == "review/withdrawal-transaction-boundary-ci-2026-10-16"
+                and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
+                and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
+            ):
+                raise RuntimeError(
+                    "Transaction boundary probes require the explicitly approved "
+                    "GitHub-hosted disposable ci-withdrawal.localhost only"
+                )
         # ERPNext's own test bootstrap records, not CCPC production business data.
         frappe.set_user("Administrator")
         self.load_test_records("Stock Entry")
@@ -257,3 +276,120 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             issue_withdrawal_slip(self.slip_name)
         self.assertEqual(frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name}), 0)
         self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED, places=5)
+
+    def _independent_sql_snapshot(self, entry_name):
+        """Read through an ACTUAL second MariaDB connection, never frappe.db.
+
+        The site credentials are obtained only from this fresh CI test site;
+        this helper performs SELECT queries only and never prints credentials.
+        A new autocommit connection avoids a stale REPEATABLE READ snapshot.
+        """
+        import pymysql
+
+        with closing(
+            pymysql.connect(
+                host=frappe.conf.get("db_host") or "127.0.0.1",
+                port=int(frappe.conf.get("db_port") or 3306),
+                user=frappe.conf.db_name,
+                password=frappe.conf.db_password,
+                database=frappe.conf.db_name,
+                autocommit=True,
+                connect_timeout=5,
+                read_timeout=5,
+            )
+        ) as other:
+            with other.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) FROM `tabStock Entry` WHERE name=%s AND docstatus=1",
+                    (entry_name,),
+                )
+                entry_count = cursor.fetchone()[0]
+                cursor.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(actual_qty),0), "
+                    "COALESCE(SUM(stock_value_difference),0) "
+                    "FROM `tabStock Ledger Entry` "
+                    "WHERE voucher_type='Stock Entry' AND voucher_no=%s AND is_cancelled=0",
+                    (entry_name,),
+                )
+                sle_count, sle_qty, sle_value = cursor.fetchone()
+                cursor.execute(
+                    "SELECT COUNT(*), COALESCE(SUM(debit),0), COALESCE(SUM(credit),0) "
+                    "FROM `tabGL Entry` "
+                    "WHERE voucher_type='Stock Entry' AND voucher_no=%s AND is_cancelled=0",
+                    (entry_name,),
+                )
+                gl_count, debits, credits = cursor.fetchone()
+                cursor.execute(
+                    "SELECT actual_qty FROM `tabBin` WHERE item_code=%s AND warehouse=%s",
+                    (self.item.name, WAREHOUSE),
+                )
+                bin_row = cursor.fetchone()
+        return {
+            "entry_count": entry_count,
+            "sle_count": sle_count,
+            "sle_qty": flt(sle_qty),
+            "sle_value": flt(sle_value),
+            "gl_count": gl_count,
+            "debits": flt(debits),
+            "credits": flt(credits),
+            "bin_qty": flt(bin_row[0]) if bin_row else 0,
+        }
+
+    def test_y_rollback_hides_and_discards_real_issue_across_sessions(self):
+        # The issued Stock Entry and SLE/GL exist on the issuing connection,
+        # but none may become externally visible before a commit.
+        frappe.set_user(ISSUER)
+        name = issue_withdrawal_slip(self.slip_name)["name"]
+        self.assertTrue(frappe.db.exists("Stock Entry", name))
+        self.assertGreater(
+            frappe.db.count("GL Entry", {"voucher_type": "Stock Entry", "voucher_no": name}),
+            0,
+        )
+        before = self._independent_sql_snapshot(name)
+        self.assertEqual(before["entry_count"], 0)
+        self.assertEqual(before["sle_count"], 0)
+        self.assertEqual(before["gl_count"], 0)
+        self.assertEqual(before["bin_qty"], 0)  # Receipt also remains uncommitted.
+
+        # This rollback occurs solely inside a disposable CI database.
+        frappe.db.rollback()
+        self.assertFalse(frappe.db.exists("Stock Entry", name))
+        self.assertEqual(
+            frappe.db.count("Stock Ledger Entry", {"voucher_type": "Stock Entry", "voucher_no": name}),
+            0,
+        )
+        self.assertEqual(
+            frappe.db.count("GL Entry", {"voucher_type": "Stock Entry", "voucher_no": name}),
+            0,
+        )
+        after = self._independent_sql_snapshot(name)
+        self.assertEqual(after["entry_count"], 0)
+        self.assertEqual(after["sle_count"], 0)
+        self.assertEqual(after["gl_count"], 0)
+        self.assertEqual(after["bin_qty"], 0)
+
+    def test_z_commit_makes_real_stock_and_gl_visible_across_sessions(self):
+        # Commit is forbidden except the gated fresh Actions site above.
+        # This verifies genuine multi-connection SQL durability/visibility,
+        # not HTTP auth or simultaneous duplicate-prevention.
+        frappe.set_user(ISSUER)
+        name = issue_withdrawal_slip(self.slip_name)["name"]
+        hidden = self._independent_sql_snapshot(name)
+        self.assertEqual(hidden["entry_count"], 0)
+        self.assertEqual(hidden["sle_count"], 0)
+        self.assertEqual(hidden["gl_count"], 0)
+        self.assertEqual(hidden["bin_qty"], 0)
+
+        # This intentionally persists only unique synthetic CI fixtures on an
+        # ephemeral runner which is torn down after the job. No shared site.
+        frappe.db.commit()
+        visible = self._independent_sql_snapshot(name)
+        self.assertEqual(visible["entry_count"], 1)
+        self.assertEqual(visible["sle_count"], 1)
+        self.assertAlmostEqual(visible["sle_qty"], -QTY_ISSUED, places=5)
+        self.assertAlmostEqual(visible["sle_value"], -(QTY_ISSUED * UNIT_RATE), places=2)
+        self.assertGreaterEqual(visible["gl_count"], 2)
+        self.assertGreater(visible["debits"], 0)
+        self.assertAlmostEqual(visible["debits"], visible["credits"], places=2)
+        self.assertAlmostEqual(visible["credits"], -visible["sle_value"], places=2)
+        self.assertAlmostEqual(visible["bin_qty"], QTY_RECEIVED - QTY_ISSUED, places=5)
