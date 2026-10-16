@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches:
-      - feature/withdrawal-material-issue-safety
+      - review/withdrawal-isolated-frappe-ci-2026-10-16
     paths:
       - .github/workflows/withdrawal-isolated-frappe.yml
       - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
