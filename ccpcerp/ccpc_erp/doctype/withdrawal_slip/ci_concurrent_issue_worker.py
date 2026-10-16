@@ -40,11 +40,18 @@ def _ci_concurrent_issue_worker(slot, site, sites_path, slip_name, issuer, resul
         from ccpcerp.ccpc_erp import withdrawal_slip_stock as issue_module
 
         original_lock = issue_module._lock_withdrawal_slip
+        reported_initial_attempt = False
 
         def report_actual_lock_attempt(locked_slip):
+            nonlocal reported_initial_attempt
             if locked_slip != slip_name:
                 raise AssertionError("Worker attempted to lock the wrong Withdrawal Slip")
-            result_queue.put(("attempt", slot, db_connection_id))
+            # issue_withdrawal_slip locks once directly and may lock AGAIN via
+            # Stock Entry.before_submit. Instrument the FIRST attempt only;
+            # every real production lock invocation still calls original_lock.
+            if not reported_initial_attempt:
+                reported_initial_attempt = True
+                result_queue.put(("attempt", slot, db_connection_id))
             return original_lock(locked_slip)
 
         issue_module._lock_withdrawal_slip = report_actual_lock_attempt
