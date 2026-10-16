@@ -19,7 +19,7 @@ from ccpcerp.ccpc_erp.withdrawal_slip_stock import issue_withdrawal_slip
 
 COMPANY = "_Test Company"
 WAREHOUSE = "_Test Warehouse - _TC"
-DEPARTMENT = "_Test Department"
+DEPARTMENT = "CI Withdrawal Integration Department"
 PREPARER = "test@example.com"
 ISSUER = "ci-stockroom-integration@invalid.test"
 QTY_RECEIVED = 5
@@ -37,10 +37,21 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         for doctype, name in (
             ("Company", COMPANY),
             ("Warehouse", WAREHOUSE),
-            ("Department", DEPARTMENT),
             ("User", PREPARER),
         ):
             self.assertTrue(frappe.db.exists(doctype, name), f"Missing isolated fixture: {doctype} {name}")
+
+        # ERPNext's Stock Entry test-record loader does not seed Department.
+        # Create the leaf department within THIS disposable test transaction.
+        self.department = frappe.get_doc(
+            {
+                "doctype": "Department",
+                "department_name": DEPARTMENT,
+                "company": COMPANY,
+                "is_group": 0,
+            }
+        ).insert(ignore_permissions=True).name
+        self.assertEqual(frappe.db.get_value("Department", self.department, "company"), COMPANY)
         self.assertTrue(frappe.db.exists("Role", "Stockroom Personnel"))
 
         stock_hooks = frappe.get_hooks("doc_events").get("Stock Entry", {})
@@ -107,7 +118,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 "source_warehouse": WAREHOUSE,
                 "company": COMPANY,
                 "requesting_company": COMPANY,
-                "department": DEPARTMENT,
+                "department": self.department,
                 "physical_location": "Disposable CI test bay",
                 "purpose": "Disposable independent inventory ledger test",
                 "received_by": "CI Synthetic Receiver",
