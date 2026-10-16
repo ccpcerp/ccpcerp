@@ -11,6 +11,7 @@ on:
       - .github/workflows/withdrawal-isolated-frappe.yml
       - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
       - ccpcerp/ccpc_erp/doctype/withdrawal_slip/test_*.py
+      - ccpcerp/ccpc_erp/doctype/withdrawal_slip/ci_concurrent_issue_worker.py
 
 permissions:
   contents: read
