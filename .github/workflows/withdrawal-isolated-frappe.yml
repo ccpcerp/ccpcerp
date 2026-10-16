@@ -159,9 +159,24 @@ jobs:
         run: |
           set -euo pipefail
           cd "$BENCH_DIR"
-          bench --site "$TEST_SITE" run-tests --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_slip
-          bench --site "$TEST_SITE" run-tests --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_issue_safety
-          bench --site "$TEST_SITE" run-tests --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_peer_issuance
+          # Run all three modules even when the first fails, while preserving
+          # a failing Actions conclusion if ANY test module fails.
+          failed=0
+          for module in \
+            ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_slip \
+            ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_issue_safety \
+            ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_peer_issuance
+          do
+            echo "::group::Frappe test module: $module"
+            if bench --site "$TEST_SITE" run-tests --module "$module"; then
+              echo "PASSED module: $module"
+            else
+              echo "::error::FAILED module: $module"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
 
       - name: Report source-only scope of this first pass
         if: always()
