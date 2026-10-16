@@ -72,8 +72,28 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
 
         # ERPNext's canonical _Test Company has perpetual inventory OFF.
         # Turn it on exclusively in the test transaction to exercise real GL.
-        frappe.db.set_value("Company", COMPANY, "enable_perpetual_inventory", 1)
+        # Stock Entry's normal ERPNext validator requires a Difference
+        # Account once perpetual inventory is enabled. The upstream _Test
+        # Company fixture intentionally has it unset, so configure ONLY this
+        # isolated site's synthetic chart of accounts; never bypass validation.
+        difference_account = "Stock Adjustment - _TC"
+        self.assertTrue(
+            frappe.db.exists("Account", difference_account),
+            "Disposable ERPNext fixture must provide a valid Stock Adjustment Account",
+        )
+        frappe.db.set_value(
+            "Company",
+            COMPANY,
+            {
+                "enable_perpetual_inventory": 1,
+                "stock_adjustment_account": difference_account,
+            },
+        )
         frappe.clear_cache(doctype="Company")
+        self.assertEqual(
+            frappe.db.get_value("Company", COMPANY, "stock_adjustment_account"),
+            difference_account,
+        )
         # ERPNext v16's is_perpetual_inventory_enabled caches this separately
         # in frappe.local and does NOT reread it on clear_cache(doctype=...).
         from erpnext import is_perpetual_inventory_enabled
