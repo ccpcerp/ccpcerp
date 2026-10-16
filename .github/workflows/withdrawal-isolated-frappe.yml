@@ -152,6 +152,10 @@ jobs:
             --admin-password "$CI_ADMIN_PASSWORD"
           bench --site "$TEST_SITE" install-app erpnext
           bench --site "$TEST_SITE" install-app ccpcerp
+          # CCPC's Stock Entry custom link fields and scoped roles are created
+          # by ccpcerp.setup.after_migrate, not just by install-app. This affects
+          # ONLY the disposable CI site; NEVER run on CCPC shared-host sites.
+          bench --site "$TEST_SITE" migrate
           bench --site "$TEST_SITE" set-config allow_tests true
 
       - name: Execute current Withdrawal Slip Frappe test modules
