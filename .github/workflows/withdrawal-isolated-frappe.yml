@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 60
     env:
       CI: "Yes"
-      BENCH_DIR: ${{ runner.temp }}/ccpc-frappe-bench
+      BENCH_DIR: ${{ github.workspace }}/../ccpc-frappe-bench
       TEST_SITE: ci-withdrawal.localhost
       # Ephemeral fake values solely for this runner's disposable MariaDB/site.
       CI_DB_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
