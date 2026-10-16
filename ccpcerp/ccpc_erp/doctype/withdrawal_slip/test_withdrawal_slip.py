@@ -892,6 +892,24 @@ class TestWithdrawalSlip(TestCase):
 		after_commit.assert_not_called()
 
 
+	@patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.logging.getLogger")
+	@patch(
+		"ccpcerp.ccpc_erp.withdrawal_slip_stock.frappe.clear_cache",
+		side_effect=RuntimeError("simulated Redis outage"),
+	)
+	def test_cache_refresh_outage_does_not_raise_after_commit(self, clear_cache, logger):
+		from ccpcerp.ccpc_erp.withdrawal_slip_stock import (
+			_clear_withdrawal_slip_cache_after_commit,
+		)
+
+		# A post-commit callback error must not turn a committed issue into an
+		# apparent failed POST which users might retry.
+		_clear_withdrawal_slip_cache_after_commit()
+		clear_cache.assert_called_once_with(doctype="Withdrawal Slip")
+		logger.assert_called_once_with("ccpcerp.ccpc_erp.withdrawal_slip_stock")
+		logger.return_value.exception.assert_called_once()
+
+
 	def test_withdrawal_slip_has_separate_issuing_and_requesting_company(self):
 		meta = json.loads(Path(__file__).with_name("withdrawal_slip.json").read_text())
 		fields = {row["fieldname"]: row for row in meta["fields"]}
