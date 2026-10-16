@@ -43,13 +43,17 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
-        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_")):
+        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_", "test_zzz_")):
             if not (
                 os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
                 and os.environ.get("GITHUB_HEAD_REF")
-                == "review/withdrawal-concurrent-issue-ci-2026-10-16"
+                == "review/withdrawal-http-csrf-ci-2026-10-16"
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
+                and (
+                    not self._testMethodName.startswith("test_zzz_")
+                    or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only"
+                )
                 and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
             ):
                 raise RuntimeError(
@@ -520,3 +524,143 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
         self.assertEqual(slip.status, "Fully Issued")
         self.assertAlmostEqual(flt(slip.items[0].issued_qty), QTY_ISSUED, places=5)
+
+
+    def test_zzz_real_wsgi_method_session_role_and_csrf_enforcement(self):
+        """Exercise the actual Frappe WSGI HTTP route, not direct Python dispatch.
+
+        Construct real Frappe login-manager sessions for synthetic test users.
+        The session cookie, CSRF token, request method, and authorization are
+        then checked by the genuine Frappe request pipeline. No auth mocks.
+        """
+        if os.environ.get("CCPC_ALLOW_HTTP_PROBE") != "isolated-only":
+            raise RuntimeError("Explicit disposable WSGI HTTP CI probe flag required")
+
+        import frappe.app
+        from frappe.auth import CookieManager, LoginManager
+        from frappe.sessions import get_csrf_token
+        from frappe.utils import get_test_client, set_request
+
+        site = frappe.local.site
+        sites_path = os.path.abspath(frappe.local.sites_path)
+        self.assertEqual(site, "ci-withdrawal.localhost")
+        self.assertFalse(frappe.conf.get("ignore_csrf"))
+        path = "/api/method/ccpcerp.ccpc_erp.withdrawal_slip_stock.issue_withdrawal_slip"
+        base_url = "http://ci-withdrawal.localhost"
+        headers = {"X-Frappe-Site-Name": site}
+        slip_name = self.slip_name
+        item_name = self.item.name
+
+        # Site and test-item fixtures are committed ONLY on this ephemeral site
+        # so the WSGI HTTP requests can see a legitimate Slip via fresh SQL.
+        frappe.db.commit()
+
+        old_sites_path = frappe.app._sites_path
+        frappe.app._sites_path = sites_path
+
+        def init_test_context():
+            frappe.init(site, sites_path=sites_path, force=True)
+            frappe.connect()
+            frappe.set_user("Administrator")
+
+        def create_cookie_session(user):
+            # This is a real Frappe LoginManager session but avoids putting
+            # synthetic plaintext passwords into logs or API request payloads.
+            init_test_context()
+            set_request(path="/", method="GET", base_url=base_url)
+            frappe.local.cookie_manager = CookieManager()
+            frappe.local.login_manager = LoginManager()
+            frappe.local.login_manager.login_as(user)
+            sid = frappe.session.sid
+            token = get_csrf_token()
+            # Frappe's test mode doesn't automatically persist newly generated
+            # CSRF tokens; deliberately persist this disposable session.
+            frappe.local.session_obj.update(force=True)
+            frappe.db.commit()
+            self.assertTrue(sid and sid != "Guest")
+            self.assertTrue(token)
+            return sid, token
+
+        def make_client(sid=None):
+            client = get_test_client()
+            if sid:
+                client.set_cookie("sid", sid, domain=site)
+            return client
+
+        def call(client, method, token=None):
+            request_headers = dict(headers)
+            if token is not None:
+                request_headers["X-Frappe-CSRF-Token"] = token
+            return getattr(client, method)(
+                path,
+                json={"withdrawal_slip": slip_name} if method == "post" else None,
+                base_url=base_url,
+                headers=request_headers,
+            )
+
+        try:
+            # A guest is not a stockroom user, whether GET or POST.
+            guest = make_client()
+            guest_response = call(guest, "post")
+            self.assertNotEqual(guest_response.status_code, 200)
+
+            # An authenticated preparer must not issue this Slip, even with
+            # a real session and a valid request CSRF token.
+            preparer_sid, preparer_token = create_cookie_session(PREPARER)
+            preparer = make_client(preparer_sid)
+            denied = call(preparer, "post", preparer_token)
+            self.assertNotEqual(denied.status_code, 200)
+
+            # A real Stockroom issuer session still cannot use GET or bypass
+            # the configured CSRF policy with missing/incorrect tokens.
+            issuer_sid, issuer_token = create_cookie_session(ISSUER)
+            issuer = make_client(issuer_sid)
+            get_denied = call(issuer, "get")
+            self.assertEqual(get_denied.status_code, 403)
+            self.assertEqual((get_denied.get_json() or {}).get("exc_type"), "PermissionError")
+            missing_csrf = call(issuer, "post")
+            self.assertEqual(missing_csrf.status_code, 400)
+            self.assertEqual(
+                (missing_csrf.get_json() or {}).get("exc_type"),
+                "CSRFTokenError",
+                "Missing CSRF must fail specifically in Frappe's request-security layer",
+            )
+            invalid_csrf = call(issuer, "post", "incorrect-ci-token")
+            self.assertEqual(invalid_csrf.status_code, 400)
+            self.assertEqual(
+                (invalid_csrf.get_json() or {}).get("exc_type"),
+                "CSRFTokenError",
+                "Wrong CSRF must fail specifically in Frappe's request-security layer",
+            )
+
+            # Correct method + genuine session + valid CSRF token should
+            # execute Stock Entry submission via actual Frappe request/commit.
+            accepted = call(issuer, "post", issuer_token)
+            self.assertEqual(accepted.status_code, 200, accepted.get_data(as_text=True)[:700])
+            message = (accepted.get_json() or {}).get("message") or {}
+            self.assertEqual(message.get("submitted"), 1)
+            entry_name = message.get("name")
+            self.assertTrue(entry_name)
+
+            repeated = call(issuer, "post", issuer_token)
+            self.assertNotEqual(repeated.status_code, 200)
+        finally:
+            # Frappe's WSGI ClosingIterator destroys its request-local state.
+            # Restore a CLI site context for ERPNextTestSuite.tearDown().
+            frappe.app._sites_path = old_sites_path
+            init_test_context()
+
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": slip_name, "docstatus": 1}),
+            1,
+        )
+        verified = self._independent_sql_snapshot(entry_name)
+        self.assertEqual(verified["entry_count"], 1)
+        self.assertEqual(verified["sle_count"], 1)
+        self.assertAlmostEqual(verified["sle_qty"], -QTY_ISSUED, places=5)
+        self.assertAlmostEqual(verified["sle_value"], -(QTY_ISSUED * UNIT_RATE), places=2)
+        self.assertAlmostEqual(verified["bin_qty"], QTY_RECEIVED - QTY_ISSUED, places=5)
+        self.assertGreaterEqual(verified["gl_count"], 2)
+        self.assertAlmostEqual(verified["debits"], verified["credits"], places=2)
+        self.assertAlmostEqual(verified["credits"], -verified["sle_value"], places=2)
+        self.assertEqual(frappe.db.get_value("Withdrawal Slip", slip_name, "status"), "Fully Issued")
