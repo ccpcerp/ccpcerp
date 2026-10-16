@@ -378,7 +378,9 @@ def sync_withdrawal_slip_issue_status_for_name(withdrawal_slip):
 			"issued_on": issued_on,
 		},
 	)
-	frappe.clear_cache(doctype="Withdrawal Slip")
+	# Defer the explicit cache invalidation until the stock/GL transaction commits.
+	# A full rollback discards the callback; SQL rollback cannot reverse Redis effects.
+	frappe.db.after_commit.add(lambda: frappe.clear_cache(doctype="Withdrawal Slip"))
 
 
 def _get_submitted_qty_by_slip_item(withdrawal_slip):
