@@ -50,6 +50,10 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 and os.environ.get("GITHUB_HEAD_REF")
                 == "review/withdrawal-http-csrf-ci-2026-10-16"
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
+                and (
+                    not self._testMethodName.startswith("test_zzz_")
+                    or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only"
+                )
                 and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
             ):
                 raise RuntimeError(
