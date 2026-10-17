@@ -288,6 +288,31 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertTrue(line.expense_account, "Issue row has no posted expense account")
         self.assertTrue(line.cost_center, "Issue row has no Cost Center")
 
+        # Diagnostic only, without changing ledger posting or skipping the
+        # beneficiary check: distinguish an active accounting dimension from
+        # a GL Entry column that merely exists in the test schema.
+        from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+            get_accounting_dimensions,
+        )
+
+        active_dimensions = get_accounting_dimensions()
+        print(
+            "Accounting attribution diagnostic: active dimensions="
+            + repr(active_dimensions)
+            + "; Stock Entry header department="
+            + repr(entry.get("department"))
+            + "; row department="
+            + repr(line.get("department"))
+            + "; header equipment="
+            + repr(entry.get("equipment"))
+            + "; row equipment="
+            + repr(line.get("equipment"))
+            + "; row expense account="
+            + repr(line.expense_account)
+            + "; row cost center="
+            + repr(line.cost_center)
+        )
+
         dimension_fields = [
             field for field in ("equipment", "department")
             if frappe.get_meta("GL Entry").has_field(field)
