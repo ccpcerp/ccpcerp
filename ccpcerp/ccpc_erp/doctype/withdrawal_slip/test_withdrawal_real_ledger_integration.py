@@ -43,13 +43,20 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
-        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
+        if self._testMethodName.startswith(("test_x_", "test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
             if not (
                 os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
                 and os.environ.get("GITHUB_HEAD_REF")
-                == "review/withdrawal-cancellation-ledger-ci-2026-10-16"
+                in {
+                    "review/withdrawal-cancellation-ledger-ci-2026-10-16",
+                    "review/withdrawal-issue-accounting-ci-2026-10-17",
+                }
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
+                and (
+                    not self._testMethodName.startswith("test_x_")
+                    or os.environ.get("CCPC_ALLOW_ACCOUNTING_PROBE") == "isolated-only"
+                )
                 and (
                     not self._testMethodName.startswith("test_zzz_")
                     or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only"
@@ -222,6 +229,121 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             frappe.db.get_value(
                 "Bin", {"item_code": self.item.name, "warehouse": WAREHOUSE}, "actual_qty"
             )
+        )
+
+    def test_x_real_issue_expense_cost_center_and_beneficiary_trace(self):
+        """Check real issue-side GL attribution; no physical return is posted.
+
+        This is a disposable Actions-only accounting baseline. The target
+        company may not configure Equipment/Department as GL dimensions; in
+        that case the row/account GL checks still run, and missing dimensions
+        are reported instead of incorrectly claiming that they passed.
+        """
+        frappe.set_user("Administrator")
+        # Make requesting Department deliberately different from the actual
+        # beneficiary. The original Slip and issue must preserve this
+        # difference, rather than silently charge the requestor's department.
+        request_department = frappe.get_doc(
+            {
+                "doctype": "Department",
+                "department_name": "CI Requesting " + frappe.generate_hash(length=8),
+                "company": COMPANY,
+                "is_group": 0,
+            }
+        ).insert(ignore_permissions=True)
+        equipment = frappe.get_doc(
+            {
+                "doctype": "Equipment Registry",
+                "equipment_number": "CI-EQUIP-" + frappe.generate_hash(length=10),
+                "equipment_description": "Disposable CI beneficiary equipment",
+                "company": COMPANY,
+                "department": self.department,
+                "status": "Active",
+            }
+        ).insert(ignore_permissions=True)
+        # Test fixture only: approved request workflow is covered by other
+        # tests. Do not mutate ordinary client request intent after approval.
+        frappe.db.set_value(
+            "Withdrawal Slip",
+            self.slip_name,
+            {
+                "department": request_department.name,
+                "work_for_department": self.department,
+                "equipment": equipment.name,
+            },
+            update_modified=False,
+        )
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        self.assertNotEqual(slip.department, slip.work_for_department)
+        self.assertEqual(slip.work_for_department, self.department)
+
+        frappe.set_user(ISSUER)
+        result = issue_withdrawal_slip(self.slip_name)
+        self.assertEqual(result["submitted"], 1)
+        entry = frappe.get_doc("Stock Entry", result["name"])
+        self.assertEqual(entry.docstatus, 1)
+        self.assertEqual(len(entry.items), 1)
+        line = entry.items[0]
+        self.assertEqual(line.withdrawal_slip_item, self.slip_item_name)
+        self.assertTrue(line.expense_account, "Issue row has no posted expense account")
+        self.assertTrue(line.cost_center, "Issue row has no Cost Center")
+
+        dimension_fields = [
+            field for field in ("equipment", "department")
+            if frappe.get_meta("GL Entry").has_field(field)
+        ]
+        gl = frappe.get_all(
+            "GL Entry",
+            filters={
+                "voucher_type": "Stock Entry",
+                "voucher_no": entry.name,
+                "is_cancelled": 0,
+            },
+            fields=["account", "cost_center", "debit", "credit"] + dimension_fields,
+        )
+        charge_rows = [
+            row for row in gl
+            if row.account == line.expense_account and flt(row.debit) > 0
+        ]
+        self.assertTrue(
+            charge_rows,
+            "Issued Material Issue has no debit in its recorded expense account",
+        )
+        self.assertAlmostEqual(
+            sum(flt(row.debit) - flt(row.credit) for row in charge_rows),
+            QTY_ISSUED * UNIT_RATE,
+            places=2,
+        )
+        for row in charge_rows:
+            self.assertEqual(
+                row.cost_center, line.cost_center,
+                "GL expense Cost Center differs from the submitted issue row",
+            )
+        if frappe.get_meta("Stock Entry").has_field("equipment"):
+            self.assertEqual(entry.equipment, equipment.name)
+        if frappe.get_meta("Stock Entry Detail").has_field("equipment"):
+            self.assertEqual(line.equipment, equipment.name)
+        if "equipment" in dimension_fields:
+            for row in charge_rows:
+                self.assertEqual(
+                    row.equipment, equipment.name,
+                    "Expense GL lost the actual beneficiary Equipment dimension",
+                )
+        else:
+            print("Accounting baseline: Equipment GL dimension NOT configured in disposable site")
+        if "department" in dimension_fields:
+            for row in charge_rows:
+                self.assertEqual(
+                    row.department, self.department,
+                    "Expense GL department differs from the beneficiary Department",
+                )
+        else:
+            print("Accounting baseline: Department GL dimension NOT configured in disposable site")
+        print(
+            "Accounting baseline: issued expense account="
+            + line.expense_account + "; cost center=" + line.cost_center
+            + "; requesting department=" + request_department.name
+            + "; beneficiary department=" + self.department
         )
 
     def test_real_material_issue_updates_bin_sle_gl_and_blocks_second_issue(self):
