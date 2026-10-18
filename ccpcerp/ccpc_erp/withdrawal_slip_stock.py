@@ -28,7 +28,7 @@ def _clear_withdrawal_slip_cache_after_commit():
 def _lock_withdrawal_slip(withdrawal_slip):
 	"""Serialize issue creation and submission on the same parent row."""
 	rows = frappe.db.sql(
-		"""SELECT status, received_by, company, source_warehouse,
+		"""SELECT status, received_by, company, source_warehouse, equipment,
 		owner, approving_supervisor
 		FROM `tabWithdrawal Slip` WHERE name = %s FOR UPDATE""",
 		(withdrawal_slip,),
@@ -95,7 +95,7 @@ def _get_issuable_slip(withdrawal_slip, locked):
 	slip.check_permission("write")
 	# A previous nonlocking read may have opened a REPEATABLE READ snapshot.
 	# Never issue from a stale Slip document after acquiring the row lock.
-	for fieldname in ("status", "received_by", "company", "source_warehouse", "owner", "approving_supervisor"):
+	for fieldname in ("status", "received_by", "company", "source_warehouse", "equipment", "owner", "approving_supervisor"):
 		if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 			frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 	if slip.status not in ISSUABLE_STATES:
@@ -239,7 +239,7 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	locked = _lock_withdrawal_slip(doc.withdrawal_slip) if method == "before_submit" else None
 	slip = frappe.get_doc("Withdrawal Slip", doc.withdrawal_slip)
 	if locked:
-		for fieldname in ("status", "received_by", "company", "source_warehouse", "owner", "approving_supervisor"):
+		for fieldname in ("status", "received_by", "company", "source_warehouse", "equipment", "owner", "approving_supervisor"):
 			if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 				frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 		_assert_independent_issuer(locked)
