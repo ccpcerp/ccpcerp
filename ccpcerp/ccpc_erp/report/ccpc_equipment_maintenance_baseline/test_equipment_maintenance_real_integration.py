@@ -2,8 +2,8 @@
 """Real ERPNext/MariaDB report integration tests. Synthetic disposable site ONLY.
 
 Never run on existing CCPC DEVELOPMENT/PRODUCTION, even in test mode.
-These tests do not implement a physical return or correct original expense GL
-Department mapping; those remain on separate review and accounting gates.
+These tests do not implement physical returns or Accounting-approved Company/category
+expense and Department-to-Cost Center allocation (Decisions B/C).
 """
 
 import os
@@ -29,7 +29,7 @@ ISSUER = "ci-stockroom-integration@invalid.test"
 REPORTER = "ci-equipment-cost-reader@invalid.test"
 UNIT_RATE = 100
 TEST_SITE = "ci-equipment-report.localhost"
-TEST_BRANCH = "review/equipment-maintenance-baseline-2026-10-18"
+TEST_BRANCH = "review/withdrawal-beneficiary-equipment-integration-2026-10-18"
 
 
 class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
