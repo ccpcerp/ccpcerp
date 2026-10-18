@@ -1300,6 +1300,25 @@ def ensure_withdrawal_slip_stock_entry_fields():
 					"hidden": 1,
 					"no_copy": 1,
 				},
+				{
+					"fieldname": "ccpc_equipment_at_issue",
+					"label": "Equipment at Issue (Source Link)",
+					"fieldtype": "Link",
+					"options": "Equipment Registry",
+					"insert_after": "withdrawal_slip_item",
+					"read_only": 1,
+					"no_copy": 1,
+					"hidden": 1,
+				},
+				{
+					"fieldname": "ccpc_equipment_code_at_issue",
+					"label": "Equipment Number at Issue (Original)",
+					"fieldtype": "Data",
+					"insert_after": "ccpc_equipment_at_issue",
+					"read_only": 1,
+					"no_copy": 1,
+					"hidden": 1,
+				},
 			],
 		}
 	)

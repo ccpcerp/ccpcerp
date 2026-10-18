@@ -1,0 +1,179 @@
+# Owner-approved disposable read-only Equipment report SQL and permission tests.
+# Intentionally no push, schedule, deploy, self-hosted runner, or production access.
+name: Equipment Maintenance Baseline - real disposable ledger report
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - review/withdrawal-cancellation-ledger-ci-2026-10-16
+    paths:
+      - .github/workflows/equipment-maintenance-real-ledger.yml
+      - ccpcerp/ccpc_erp/report/ccpc_equipment_maintenance_baseline/**
+      - ccpcerp/setup.py
+      - ccpcerp/hooks.py
+      - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
+      - ccpcerp/ccpc_erp/doctype/equipment_registry/equipment_registry.py
+
+
+permissions:
+  contents: read
+
+concurrency:
+  group: equipment-ledger-report-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  real-ledger-report:
+    # The CI branch has no production credentials, and only this approved same-repo
+    # PR may spend hosted-runner minutes. No third-party fork code.
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/equipment-maintenance-baseline-2026-10-18' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CI: "Yes"
+      BENCH_DIR: ${{ github.workspace }}/../ccpc-frappe-bench
+      TEST_SITE: ci-equipment-report.localhost
+      # Ephemeral fake values solely for this runner's disposable MariaDB/site.
+      CI_DB_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_ADMIN_PASSWORD: ci-admin-${{ github.run_id }}-${{ github.run_attempt }}
+      FEATURE_BASE: 6aea58f9d785f037076b75bc9e0b4bc7bf683bd2
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      redis-cache:
+        image: redis:7-alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:7-alpine
+        ports:
+          - 11000:6379
+
+    steps:
+      - name: Checkout reviewed app changes (no persistent Git credentials)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact branch ancestry and real test inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$FEATURE_BASE" HEAD
+          python3 - <<'PY'
+          import ast
+          import json
+          from pathlib import Path
+          folder = Path("ccpcerp/ccpc_erp/report/ccpc_equipment_maintenance_baseline")
+          f = folder / "test_equipment_maintenance_real_integration.py"
+          parsed = ast.parse(f.read_text(encoding="utf-8"))
+          count = sum(
+              isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and node.name.startswith("test_real_")
+              for node in ast.walk(parsed)
+          )
+          if count != 13:
+              raise SystemExit(f"Expected thirteen distinct real integration test methods, found {count}")
+          metadata = json.loads((folder / "ccpc_equipment_maintenance_baseline.json").read_text())
+          if metadata["roles"] != [{"role":"System Manager"}]:
+              raise SystemExit("Report role config changed unexpectedly")
+          print("Exactly thirteen real test methods defined (not yet executed).")
+          PY
+
+      - name: Set up Python 3.14 and Node 24
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install disposable runner prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+          npm install -g yarn
+          python -m pip install frappe-bench
+          MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
+            -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+
+      - name: Initialize an independent Frappe v16 bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+            --python "$(command -v python)" "$BENCH_DIR"
+          cd "$BENCH_DIR"
+          bench set-config -g redis_cache redis://127.0.0.1:13000
+          bench set-config -g redis_queue redis://127.0.0.1:11000
+          bench set-config -g redis_socketio redis://127.0.0.1:11000
+
+      - name: Install ERPNext v16 and the exact reviewed app checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+          # The private CCPC source comes only from the current Actions checkout.
+          # No token-bearing URL or clone of CCPC from the shared ERP server.
+          bench get-app ccpcerp "$GITHUB_WORKSPACE"
+          git -C apps/ccpcerp fetch --quiet --no-tags "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+          git -C apps/ccpcerp checkout --quiet --detach "$GITHUB_SHA"
+          test "$(git -C apps/ccpcerp rev-parse HEAD)" = "$GITHUB_SHA"
+          git -C apps/ccpcerp merge-base --is-ancestor "$FEATURE_BASE" HEAD
+          bench setup requirements --dev
+          echo "Frappe source: $(git -C apps/frappe rev-parse HEAD)"
+          echo "ERPNext source: $(git -C apps/erpnext rev-parse HEAD)"
+          echo "CCPC app source: $(git -C apps/ccpcerp rev-parse HEAD)"
+
+      - name: Create disposable test site and install apps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
+            --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+            --admin-password "$CI_ADMIN_PASSWORD"
+          bench --site "$TEST_SITE" install-app erpnext
+          bench --site "$TEST_SITE" install-app ccpcerp
+          # CCPC's Stock Entry custom link fields and scoped roles are created
+          # by ccpcerp.setup.after_migrate, not just by install-app. This affects
+          # ONLY the disposable CI site; NEVER run on CCPC shared-host sites.
+          bench --site "$TEST_SITE" migrate
+          bench --site "$TEST_SITE" set-config allow_tests true
+
+      - name: Execute thirteen real SQL, SLE, GL, permissions and report tests
+        env:
+          CCPC_ALLOW_EQUIPMENT_REAL_PROBE: isolated-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests --module ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.test_equipment_maintenance_real_integration
+
+      - name: Record test scope and release prohibition
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Equipment maintenance baseline disposable SQL / stock-ledger verification"
+            echo "Source: PR exact commit $GITHUB_SHA; hosted Ubuntu; disposable Frappe v16 ERPNext/MariaDB/Redis."
+            echo "Scope: 13 real Frappe tests if completed; synthetic _Test Company, linked Material Issue SLE/GL, report SQL, date/role/company and cancellation."
+            echo "Not tested: live CCPC configuration, equipment source immutability, return Material Receipts, report deployment, priced labor or full maintenance cost reconciliation."
+            echo "PRODUCTION NO-GO and DEVELOPMENT deployment not authorized."
+          } >> "$GITHUB_STEP_SUMMARY"
