@@ -83,12 +83,12 @@ jobs:
               and node.name.startswith("test_real_")
               for node in ast.walk(parsed)
           )
-          if count != 10:
-              raise SystemExit(f"Expected ten distinct real integration test methods, found {count}")
+          if count != 13:
+              raise SystemExit(f"Expected thirteen distinct real integration test methods, found {count}")
           metadata = json.loads((folder / "ccpc_equipment_maintenance_baseline.json").read_text())
           if metadata["roles"] != [{"role":"System Manager"}]:
               raise SystemExit("Report role config changed unexpectedly")
-          print("Exactly ten real test methods defined (not yet executed).")
+          print("Exactly thirteen real test methods defined (not yet executed).")
           PY
 
       - name: Set up Python 3.14 and Node 24
@@ -157,7 +157,7 @@ jobs:
           bench --site "$TEST_SITE" migrate
           bench --site "$TEST_SITE" set-config allow_tests true
 
-      - name: Execute ten real SQL, SLE, GL, permissions and report tests
+      - name: Execute thirteen real SQL, SLE, GL, permissions and report tests
         env:
           CCPC_ALLOW_EQUIPMENT_REAL_PROBE: isolated-only
         shell: bash
@@ -173,7 +173,7 @@ jobs:
           {
             echo "## Equipment maintenance baseline disposable SQL / stock-ledger verification"
             echo "Source: PR exact commit $GITHUB_SHA; hosted Ubuntu; disposable Frappe v16 ERPNext/MariaDB/Redis."
-            echo "Scope: 10 real Frappe tests if completed; synthetic _Test Company, linked Material Issue SLE/GL, report SQL, date/role/company and cancellation."
+            echo "Scope: 13 real Frappe tests if completed; synthetic _Test Company, linked Material Issue SLE/GL, report SQL, date/role/company and cancellation."
             echo "Not tested: live CCPC configuration, equipment source immutability, return Material Receipts, report deployment, priced labor or full maintenance cost reconciliation."
             echo "PRODUCTION NO-GO and DEVELOPMENT deployment not authorized."
           } >> "$GITHUB_STEP_SUMMARY"
