@@ -28,8 +28,8 @@ class TestEquipmentMaintenanceBaseline(TestCase):
         self.assertEqual(rows[0]["recorded_labor_hours"], 3.5)
         self.assertEqual(rows[0]["currency"], "PHP")
         self.assertIn("returns", rows[0]["scope_note"])
-        self.assertIn("PROVISIONAL equipment attribution", rows[0]["scope_note"])
-        self.assertIn("no immutable issue-row Equipment snapshot", rows[0]["scope_note"])
+        self.assertIn("ORIGINAL SNAPSHOT", rows[0]["scope_note"])
+        self.assertEqual(rows[0]["source_quality"], "SNAPSHOT_MATCHES_SOURCE")
         self.assertNotIn("net_cost", rows[0])
 
     def test_unrecorded_labor_hours_are_unknown_not_zero(self):
@@ -88,7 +88,7 @@ class TestEquipmentMaintenanceBaseline(TestCase):
             "se.docstatus = 1", "se.purpose = 'Material Issue'",
             "sle.voucher_detail_no", "sle.is_cancelled = 0",
             "sed.withdrawal_slip_item", "se.company = %(company)s",
-            "eq.name = %(equipment)s", "sle.posting_date >= %(from_date)s",
+            "source.equipment = %(equipment)s", "sle.posting_date >= %(from_date)s",
             "sle.posting_date <= %(to_date)s",
             "unexpected_value_rows",
         ):
@@ -114,3 +114,40 @@ class TestEquipmentMaintenanceBaseline(TestCase):
             )
         self.assertEqual(rows[0]["unexpected_value_rows"], 1)
         self.assertIn("REQUIRES REVIEW", rows[0]["scope_note"])
+
+    def test_legacy_and_conflict_rows_stay_unattributed_and_separate(self):
+        with patch("ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.ccpc_equipment_maintenance_baseline._", side_effect=lambda s: s):
+            rows = _merge_activity(
+                [
+                    {"equipment": None, "source_quality": "LEGACY_NO_SNAPSHOT",
+                     "issue_rows": 2, "gross_issued_stock_value": 300},
+                    {"equipment": None, "source_quality": "SNAPSHOT_PAIR_CONFLICT",
+                     "issue_rows": 1, "gross_issued_stock_value": 60},
+                    {"equipment": "P-01", "source_quality": "SNAPSHOT_MATCHES_SOURCE",
+                     "issue_rows": 1, "gross_issued_stock_value": 100},
+                ], [], "PHP")
+        self.assertEqual(len(rows), 3)
+        exceptions = [r for r in rows if not r["equipment"]]
+        self.assertEqual(len(exceptions), 2)
+        self.assertEqual(sum(r["gross_issued_stock_value"] for r in exceptions), 360)
+        self.assertTrue(all("UNATTRIBUTED" in r["scope_note"] for r in exceptions))
+        self.assertEqual([r["gross_issued_stock_value"] for r in rows if r["equipment"] == "P-01"], [100])
+
+    def test_same_equipment_valid_and_slip_conflict_are_separate(self):
+        with patch("ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.ccpc_equipment_maintenance_baseline._", side_effect=lambda s: s):
+            rows = _merge_activity(
+                [
+                    {"equipment": "P-01", "source_quality": "SNAPSHOT_MATCHES_SOURCE",
+                     "issue_rows": 1, "gross_issued_stock_value": 100},
+                    {"equipment": "P-01", "source_quality": "SLIP_SNAPSHOT_CONFLICT",
+                     "issue_rows": 1, "gross_issued_stock_value": 200},
+                ],
+                [{"equipment": "P-01", "job_orders": 1,
+                  "jobs_with_labor_hours": 1, "recorded_labor_hours": 2}],
+                "PHP", equipment_filtered=True)
+        self.assertEqual(len(rows), 2)
+        by_status = {r["source_quality"]: r for r in rows}
+        self.assertEqual(by_status["SNAPSHOT_MATCHES_SOURCE"]["job_orders"], 1)
+        self.assertEqual(by_status["SLIP_SNAPSHOT_CONFLICT"]["job_orders"], 0)
+        self.assertIn("not certified", by_status["SLIP_SNAPSHOT_CONFLICT"]["scope_note"])
+        self.assertTrue(all("FILTER HIDES UNATTRIBUTED" in r["scope_note"] for r in rows))
