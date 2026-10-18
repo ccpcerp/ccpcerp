@@ -254,9 +254,10 @@ class TestWithdrawalSlip(TestCase):
 		slip.company = "Cagayan Corn Products Corporation"
 		slip.requesting_company = "Ricor Mills Corporation"
 		slip.department = "Maintenance Department - RMC"
+		slip.work_for_department = "Maintenance Department - CCPC"
 		slip.source_warehouse = "Warehouse 1 - CCPC"
 		slip.equipment = None
-		slip.get.return_value = [
+		request_items = [
 			frappe._dict(
 				idx=1,
 				name="WSI-1",
@@ -267,6 +268,9 @@ class TestWithdrawalSlip(TestCase):
 				stockroom_remarks="",
 			)
 		]
+		slip.get.side_effect = lambda key: request_items if key == "items" else (
+			"Maintenance Department - CCPC" if key == "work_for_department" else None
+		)
 		get_doc.return_value = slip
 
 		stock_entry = MagicMock()
@@ -288,12 +292,15 @@ class TestWithdrawalSlip(TestCase):
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_issuable_slip", return_value=slip),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_existing_draft_names", return_value=[]),
+			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.require_department_gl_dimension"),
+			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.validate_department_company"),
 		):
 			result = make_material_issue(slip.name)
 
 		self.assertEqual(stock_entry.company, "Cagayan Corn Products Corporation")
+		self.assertEqual(stock_entry.department, "Maintenance Department - CCPC")
+		self.assertEqual(stock_entry.items[0].department, "Maintenance Department - CCPC")
 		self.assertNotEqual(stock_entry.department, "Maintenance Department - RMC")
-		self.assertNotIn("department", stock_entry.items[0])
 		self.assertEqual(result, {"name": "MAT-STE-0001", "existing": 0})
 
 
