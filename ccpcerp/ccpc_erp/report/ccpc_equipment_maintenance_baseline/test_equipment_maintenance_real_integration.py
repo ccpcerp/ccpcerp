@@ -275,3 +275,125 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         with patch("frappe.has_permission", side_effect=lambda doctype, action: doctype != "Stock Entry"):
             with self.assertRaises(frappe.PermissionError):
                 execute({"company": COMPANY, "equipment": self.equipment})
+
+
+    def test_real_posted_issue_equipment_normal_edit_denied(self):
+        # The Withdrawal Slip request-intent lock prevents normal ORM
+        # reattribution after issue. A direct database write bypasses this
+        # guard, hence the report must keep its PROVISIONAL warning.
+        frappe.set_user(PREPARER)
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        self.assertEqual(slip.equipment, self.equipment)
+        self.assertIn(slip.status, ("Fully Issued", "Issued with Shortage"))
+        slip.equipment = None
+        with self.assertRaises(frappe.ValidationError):
+            slip.save(ignore_permissions=True)
+        self.assertEqual(
+            frappe.db.get_value("Withdrawal Slip", self.slip_name, "equipment"),
+            self.equipment,
+        )
+
+        result = self._report()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["equipment"], self.equipment)
+        self.assertIn("PROVISIONAL equipment attribution", result[0]["scope_note"])
+
+    def test_real_multiple_issue_rows_sum_once_and_equipment_filter_isolates(self):
+        # The original 1-row issue from setUp already exists; append a second
+        # submitted issue containing two distinct rows for the same Equipment.
+        # An additional third issue belongs to a different Equipment and
+        # must never leak into the filtered primary Equipment value.
+        frappe.set_user("Administrator")
+        new_item = make_item(
+            item_code="CI-EQUIP-SECOND-" + frappe.generate_hash(length=12),
+            properties={
+                "is_stock_item": 1,
+                "stock_uom": "_Test UOM",
+                "item_group": "_Test Item Group",
+                "opening_stock": 0,
+                "valuation_rate": UNIT_RATE,
+            },
+        )
+        incoming2 = make_stock_entry(
+            item_code=new_item.name,
+            qty=5,
+            company=COMPANY,
+            to_warehouse=WAREHOUSE,
+            rate=UNIT_RATE,
+        )
+        self.assertEqual(incoming2.docstatus, 1)
+
+        equipment2 = frappe.get_doc({
+            "doctype": "Equipment Registry",
+            "equipment_number": "CI-REPORT-OTHER-" + frappe.generate_hash(length=10),
+            "equipment_description": "Independent equipment - CI",
+            "company": COMPANY,
+            "department": self.department,
+            "status": "Active",
+        }).insert(ignore_permissions=True).name
+
+        def submit_issue(equipment, item_codes):
+            frappe.set_user(PREPARER)
+            slip = frappe.get_doc({
+                "doctype": "Withdrawal Slip",
+                "requestor": "CI Synthetic Multi-row Test",
+                "approving_supervisor": PREPARER,
+                "required_by": nowdate(),
+                "company": COMPANY,
+                "requesting_company": COMPANY,
+                "department": self.department,
+                "work_for_department": self.department,
+                "equipment": equipment,
+                "source_warehouse": WAREHOUSE,
+                "physical_location": "Disposable CI multi-equipment bay",
+                "purpose": "Synthetic separate equipment source aggregation",
+                "received_by": "CI test receiver",
+                "items": [
+                    {"item_code": code, "requested_qty": 1, "issue_qty": 1, "uom": "_Test UOM"}
+                    for code in item_codes
+                ],
+            })
+            slip.insert(ignore_permissions=True)
+            frappe.db.set_value("Withdrawal Slip", slip.name, "status", "Stockroom Review")
+            frappe.set_user(ISSUER)
+            result = issue_withdrawal_slip(slip.name)
+            self.assertEqual(result["submitted"], 1)
+            doc = frappe.get_doc("Stock Entry", result["name"])
+            self.assertEqual(len(doc.items), len(item_codes))
+            return doc
+
+        same_equipment = submit_issue(self.equipment, [self.item.name, new_item.name])
+        other_equipment = submit_issue(equipment2, [self.item.name])
+        self.assertEqual(len(same_equipment.items), 2)
+
+        def source_value(stock_entry):
+            ledger = frappe.get_all(
+                "Stock Ledger Entry",
+                filters={"voucher_type": "Stock Entry", "voucher_no": stock_entry.name, "is_cancelled": 0},
+                fields=["voucher_detail_no", "actual_qty", "stock_value_difference"],
+            )
+            self.assertEqual(len(ledger), len(stock_entry.items))
+            self.assertEqual(
+                {r.voucher_detail_no for r in ledger},
+                {r.name for r in stock_entry.items},
+            )
+            self.assertTrue(all(flt(row.actual_qty) == -1 for row in ledger))
+            return -sum(flt(row.stock_value_difference) for row in ledger)
+
+        value_primary = source_value(same_equipment)
+        value_other = source_value(other_equipment)
+        original = -sum(flt(row.stock_value_difference) for row in self._source_sle())
+
+        filtered = self._report()
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["issue_rows"], 3)
+        self.assertAlmostEqual(filtered[0]["gross_issued_stock_value"], original + value_primary, places=2)
+
+        frappe.set_user(REPORTER)
+        unfiltered = execute({"company": COMPANY})[1]
+        by_equipment = {row["equipment"]: row for row in unfiltered}
+        self.assertIn(self.equipment, by_equipment)
+        self.assertIn(equipment2, by_equipment)
+        self.assertEqual(by_equipment[equipment2]["issue_rows"], 1)
+        self.assertAlmostEqual(by_equipment[equipment2]["gross_issued_stock_value"], value_other, places=2)
+        self.assertAlmostEqual(by_equipment[self.equipment]["gross_issued_stock_value"], original + value_primary, places=2)
