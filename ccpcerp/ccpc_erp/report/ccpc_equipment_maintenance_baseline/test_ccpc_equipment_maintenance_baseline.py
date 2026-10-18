@@ -38,7 +38,7 @@ class TestEquipmentMaintenanceBaseline(TestCase):
             ], "PHP")
         self.assertEqual(rows[0]["gross_issued_stock_value"], 0)
         self.assertIsNone(rows[0]["recorded_labor_hours"])
-        self.assertEqual(rows[0]["hours_completeness"], "0 of 2 Job Orders have hours")
+        self.assertEqual(rows[0]["hours_completeness"], "0 of 2 Job Orders have positive labor hours")
 
     def test_multiple_equipment_and_partial_hours_remain_separate(self):
         with patch("ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.ccpc_equipment_maintenance_baseline._", side_effect=lambda s: s):
@@ -48,7 +48,7 @@ class TestEquipmentMaintenanceBaseline(TestCase):
                   "recorded_labor_hours": 12}], "PHP"
             )
         self.assertEqual([x["equipment"] for x in rows], ["P-01", "P-02"])
-        self.assertEqual(rows[0]["hours_completeness"], "2 of 4 Job Orders have hours")
+        self.assertEqual(rows[0]["hours_completeness"], "2 of 4 Job Orders have positive labor hours")
         self.assertEqual(rows[1]["job_orders"], 0)
 
     def test_duplicate_issue_equipment_group_is_not_silently_added_twice(self):
@@ -100,6 +100,7 @@ class TestEquipmentMaintenanceBaseline(TestCase):
         self.assertIn("jo.docstatus < 2", query)
         self.assertIn("jo.status, '') != 'Cancelled'", query)
         self.assertIn("DATE(jo.date_assigned)", query)
+        self.assertIn("jo.labor_hours > 0", query)
         self.assertNotIn("actual_finish -", query)
         self.assertEqual(parameters["company"], "CCPC")
 
