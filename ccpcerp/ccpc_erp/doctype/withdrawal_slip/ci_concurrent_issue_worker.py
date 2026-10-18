@@ -21,12 +21,15 @@ def _ci_concurrent_issue_worker(slot, site, sites_path, slip_name, issuer, resul
             os.environ.get("GITHUB_ACTIONS") == "true"
             and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
             and os.environ.get("GITHUB_HEAD_REF")
-            == "review/withdrawal-cancellation-ledger-ci-2026-10-16"
+            in {
+                "review/withdrawal-cancellation-ledger-ci-2026-10-16",
+                "review/withdrawal-issue-accounting-ci-2026-10-17",
+            }
             and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
             and os.environ.get("CCPC_ALLOW_CONCURRENCY_PROBE") == "isolated-only"
             and site == "ci-withdrawal.localhost"
         ):
-            raise RuntimeError("Concurrent worker may only run on the disposable PR11 CI site")
+            raise RuntimeError("Concurrent worker may only run on the allowed disposable Withdrawal CI site")
 
         frappe.init(site=site, sites_path=sites_path, force=True)
         if getattr(frappe.local, "site", None) != "ci-withdrawal.localhost":
