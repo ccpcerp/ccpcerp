@@ -101,7 +101,7 @@ def _get_job_activity(f):
             eq.name AS equipment,
             eq.equipment_description,
             COUNT(jo.name) AS job_orders,
-            COUNT(jo.labor_hours) AS jobs_with_labor_hours,
+            SUM(CASE WHEN jo.labor_hours > 0 THEN 1 ELSE 0 END) AS jobs_with_labor_hours,
             SUM(COALESCE(jo.labor_hours, 0)) AS recorded_labor_hours
         FROM `tabJob Order` jo
         INNER JOIN `tabEquipment Registry` eq
@@ -161,7 +161,7 @@ def _merge_activity(issues, jobs, currency):
         row["recorded_labor_hours"] = (
             flt(item.get("recorded_labor_hours")) if counted else None
         )
-        row["hours_completeness"] = _("{0} of {1} Job Orders have hours").format(counted, total)
+        row["hours_completeness"] = _("{0} of {1} Job Orders have positive labor hours").format(counted, total)
 
     for row in equipment.values():
         row["scope_note"] = _("PARTIAL: gross stock valuation, not GL reconciliation; returns, priced labor, services and downtime excluded")
@@ -179,6 +179,6 @@ def get_columns():
         {"label": _("Unexpected Valuation Rows"), "fieldname": "unexpected_value_rows", "fieldtype": "Int", "width": 170},
         {"label": _("Job Orders"), "fieldname": "job_orders", "fieldtype": "Int", "width": 100},
         {"label": _("Recorded Labor Hours (not cost)"), "fieldname": "recorded_labor_hours", "fieldtype": "Float", "width": 210},
-        {"label": _("Labor Hours Coverage"), "fieldname": "hours_completeness", "fieldtype": "Data", "width": 200},
+        {"label": _("Positive Hours Coverage"), "fieldname": "hours_completeness", "fieldtype": "Data", "width": 200},
         {"label": _("Scope"), "fieldname": "scope_note", "fieldtype": "Data", "width": 440},
     ]
