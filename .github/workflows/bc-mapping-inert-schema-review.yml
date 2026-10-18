@@ -1,0 +1,27 @@
+name: CCPC B/C mapping inert-schema review
+
+on:
+  push:
+    branches:
+      - review/bc-mapping-scopes-revisions-2026-10-18
+
+permissions:
+  contents: read
+
+jobs:
+  static-only:
+    if: github.repository == 'ccpcerp/ccpcerp'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify four inactive mapping DocTypes and guards (not a finance posting test)
+        run: |
+          python3 -m unittest discover -s ccpcerp/ccpc_erp -p 'test_ccpc_mapping_schema_static.py' -v
+          python3 -m compileall -q ccpcerp/ccpc_erp/doctype/ccpc_expense_mapping_scope ccpcerp/ccpc_erp/doctype/ccpc_expense_mapping_revision ccpcerp/ccpc_erp/doctype/ccpc_center_mapping_scope ccpcerp/ccpc_erp/doctype/ccpc_center_mapping_revision ccpcerp/ccpc_erp/mapping_scope_keys.py
+      - name: Explicit boundary
+        run: |
+          echo 'STATIC SCHEMA CHECK ONLY: no Frappe/MariaDB site, no permission/approval workflow, no B/C stock/GL posting implementation.'
+          echo 'No DEVELOPMENT/PRODUCTION connectivity. No CCPC finance masters. POSTING_NO_GO.'
