@@ -10,6 +10,7 @@ on:
     paths:
       - .github/workflows/withdrawal-issue-accounting-ci.yml
       - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
+      - ccpcerp/ccpc_erp/withdrawal_issue_beneficiary.py
       - ccpcerp/ccpc_erp/doctype/withdrawal_slip/test_*.py
       - ccpcerp/ccpc_erp/doctype/withdrawal_slip/ci_concurrent_issue_worker.py
 
@@ -183,7 +184,7 @@ jobs:
           done
           exit "$failed"
 
-      - name: Execute nine real SQL, WSGI, concurrency, cancellation and accounting tests
+      - name: Execute twelve real SQL, WSGI, concurrency, cancellation and accounting tests
         env:
           CCPC_ALLOW_COMMIT_PROBE: isolated-only
           CCPC_ALLOW_CONCURRENCY_PROBE: isolated-only
@@ -207,7 +208,7 @@ jobs:
             echo "Runner: GitHub-hosted Ubuntu 24.04; disposable MariaDB and Redis."
             echo "App checkout SHA: $GITHUB_SHA"
             echo "Baseline feature commit: $FEATURE_BASE"
-            echo "Scope: 72 mocked Frappe regressions PLUS 9 real MariaDB/WSGI methods including native dimension control and issue-side attribution (only if step completed)."
+            echo "Scope: 72 mocked Frappe regressions PLUS 12 real MariaDB/WSGI methods including native dimension control, issue-side attribution and three negative beneficiary/forged voucher scenarios (only if step completed)."
             echo "Still not tested by this CI: return Material Receipt posting, configured CCPC beneficiary Cost Center mapping where absent, shared-server runtime, and backup recovery."
             echo "Production status: NO-GO regardless of this job's result."
           } >> "$GITHUB_STEP_SUMMARY"
