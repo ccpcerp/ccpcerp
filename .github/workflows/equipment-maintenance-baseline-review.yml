@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   mocked-report-contract:
-    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/equipment-maintenance-baseline-2026-10-18' }}
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-beneficiary-equipment-integration-2026-10-18' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
