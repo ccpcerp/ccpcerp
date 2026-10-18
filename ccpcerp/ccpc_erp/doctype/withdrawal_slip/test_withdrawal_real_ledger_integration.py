@@ -43,13 +43,20 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
-        if self._testMethodName.startswith(("test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
+        if self._testMethodName.startswith(("test_w_", "test_x_", "test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
             if not (
                 os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
                 and os.environ.get("GITHUB_HEAD_REF")
-                == "review/withdrawal-cancellation-ledger-ci-2026-10-16"
+                in {
+                    "review/withdrawal-cancellation-ledger-ci-2026-10-16",
+                    "review/withdrawal-issue-accounting-ci-2026-10-17",
+                }
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
+                and (
+                    not self._testMethodName.startswith(("test_w_", "test_x_"))
+                    or os.environ.get("CCPC_ALLOW_ACCOUNTING_PROBE") == "isolated-only"
+                )
                 and (
                     not self._testMethodName.startswith("test_zzz_")
                     or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only"
@@ -189,6 +196,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 "company": COMPANY,
                 "requesting_company": COMPANY,
                 "department": self.department,
+                "work_for_department": self.department,  # Explicit synthetic beneficiary, not an assumed requester fallback.
                 "physical_location": "Disposable CI test bay",
                 "purpose": "Disposable independent inventory ledger test",
                 "received_by": "CI Synthetic Receiver",
@@ -222,6 +230,313 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             frappe.db.get_value(
                 "Bin", {"item_code": self.item.name, "warehouse": WAREHOUSE}, "actual_qty"
             )
+        )
+
+    def test_w_native_explicit_department_reaches_gl(self):
+        """Isolate native dimension propagation from CCPC's issue builder.
+
+        A separate, unlinked synthetic Material Issue is explicitly tagged
+        with the beneficiary Department on both header and item. This must
+        post its expense debit to that Department on the real GL. The linked
+        CCPC issue test remains separate and intentionally checks the actual
+        builder's missing-source-dimension behavior.
+        """
+        from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+            get_accounting_dimensions,
+        )
+
+        self.assertIn("department", get_accounting_dimensions())
+        for doctype in ("Stock Entry", "Stock Entry Detail", "GL Entry"):
+            self.assertTrue(
+                frappe.get_meta(doctype).has_field("department"),
+                f"Disposable ERPNext {doctype} lacks the Department dimension",
+            )
+
+        frappe.set_user("Administrator")
+        entry = frappe.new_doc("Stock Entry")
+        entry.company = COMPANY
+        entry.purpose = "Material Issue"
+        entry.set_stock_entry_type()
+        entry.from_warehouse = WAREHOUSE
+        entry.department = self.department
+        entry.append(
+            "items",
+            {
+                "item_code": self.item.name,
+                "qty": QTY_ISSUED,
+                "uom": "_Test UOM",
+                "conversion_factor": 1,
+                "s_warehouse": WAREHOUSE,
+                "department": self.department,
+            },
+        )
+        entry.insert(ignore_permissions=True)
+        entry.submit()
+
+        self.assertEqual(entry.docstatus, 1)
+        self.assertEqual(entry.department, self.department)
+        self.assertEqual(entry.items[0].department, self.department)
+        line = entry.items[0]
+        self.assertTrue(line.expense_account)
+        self.assertTrue(line.cost_center)
+        gl = frappe.get_all(
+            "GL Entry",
+            filters={
+                "voucher_type": "Stock Entry",
+                "voucher_no": entry.name,
+                "is_cancelled": 0,
+            },
+            fields=["account", "cost_center", "department", "debit", "credit"],
+        )
+        charges = [
+            row for row in gl
+            if row.account == line.expense_account and flt(row.debit) > 0
+        ]
+        self.assertTrue(charges, "Native Material Issue expense debit missing")
+        self.assertAlmostEqual(
+            sum(flt(r.debit) - flt(r.credit) for r in charges),
+            QTY_ISSUED * UNIT_RATE,
+            places=2,
+        )
+        for row in charges:
+            self.assertEqual(row.department, self.department)
+            self.assertEqual(row.cost_center, line.cost_center)
+        print(
+            "Native ERPNext dimension proof: explicit beneficiary Department "
+            + self.department
+            + " reached submitted expense GL for "
+            + entry.name
+        )
+
+    def test_x_real_issue_expense_cost_center_and_beneficiary_trace(self):
+        """Check real issue-side GL attribution; no physical return is posted.
+
+        This is a disposable Actions-only accounting baseline. The target
+        company may not configure Equipment/Department as GL dimensions; in
+        that case the row/account GL checks still run, and missing dimensions
+        are reported instead of incorrectly claiming that they passed.
+        """
+        frappe.set_user("Administrator")
+        # Make requesting Department deliberately different from the actual
+        # beneficiary. The original Slip and issue must preserve this
+        # difference, rather than silently charge the requestor's department.
+        request_department = frappe.get_doc(
+            {
+                "doctype": "Department",
+                "department_name": "CI Requesting " + frappe.generate_hash(length=8),
+                "company": COMPANY,
+                "is_group": 0,
+            }
+        ).insert(ignore_permissions=True)
+        equipment = frappe.get_doc(
+            {
+                "doctype": "Equipment Registry",
+                "equipment_number": "CI-EQUIP-" + frappe.generate_hash(length=10),
+                "equipment_description": "Disposable CI beneficiary equipment",
+                "company": COMPANY,
+                "department": self.department,
+                "status": "Active",
+            }
+        ).insert(ignore_permissions=True)
+        # Test fixture only: approved request workflow is covered by other
+        # tests. Do not mutate ordinary client request intent after approval.
+        frappe.db.set_value(
+            "Withdrawal Slip",
+            self.slip_name,
+            {
+                "department": request_department.name,
+                "work_for_department": self.department,
+                "equipment": equipment.name,
+            },
+            update_modified=False,
+        )
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        self.assertNotEqual(slip.department, slip.work_for_department)
+        self.assertEqual(slip.work_for_department, self.department)
+
+        frappe.set_user(ISSUER)
+        result = issue_withdrawal_slip(self.slip_name)
+        self.assertEqual(result["submitted"], 1)
+        entry = frappe.get_doc("Stock Entry", result["name"])
+        self.assertEqual(entry.docstatus, 1)
+        self.assertEqual(len(entry.items), 1)
+        line = entry.items[0]
+        self.assertEqual(line.withdrawal_slip_item, self.slip_item_name)
+        self.assertTrue(line.expense_account, "Issue row has no posted expense account")
+        self.assertTrue(line.cost_center, "Issue row has no Cost Center")
+
+        # Diagnostic only, without changing ledger posting or skipping the
+        # beneficiary check: distinguish an active accounting dimension from
+        # a GL Entry column that merely exists in the test schema.
+        from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+            get_accounting_dimensions,
+        )
+
+        active_dimensions = get_accounting_dimensions()
+        print(
+            "Accounting attribution diagnostic: active dimensions="
+            + repr(active_dimensions)
+            + "; Stock Entry header department="
+            + repr(entry.get("department"))
+            + "; row department="
+            + repr(line.get("department"))
+            + "; header equipment="
+            + repr(entry.get("equipment"))
+            + "; row equipment="
+            + repr(line.get("equipment"))
+            + "; row expense account="
+            + repr(line.expense_account)
+            + "; row cost center="
+            + repr(line.cost_center)
+        )
+
+        dimension_fields = [
+            field for field in ("equipment", "department")
+            if frappe.get_meta("GL Entry").has_field(field)
+        ]
+        gl = frappe.get_all(
+            "GL Entry",
+            filters={
+                "voucher_type": "Stock Entry",
+                "voucher_no": entry.name,
+                "is_cancelled": 0,
+            },
+            fields=["account", "cost_center", "debit", "credit"] + dimension_fields,
+        )
+        charge_rows = [
+            row for row in gl
+            if row.account == line.expense_account and flt(row.debit) > 0
+        ]
+        self.assertTrue(
+            charge_rows,
+            "Issued Material Issue has no debit in its recorded expense account",
+        )
+        self.assertAlmostEqual(
+            sum(flt(row.debit) - flt(row.credit) for row in charge_rows),
+            QTY_ISSUED * UNIT_RATE,
+            places=2,
+        )
+        for row in charge_rows:
+            self.assertEqual(
+                row.cost_center, line.cost_center,
+                "GL expense Cost Center differs from the submitted issue row",
+            )
+        if frappe.get_meta("Stock Entry").has_field("equipment"):
+            self.assertEqual(entry.equipment, equipment.name)
+        if frappe.get_meta("Stock Entry Detail").has_field("equipment"):
+            self.assertEqual(line.equipment, equipment.name)
+        if "equipment" in dimension_fields:
+            for row in charge_rows:
+                self.assertEqual(
+                    row.equipment, equipment.name,
+                    "Expense GL lost the actual beneficiary Equipment dimension",
+                )
+        else:
+            print("Accounting baseline: Equipment GL dimension NOT configured in disposable site")
+        if "department" in dimension_fields:
+            for row in charge_rows:
+                self.assertEqual(
+                    row.department, self.department,
+                    "Expense GL department differs from the beneficiary Department",
+                )
+        else:
+            print("Accounting baseline: Department GL dimension NOT configured in disposable site")
+        print(
+            "Accounting baseline: issued expense account="
+            + line.expense_account + "; cost center=" + line.cost_center
+            + "; requesting department=" + request_department.name
+            + "; beneficiary department=" + self.department
+        )
+
+    def test_x_missing_beneficiary_blocks_issue_without_requester_fallback(self):
+        """Missing approved beneficiary must not charge the requesting Department."""
+        frappe.set_user("Administrator")
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, {
+            "work_for_department": None, "equipment": None,
+        }, update_modified=False)
+        frappe.set_user(ISSUER)
+        with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
+            issue_withdrawal_slip(self.slip_name)
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}), 0
+        )
+
+    def test_x_equipment_department_fallback_reaches_actual_gl(self):
+        """Use registered Equipment's Company Department, never requester, when work-for absent."""
+        frappe.set_user("Administrator")
+        requester = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": "CI Different Requester " + frappe.generate_hash(length=8),
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True)
+        equip = frappe.get_doc({
+            "doctype": "Equipment Registry",
+            "equipment_number": "CI-ACCOUNT-FALLBACK-" + frappe.generate_hash(length=9),
+            "equipment_description": "Synthetic Equipment beneficiary fallback",
+            "company": COMPANY, "department": self.department, "status": "Active",
+        }).insert(ignore_permissions=True)
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, {
+            "department": requester.name,
+            "work_for_department": None,
+            "equipment": equip.name,
+        }, update_modified=False)
+        frappe.set_user(ISSUER)
+        issued = issue_withdrawal_slip(self.slip_name)
+        entry = frappe.get_doc("Stock Entry", issued["name"])
+        self.assertEqual(entry.department, self.department)
+        self.assertEqual(entry.items[0].department, self.department)
+        self.assertNotEqual(entry.department, requester.name)
+        row = entry.items[0]
+        gl = frappe.get_all("GL Entry", filters={
+            "voucher_type": "Stock Entry", "voucher_no": entry.name, "is_cancelled": 0,
+        }, fields=["account", "debit", "department"])
+        expense = [g for g in gl if g.account == row.expense_account and flt(g.debit) > 0]
+        self.assertTrue(expense, "Fallback issue expense debit missing")
+        self.assertTrue(all(g.department == self.department for g in expense))
+
+    def test_x_equipment_beneficiary_conflict_blocks_before_stock_gl(self):
+        """Never silently override explicit beneficiary from another Equipment Department."""
+        frappe.set_user("Administrator")
+        other = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": "CI Other Equip Department " + frappe.generate_hash(length=8),
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True)
+        equip = frappe.get_doc({
+            "doctype": "Equipment Registry",
+            "equipment_number": "CI-ACCOUNT-CONFLICT-" + frappe.generate_hash(length=9),
+            "equipment_description": "Synthetic conflict validation",
+            "company": COMPANY, "department": other.name, "status": "Active",
+        }).insert(ignore_permissions=True)
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, {
+            "equipment": equip.name, "work_for_department": self.department,
+        }, update_modified=False)
+        frappe.set_user(ISSUER)
+        with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
+            issue_withdrawal_slip(self.slip_name)
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}), 0
+        )
+
+    def test_x_forged_direct_voucher_department_rejected_before_ledger(self):
+        """Normal Stock Entry.submit also rejects a forged source Department."""
+        from ccpcerp.ccpc_erp.withdrawal_slip_stock import _build_material_issue
+
+        frappe.set_user(ISSUER)
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        doc = _build_material_issue(slip)
+        self.assertEqual(doc.department, self.department)
+        self.assertEqual(doc.items[0].department, self.department)
+        doc.insert(ignore_permissions=True)
+        doc.items[0].department = None
+        doc.flags.ignore_permissions = True
+        with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
+            doc.submit()
+        self.assertEqual(
+            frappe.db.count("Stock Ledger Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}), 0
+        )
+        self.assertEqual(
+            frappe.db.count("GL Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}), 0
         )
 
     def test_real_material_issue_updates_bin_sle_gl_and_blocks_second_issue(self):
