@@ -27,10 +27,19 @@ class CCPCCenterMappingRevision(Document):
             frappe.throw(_("C mapping approval is not enabled; selector and Finance controls remain pending."))
         if self.approved_by or self.approved_at or self.supersedes or self.revocation_reason:
             frappe.throw(_("Approval/revocation provenance cannot be supplied by draft users."))
-        if not frappe.db.exists("CCPC Center Mapping Scope", self.mapping_scope):
+        scope = frappe.db.get_value(
+            "CCPC Center Mapping Scope", self.mapping_scope, "company"
+        )
+        if not scope:
             frappe.throw(_("Center mapping scope does not exist."))
-        if not self.cost_center or not frappe.db.exists("Cost Center", self.cost_center):
+        center = frappe.db.get_value(
+            "Cost Center", self.cost_center,
+            ["company", "is_group", "disabled"], as_dict=True,
+        ) if self.cost_center else None
+        if not center:
             frappe.throw(_("A real Cost Center reference is required even for a draft."))
+        if center.company != scope or center.is_group or center.disabled:
+            frappe.throw(_("Draft Cost Center must be an enabled leaf Cost Center in the mapping Company."))
         if self.effective_from and self.effective_until:
             from frappe.utils import get_datetime
             if get_datetime(self.effective_until) <= get_datetime(self.effective_from):
