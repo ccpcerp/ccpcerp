@@ -22,6 +22,8 @@ class CCPCExpenseMappingScope(Document):
         self.scope_key = expected
 
     def validate(self):
+        if not frappe.db.exists("Company", self.company):
+            frappe.throw(_("Expense mapping Company must exist."))
         group = frappe.db.get_value("Item Group", self.item_group, "is_group")
         if group is None:
             frappe.throw(_("Expense mapping Item Group must exist."))
