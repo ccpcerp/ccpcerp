@@ -43,7 +43,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
-        if self._testMethodName.startswith(("test_x_", "test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
+        if self._testMethodName.startswith(("test_w_", "test_x_", "test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
             if not (
                 os.environ.get("GITHUB_ACTIONS") == "true"
                 and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
@@ -54,7 +54,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 }
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
                 and (
-                    not self._testMethodName.startswith("test_x_")
+                    not self._testMethodName.startswith(("test_w_", "test_x_"))
                     or os.environ.get("CCPC_ALLOW_ACCOUNTING_PROBE") == "isolated-only"
                 )
                 and (
@@ -229,6 +229,82 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             frappe.db.get_value(
                 "Bin", {"item_code": self.item.name, "warehouse": WAREHOUSE}, "actual_qty"
             )
+        )
+
+    def test_w_native_explicit_department_reaches_gl(self):
+        """Isolate native dimension propagation from CCPC's issue builder.
+
+        A separate, unlinked synthetic Material Issue is explicitly tagged
+        with the beneficiary Department on both header and item. This must
+        post its expense debit to that Department on the real GL. The linked
+        CCPC issue test remains separate and intentionally checks the actual
+        builder's missing-source-dimension behavior.
+        """
+        from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+            get_accounting_dimensions,
+        )
+
+        self.assertIn("department", get_accounting_dimensions())
+        for doctype in ("Stock Entry", "Stock Entry Detail", "GL Entry"):
+            self.assertTrue(
+                frappe.get_meta(doctype).has_field("department"),
+                f"Disposable ERPNext {doctype} lacks the Department dimension",
+            )
+
+        frappe.set_user("Administrator")
+        entry = frappe.new_doc("Stock Entry")
+        entry.company = COMPANY
+        entry.purpose = "Material Issue"
+        entry.set_stock_entry_type()
+        entry.from_warehouse = WAREHOUSE
+        entry.department = self.department
+        entry.append(
+            "items",
+            {
+                "item_code": self.item.name,
+                "qty": QTY_ISSUED,
+                "uom": "_Test UOM",
+                "conversion_factor": 1,
+                "s_warehouse": WAREHOUSE,
+                "department": self.department,
+            },
+        )
+        entry.insert(ignore_permissions=True)
+        entry.submit()
+
+        self.assertEqual(entry.docstatus, 1)
+        self.assertEqual(entry.department, self.department)
+        self.assertEqual(entry.items[0].department, self.department)
+        line = entry.items[0]
+        self.assertTrue(line.expense_account)
+        self.assertTrue(line.cost_center)
+        gl = frappe.get_all(
+            "GL Entry",
+            filters={
+                "voucher_type": "Stock Entry",
+                "voucher_no": entry.name,
+                "is_cancelled": 0,
+            },
+            fields=["account", "cost_center", "department", "debit", "credit"],
+        )
+        charges = [
+            row for row in gl
+            if row.account == line.expense_account and flt(row.debit) > 0
+        ]
+        self.assertTrue(charges, "Native Material Issue expense debit missing")
+        self.assertAlmostEqual(
+            sum(flt(r.debit) - flt(r.credit) for r in charges),
+            QTY_ISSUED * UNIT_RATE,
+            places=2,
+        )
+        for row in charges:
+            self.assertEqual(row.department, self.department)
+            self.assertEqual(row.cost_center, line.cost_center)
+        print(
+            "Native ERPNext dimension proof: explicit beneficiary Department "
+            + self.department
+            + " reached submitted expense GL for "
+            + entry.name
         )
 
     def test_x_real_issue_expense_cost_center_and_beneficiary_trace(self):
