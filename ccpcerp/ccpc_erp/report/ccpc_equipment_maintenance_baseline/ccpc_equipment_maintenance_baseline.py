@@ -164,7 +164,7 @@ def _merge_activity(issues, jobs, currency):
         row["hours_completeness"] = _("{0} of {1} Job Orders have positive labor hours").format(counted, total)
 
     for row in equipment.values():
-        row["scope_note"] = _("PARTIAL: gross stock valuation, not GL reconciliation; returns, priced labor, services and downtime excluded")
+        row["scope_note"] = _("PROVISIONAL equipment attribution from Withdrawal Slip; no immutable issue-row Equipment snapshot. PARTIAL gross stock valuation, not GL reconciliation; returns, priced labor, services and downtime excluded")
         if row["unexpected_value_rows"]:
             row["scope_note"] += _("; unexpected nonnegative issue valuation REQUIRES REVIEW")
     return [equipment[key] for key in sorted(equipment)]
