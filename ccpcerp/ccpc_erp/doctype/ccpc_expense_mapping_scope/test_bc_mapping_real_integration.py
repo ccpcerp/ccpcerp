@@ -80,6 +80,94 @@ class TestBCMappingRealIntegration(ERPNextTestSuite):
         with self.assertRaises(frappe.ValidationError):
             rejected.before_validate()
 
+    def test_real_draft_expense_revision_eligible_company_and_no_group_account(self):
+        item_group = frappe.db.get_value("Item Group", {"is_group": 0}, "name")
+        scope = frappe.get_doc({
+            "doctype": "CCPC Expense Mapping Scope",
+            "company": self.company, "item_group": item_group,
+        }).insert(ignore_permissions=True)
+        account = "Stock Adjustment - _TC"  # Disposable ERPNext fixture only; NOT CCPC-approved.
+        details = frappe.db.get_value(
+            "Account", account, ["company", "is_group", "disabled", "root_type"], as_dict=True,
+        )
+        self.assertEqual(details.company, self.company)
+        self.assertEqual(details.root_type, "Expense")
+        self.assertFalse(details.is_group or details.disabled)
+        draft = frappe.get_doc({
+            "doctype": "CCPC Expense Mapping Revision",
+            "mapping_scope": scope.name, "revision_no": 1,
+            "expense_account": account, "approval_state": "Draft",
+        }).insert(ignore_permissions=True)
+        self.assertEqual(len(draft.revision_key), 64)
+        self.assertEqual(draft.approval_state, "Draft")
+        self.assertIsNone(draft.approved_by)
+        self.assertIsNone(draft.approved_at)
+
+        group_account = frappe.db.get_value(
+            "Account", {"company": self.company, "is_group": 1}, "name",
+        )
+        self.assertTrue(group_account)
+        invalid = frappe.get_doc({
+            "doctype": "CCPC Expense Mapping Revision",
+            "mapping_scope": scope.name, "revision_no": 2,
+            "expense_account": group_account, "approval_state": "Draft",
+        })
+        with self.assertRaises(frappe.ValidationError):
+            invalid.insert(ignore_permissions=True)
+
+        # A second revision may not silently reuse the first immutable key.
+        duplicate = frappe.get_doc({
+            "doctype": "CCPC Expense Mapping Revision",
+            "mapping_scope": scope.name, "revision_no": 1,
+            "expense_account": account, "approval_state": "Draft",
+        })
+        with self.assertRaises(Exception):
+            duplicate.insert(ignore_permissions=True)
+        self.assertEqual(frappe.db.count(
+            "CCPC Expense Mapping Revision", {"revision_key": draft.revision_key}
+        ), 1)
+
+    def test_real_draft_center_revision_valid_leaf_and_reject_group_center(self):
+        name = "CI B/C Department"
+        department = frappe.db.get_value(
+            "Department", {"company": self.company, "department_name": name}, "name",
+        )
+        if not department:
+            department = frappe.get_doc({
+                "doctype": "Department", "department_name": name,
+                "company": self.company, "is_group": 0, "disabled": 0,
+            }).insert(ignore_permissions=True).name
+        scope = frappe.get_doc({
+            "doctype": "CCPC Center Mapping Scope",
+            "company": self.company, "beneficiary_department": department,
+            "selector_kind": "Department Only", "selector_key": "DEPARTMENT_ONLY",
+        }).insert(ignore_permissions=True)
+        center = "_Test Cost Center 2 - _TC"  # Disposable ERPNext fixture only.
+        details = frappe.db.get_value(
+            "Cost Center", center, ["company", "is_group", "disabled"], as_dict=True,
+        )
+        self.assertEqual(details.company, self.company)
+        self.assertFalse(details.is_group or details.disabled)
+        draft = frappe.get_doc({
+            "doctype": "CCPC Center Mapping Revision",
+            "mapping_scope": scope.name, "revision_no": 1,
+            "cost_center": center, "approval_state": "Draft",
+        }).insert(ignore_permissions=True)
+        self.assertEqual(draft.approval_state, "Draft")
+        self.assertEqual(len(draft.revision_key), 64)
+
+        group_center = frappe.db.get_value(
+            "Cost Center", {"company": self.company, "is_group": 1}, "name",
+        )
+        self.assertTrue(group_center)
+        invalid = frappe.get_doc({
+            "doctype": "CCPC Center Mapping Revision",
+            "mapping_scope": scope.name, "revision_no": 2,
+            "cost_center": group_center, "approval_state": "Draft",
+        })
+        with self.assertRaises(frappe.ValidationError):
+            invalid.insert(ignore_permissions=True)
+
     def test_real_no_finance_approval_activation_even_for_administrator(self):
         cases = [
             ("CCPC Expense Mapping Revision", "Stock Adjustment - _TC", "expense_account"),
