@@ -1,0 +1,65 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "company",
+    "beneficiary_department",
+    "selector_kind",
+    "selector_key",
+    "scope_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "company",
+      "fieldtype": "Link",
+      "label": "Issue Company",
+      "options": "Company",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "beneficiary_department",
+      "fieldtype": "Link",
+      "label": "Actual Beneficiary Department",
+      "options": "Department",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "selector_kind",
+      "fieldtype": "Select",
+      "label": "Selector Kind — Pending Finance Rule",
+      "options": "Department Only\nExplicit Selection",
+      "default": "Department Only",
+      "reqd": 1
+    },
+    {
+      "fieldname": "selector_key",
+      "fieldtype": "Data",
+      "label": "Selector Key",
+      "default": "DEPARTMENT_ONLY",
+      "reqd": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "scope_key",
+      "fieldtype": "Data",
+      "label": "Immutable Scope Key",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1,
+      "hidden": 1,
+      "no_copy": 1,
+      "length": 64
+    }
+  ],
+  "istable": 0,
+  "module": "CCPC ERP",
+  "name": "CCPC Center Mapping Scope",
+  "permissions": [],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}
