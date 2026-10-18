@@ -413,6 +413,30 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         item = self.entry.items[0]
         self.assertEqual(item.ccpc_equipment_at_issue, self.equipment)
         self.assertEqual(item.ccpc_equipment_code_at_issue, self.equipment)
+        # Joint A+D acceptance on the SAME original submitted Stock Entry:
+        # immutable Equipment source plus actual beneficiary Department on real GL.
+        from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
+            get_accounting_dimensions,
+        )
+        self.assertIn("department", get_accounting_dimensions())
+        self.assertEqual(self.entry.department, self.department)
+        self.assertEqual(item.department, self.department)
+        self.assertTrue(frappe.get_meta("GL Entry").has_field("department"))
+        expense_gl = frappe.get_all(
+            "GL Entry",
+            filters={
+                "voucher_type": "Stock Entry",
+                "voucher_no": self.entry_name,
+                "is_cancelled": 0,
+                "account": item.expense_account,
+            },
+            fields=["debit", "department", "cost_center"],
+        )
+        charged = [line for line in expense_gl if flt(line.debit) > 0]
+        self.assertTrue(charged, "Original issue must produce a real expense GL debit")
+        for line in charged:
+            self.assertEqual(line.department, self.department)
+            self.assertEqual(line.cost_center, item.cost_center)
         self.assertEqual(
             frappe.db.get_value("Stock Entry Detail", item.name, "ccpc_equipment_code_at_issue"),
             self.equipment,
