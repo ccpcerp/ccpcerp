@@ -397,3 +397,93 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         self.assertEqual(by_equipment[equipment2]["issue_rows"], 1)
         self.assertAlmostEqual(by_equipment[equipment2]["gross_issued_stock_value"], value_other, places=2)
         self.assertAlmostEqual(by_equipment[self.equipment]["gross_issued_stock_value"], original + value_primary, places=2)
+
+
+    def test_real_new_issue_snapshot_pair_is_provisioned(self):
+        meta = frappe.get_meta("Stock Entry Detail")
+        for fieldname, typ in (
+            ("ccpc_equipment_at_issue", "Link"),
+            ("ccpc_equipment_code_at_issue", "Data"),
+        ):
+            field = meta.get_field(fieldname)
+            self.assertIsNotNone(field)
+            self.assertEqual(field.fieldtype, typ)
+            self.assertEqual(int(field.read_only), 1)
+            self.assertEqual(int(field.no_copy), 1)
+        item = self.entry.items[0]
+        self.assertEqual(item.ccpc_equipment_at_issue, self.equipment)
+        self.assertEqual(item.ccpc_equipment_code_at_issue, self.equipment)
+        self.assertEqual(
+            frappe.db.get_value("Stock Entry Detail", item.name, "ccpc_equipment_code_at_issue"),
+            self.equipment,
+        )
+        self.assertEqual(
+            frappe.db.get_value("Equipment Registry", item.ccpc_equipment_at_issue, "company"),
+            COMPANY,
+        )
+        self.assertTrue(
+            "ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_submitted_issue_equipment_snapshot"
+            in str(frappe.get_hooks("doc_events")["Stock Entry"]["before_update_after_submit"])
+        )
+
+    def test_real_direct_issue_snapshot_tampering_fails_source_validation(self):
+        from ccpcerp.ccpc_erp.withdrawal_slip_stock import _validate_equipment_issue_snapshot
+        frappe.set_user("Administrator")
+        doc = frappe.get_doc("Stock Entry", self.entry_name)
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        item = doc.items[0]
+        self.assertEqual(item.ccpc_equipment_at_issue, self.equipment)
+        self.assertEqual(item.ccpc_equipment_code_at_issue, self.equipment)
+        original = item.ccpc_equipment_code_at_issue
+        item.ccpc_equipment_code_at_issue = "FRAUDULENT-EQUIPMENT"
+        with self.assertRaises(frappe.ValidationError):
+            _validate_equipment_issue_snapshot(doc, slip)
+        item.ccpc_equipment_code_at_issue = original
+        item.ccpc_equipment_at_issue = None
+        with self.assertRaises(frappe.ValidationError):
+            _validate_equipment_issue_snapshot(doc, slip)
+        item.ccpc_equipment_at_issue = self.equipment
+        _validate_equipment_issue_snapshot(doc, slip)
+
+    def test_real_registry_rename_denied_with_posted_legacy_source_only(self):
+        # Simulate an older posted issue that lacks snapshots, without
+        # changing quantity, valuation or GL on this DISPOSABLE CI site.
+        from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
+            has_submitted_equipment_use,
+        )
+        item_name = self.entry.items[0].name
+        frappe.set_user("Administrator")
+        frappe.db.set_value(
+            "Stock Entry Detail", item_name,
+            {"ccpc_equipment_at_issue": None, "ccpc_equipment_code_at_issue": None},
+        )
+        self.assertIsNone(
+            frappe.db.get_value("Stock Entry Detail", item_name, "ccpc_equipment_code_at_issue")
+        )
+        self.assertTrue(has_submitted_equipment_use(self.equipment))
+        registry = frappe.get_doc("Equipment Registry", self.equipment)
+        with self.assertRaises(frappe.ValidationError):
+            registry.before_rename(self.equipment, self.equipment + "-RENAMED")
+
+    def test_real_independent_original_code_survives_bypassed_slip_edit(self):
+        # Demonstrate the benefit and remaining privileged-database bypass
+        # risk: Data snapshot is preserved though current Slip.equipment
+        # is directly changed without controller validation.
+        from ccpcerp.ccpc_erp.doctype.equipment_registry.equipment_registry import (
+            has_submitted_equipment_use,
+        )
+        frappe.set_user("Administrator")
+        item_name = self.entry.items[0].name
+        self.assertEqual(
+            frappe.db.get_value("Stock Entry Detail", item_name, "ccpc_equipment_code_at_issue"),
+            self.equipment,
+        )
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, "equipment", None)
+        self.assertIsNone(frappe.db.get_value("Withdrawal Slip", self.slip_name, "equipment"))
+        self.assertEqual(
+            frappe.db.get_value("Stock Entry Detail", item_name, "ccpc_equipment_code_at_issue"),
+            self.equipment,
+        )
+        self.assertTrue(has_submitted_equipment_use(self.equipment))
+        # Report still groups by current Slip.equipment; do not certify it.
+        self.assertEqual(self._report(), [])
