@@ -455,11 +455,44 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             "work_for_department": None, "equipment": None,
         }, update_modified=False)
         frappe.set_user(ISSUER)
-        with self.assertRaises(frappe.ValidationError):
+        with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
             issue_withdrawal_slip(self.slip_name)
         self.assertEqual(
             frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}), 0
         )
+
+    def test_x_equipment_department_fallback_reaches_actual_gl(self):
+        """Use registered Equipment's Company Department, never requester, when work-for absent."""
+        frappe.set_user("Administrator")
+        requester = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": "CI Different Requester " + frappe.generate_hash(length=8),
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True)
+        equip = frappe.get_doc({
+            "doctype": "Equipment Registry",
+            "equipment_number": "CI-ACCOUNT-FALLBACK-" + frappe.generate_hash(length=9),
+            "equipment_description": "Synthetic Equipment beneficiary fallback",
+            "company": COMPANY, "department": self.department, "status": "Active",
+        }).insert(ignore_permissions=True)
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, {
+            "department": requester.name,
+            "work_for_department": None,
+            "equipment": equip.name,
+        }, update_modified=False)
+        frappe.set_user(ISSUER)
+        issued = issue_withdrawal_slip(self.slip_name)
+        entry = frappe.get_doc("Stock Entry", issued["name"])
+        self.assertEqual(entry.department, self.department)
+        self.assertEqual(entry.items[0].department, self.department)
+        self.assertNotEqual(entry.department, requester.name)
+        row = entry.items[0]
+        gl = frappe.get_all("GL Entry", filters={
+            "voucher_type": "Stock Entry", "voucher_no": entry.name, "is_cancelled": 0,
+        }, fields=["account", "debit", "department"])
+        expense = [g for g in gl if g.account == row.expense_account and flt(g.debit) > 0]
+        self.assertTrue(expense, "Fallback issue expense debit missing")
+        self.assertTrue(all(g.department == self.department for g in expense))
 
     def test_x_equipment_beneficiary_conflict_blocks_before_stock_gl(self):
         """Never silently override explicit beneficiary from another Equipment Department."""
@@ -479,7 +512,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             "equipment": equip.name, "work_for_department": self.department,
         }, update_modified=False)
         frappe.set_user(ISSUER)
-        with self.assertRaises(frappe.ValidationError):
+        with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
             issue_withdrawal_slip(self.slip_name)
         self.assertEqual(
             frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}), 0
@@ -497,7 +530,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         doc.insert(ignore_permissions=True)
         doc.items[0].department = None
         doc.flags.ignore_permissions = True
-        with self.assertRaises(frappe.ValidationError):
+        with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
             doc.submit()
         self.assertEqual(
             frappe.db.count("Stock Ledger Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}), 0
