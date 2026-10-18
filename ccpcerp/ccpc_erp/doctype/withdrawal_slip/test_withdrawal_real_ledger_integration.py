@@ -196,6 +196,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 "company": COMPANY,
                 "requesting_company": COMPANY,
                 "department": self.department,
+                "work_for_department": self.department,  # Explicit synthetic beneficiary, not an assumed requester fallback.
                 "physical_location": "Disposable CI test bay",
                 "purpose": "Disposable independent inventory ledger test",
                 "received_by": "CI Synthetic Receiver",
@@ -445,6 +446,64 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             + line.expense_account + "; cost center=" + line.cost_center
             + "; requesting department=" + request_department.name
             + "; beneficiary department=" + self.department
+        )
+
+    def test_x_missing_beneficiary_blocks_issue_without_requester_fallback(self):
+        """Missing approved beneficiary must not charge the requesting Department."""
+        frappe.set_user("Administrator")
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, {
+            "work_for_department": None, "equipment": None,
+        }, update_modified=False)
+        frappe.set_user(ISSUER)
+        with self.assertRaises(frappe.ValidationError):
+            issue_withdrawal_slip(self.slip_name)
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}), 0
+        )
+
+    def test_x_equipment_beneficiary_conflict_blocks_before_stock_gl(self):
+        """Never silently override explicit beneficiary from another Equipment Department."""
+        frappe.set_user("Administrator")
+        other = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": "CI Other Equip Department " + frappe.generate_hash(length=8),
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True)
+        equip = frappe.get_doc({
+            "doctype": "Equipment Registry",
+            "equipment_number": "CI-ACCOUNT-CONFLICT-" + frappe.generate_hash(length=9),
+            "equipment_description": "Synthetic conflict validation",
+            "company": COMPANY, "department": other.name, "status": "Active",
+        }).insert(ignore_permissions=True)
+        frappe.db.set_value("Withdrawal Slip", self.slip_name, {
+            "equipment": equip.name, "work_for_department": self.department,
+        }, update_modified=False)
+        frappe.set_user(ISSUER)
+        with self.assertRaises(frappe.ValidationError):
+            issue_withdrawal_slip(self.slip_name)
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": self.slip_name, "docstatus": 1}), 0
+        )
+
+    def test_x_forged_direct_voucher_department_rejected_before_ledger(self):
+        """Normal Stock Entry.submit also rejects a forged source Department."""
+        from ccpcerp.ccpc_erp.withdrawal_slip_stock import _build_material_issue
+
+        frappe.set_user(ISSUER)
+        slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
+        doc = _build_material_issue(slip)
+        self.assertEqual(doc.department, self.department)
+        self.assertEqual(doc.items[0].department, self.department)
+        doc.insert(ignore_permissions=True)
+        doc.items[0].department = None
+        doc.flags.ignore_permissions = True
+        with self.assertRaises(frappe.ValidationError):
+            doc.submit()
+        self.assertEqual(
+            frappe.db.count("Stock Ledger Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}), 0
+        )
+        self.assertEqual(
+            frappe.db.count("GL Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}), 0
         )
 
     def test_real_material_issue_updates_bin_sle_gl_and_blocks_second_issue(self):
