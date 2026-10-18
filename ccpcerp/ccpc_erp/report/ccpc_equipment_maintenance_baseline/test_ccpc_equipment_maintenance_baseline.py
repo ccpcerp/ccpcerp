@@ -9,6 +9,8 @@ from ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.ccpc_equipment_
     _merge_activity,
     _require_system_manager,
     _validate_filters,
+    _get_posted_issue_valuations,
+    _get_job_activity,
 )
 
 
@@ -73,3 +75,39 @@ class TestEquipmentMaintenanceBaseline(TestCase):
         with self.assertRaises(frappe.ValidationError):
             _validate_filters(frappe._dict(company="CCPC", from_date="2026-10-18", to_date="2026-10-01"))
 
+
+    @patch("frappe.db.sql", return_value=[])
+    def test_material_valuation_query_is_parameterized_and_receipts_not_counted(self, sql):
+        filters = frappe._dict(company="CCPC", equipment="P-01", from_date="2026-01-01", to_date="2026-12-31")
+        _get_posted_issue_valuations(filters)
+        query, parameters = sql.call_args.args[:2]
+        self.assertEqual(parameters, dict(filters))
+        for expected in (
+            "se.docstatus = 1", "se.purpose = 'Material Issue'",
+            "sle.voucher_detail_no", "sle.is_cancelled = 0",
+            "sed.withdrawal_slip_item", "se.company = %(company)s",
+            "eq.name = %(equipment)s", "sle.posting_date >= %(from_date)s",
+            "sle.posting_date <= %(to_date)s",
+            "unexpected_value_rows",
+        ):
+            self.assertIn(expected, query)
+        self.assertNotIn("P-01", query)
+
+    @patch("frappe.db.sql", return_value=[])
+    def test_job_query_excludes_cancelled_and_uses_date_assigned_not_downtime(self, sql):
+        _get_job_activity(frappe._dict(company="CCPC", from_date="2026-01-01", to_date="2026-12-31"))
+        query, parameters = sql.call_args.args[:2]
+        self.assertIn("jo.docstatus < 2", query)
+        self.assertIn("jo.status, '') != 'Cancelled'", query)
+        self.assertIn("DATE(jo.date_assigned)", query)
+        self.assertNotIn("actual_finish -", query)
+        self.assertEqual(parameters["company"], "CCPC")
+
+    def test_unexpected_stock_value_is_visible_to_review(self):
+        with patch("ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.ccpc_equipment_maintenance_baseline._", side_effect=lambda s: s):
+            rows = _merge_activity(
+                [{"equipment": "P-03", "gross_issued_stock_value": -70,
+                  "unexpected_value_rows": 1, "issue_rows": 1}], [], "PHP"
+            )
+        self.assertEqual(rows[0]["unexpected_value_rows"], 1)
+        self.assertIn("REQUIRES REVIEW", rows[0]["scope_note"])
