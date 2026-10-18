@@ -29,10 +29,19 @@ class CCPCExpenseMappingRevision(Document):
             frappe.throw(_("B mapping approval is not enabled; Finance controls remain pending."))
         if self.approved_by or self.approved_at or self.supersedes or self.revocation_reason:
             frappe.throw(_("Approval/revocation provenance cannot be supplied by draft users."))
-        if not frappe.db.exists("CCPC Expense Mapping Scope", self.mapping_scope):
+        scope = frappe.db.get_value(
+            "CCPC Expense Mapping Scope", self.mapping_scope, "company"
+        )
+        if not scope:
             frappe.throw(_("Expense mapping scope does not exist."))
-        if not self.expense_account or not frappe.db.exists("Account", self.expense_account):
+        account = frappe.db.get_value(
+            "Account", self.expense_account,
+            ["company", "is_group", "disabled", "root_type"], as_dict=True,
+        ) if self.expense_account else None
+        if not account:
             frappe.throw(_("A real Account reference is required even for a draft."))
+        if account.company != scope or account.is_group or account.disabled or account.root_type != "Expense":
+            frappe.throw(_("Draft expense Account must be an enabled leaf Expense account in the mapping Company."))
         if self.effective_from and self.effective_until:
             from frappe.utils import get_datetime
             if get_datetime(self.effective_until) <= get_datetime(self.effective_from):
