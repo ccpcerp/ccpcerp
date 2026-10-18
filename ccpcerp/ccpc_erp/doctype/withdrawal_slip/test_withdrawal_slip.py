@@ -277,6 +277,7 @@ class TestWithdrawalSlip(TestCase):
 		stock_entry.name = "MAT-STE-0001"
 		stock_entry.meta.has_field.return_value = True
 		stock_entry.items = []
+		stock_entry.get.side_effect = lambda key: stock_entry.items if key == "items" else None
 		stock_entry.append.side_effect = lambda fieldname, values: stock_entry.items.append(
 			frappe._dict(values)
 		)
@@ -754,6 +755,8 @@ class TestWithdrawalSlip(TestCase):
 		)),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_independent_issuer"),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
+			# Dedicated beneficiary GL tests cover this separate assertion.
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_issue_beneficiary"),
 		):
 			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 		self.assertEqual(doc.withdrawal_slip_issued_by, "stockroom@personnel1.com")
