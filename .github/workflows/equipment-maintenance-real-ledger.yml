@@ -27,7 +27,7 @@ jobs:
   real-ledger-report:
     # The CI branch has no production credentials, and only this approved same-repo
     # PR may spend hosted-runner minutes. No third-party fork code.
-    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/equipment-maintenance-baseline-2026-10-18' }}
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-beneficiary-equipment-integration-2026-10-18' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
