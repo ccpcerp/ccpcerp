@@ -82,7 +82,10 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         self.assertEqual(int(is_perpetual_inventory_enabled(COMPANY)), 1)
 
         self._ensure_user(ISSUER, "Stockroom Personnel")
-        self._ensure_user(REPORTER, "System Manager")
+        # This disposable reader carries both roles because native Stock Entry
+        # DocPerm does not grant read to System Manager alone. Do NOT
+        # automatically grant these broad stock rights to CCPC real users.
+        self._ensure_user(REPORTER, "System Manager", "Stock User")
 
         self.equipment = frappe.get_doc({
             "doctype": "Equipment Registry",
@@ -147,18 +150,18 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         self.assertEqual(self.entry.docstatus, 1)
 
     @staticmethod
-    def _ensure_user(email, role):
+    def _ensure_user(email, *roles):
         if not frappe.db.exists("User", email):
             frappe.get_doc({
                 "doctype": "User",
                 "email": email,
-                "first_name": "CI Equipment " + role,
+                "first_name": "CI Equipment Integration Reader",
                 "enabled": 1,
                 "user_type": "System User",
                 "send_welcome_email": 0,
-                "roles": [{"role": role}],
+                "roles": [{"role": role} for role in roles],
             }).insert(ignore_permissions=True)
-        assert role in frappe.get_roles(email)
+        assert all(role in frappe.get_roles(email) for role in roles)
 
     def tearDown(self):
         frappe.set_user("Administrator")
