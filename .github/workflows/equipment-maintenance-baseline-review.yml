@@ -77,7 +77,7 @@ jobs:
           target = "ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.test_ccpc_equipment_maintenance_baseline"
           suite = unittest.defaultTestLoader.loadTestsFromName(target)
           result = unittest.TextTestRunner(verbosity=2).run(suite)
-          if not result.wasSuccessful() or result.testsRun != 10:
+          if not result.wasSuccessful() or result.testsRun != 12:
               raise SystemExit(f"Equipment mocked checks not fully passed: {result.testsRun}")
-          print("10/10 mocked equipment baseline checks PASSED. No database/GL verification.")
+          print("12/12 mocked equipment baseline checks PASSED. No database/GL verification.")
           PY
