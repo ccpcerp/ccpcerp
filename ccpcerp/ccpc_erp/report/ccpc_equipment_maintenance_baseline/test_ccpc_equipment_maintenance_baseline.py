@@ -28,6 +28,8 @@ class TestEquipmentMaintenanceBaseline(TestCase):
         self.assertEqual(rows[0]["recorded_labor_hours"], 3.5)
         self.assertEqual(rows[0]["currency"], "PHP")
         self.assertIn("returns", rows[0]["scope_note"])
+        self.assertIn("PROVISIONAL equipment attribution", rows[0]["scope_note"])
+        self.assertIn("no immutable issue-row Equipment snapshot", rows[0]["scope_note"])
         self.assertNotIn("net_cost", rows[0])
 
     def test_unrecorded_labor_hours_are_unknown_not_zero(self):
