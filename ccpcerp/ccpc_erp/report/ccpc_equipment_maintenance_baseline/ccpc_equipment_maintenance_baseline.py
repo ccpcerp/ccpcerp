@@ -65,7 +65,8 @@ def _get_posted_issue_valuations(f):
             eq.name AS equipment,
             eq.equipment_description,
             COUNT(DISTINCT sed.name) AS issue_rows,
-            SUM(-sle.stock_value_difference) AS gross_issued_stock_value
+            SUM(-sle.stock_value_difference) AS gross_issued_stock_value,
+            SUM(CASE WHEN sle.stock_value_difference >= 0 THEN 1 ELSE 0 END) AS unexpected_value_rows
         FROM `tabStock Ledger Entry` sle
         INNER JOIN `tabStock Entry` se
             ON se.name = sle.voucher_no AND sle.voucher_type = 'Stock Entry'
@@ -79,7 +80,6 @@ def _get_posted_issue_valuations(f):
           AND se.purpose = 'Material Issue'
           AND sle.is_cancelled = 0
           AND sle.actual_qty < 0
-          AND sle.stock_value_difference <= 0
           AND se.company = %(company)s
           AND sle.company = %(company)s
           AND sed.withdrawal_slip_item IS NOT NULL
@@ -107,6 +107,7 @@ def _get_job_activity(f):
         INNER JOIN `tabEquipment Registry` eq
             ON eq.name = jo.equipment AND eq.company = jo.company
         WHERE jo.company = %(company)s
+          AND jo.docstatus < 2
           AND COALESCE(jo.status, '') != 'Cancelled'
           {equipment_condition}
           {date_conditions}
@@ -131,6 +132,7 @@ def _merge_activity(issues, jobs, currency):
             "currency": currency,
             "issue_rows": int(item.get("issue_rows") or 0),
             "gross_issued_stock_value": flt(item.get("gross_issued_stock_value")),
+            "unexpected_value_rows": int(item.get("unexpected_value_rows") or 0),
             "job_orders": 0,
             "recorded_labor_hours": None,
             "hours_completeness": _("No Job Orders in selected period"),
@@ -146,6 +148,7 @@ def _merge_activity(issues, jobs, currency):
                 "currency": currency,
                 "issue_rows": 0,
                 "gross_issued_stock_value": 0.0,
+                "unexpected_value_rows": 0,
                 "job_orders": 0,
                 "recorded_labor_hours": None,
                 "hours_completeness": "",
@@ -161,7 +164,9 @@ def _merge_activity(issues, jobs, currency):
         row["hours_completeness"] = _("{0} of {1} Job Orders have hours").format(counted, total)
 
     for row in equipment.values():
-        row["scope_note"] = _("PARTIAL: gross issued stock value only; returns, labor cost, services and downtime excluded")
+        row["scope_note"] = _("PARTIAL: gross stock valuation, not GL reconciliation; returns, priced labor, services and downtime excluded")
+        if row["unexpected_value_rows"]:
+            row["scope_note"] += _("; unexpected nonnegative issue valuation REQUIRES REVIEW")
     return [equipment[key] for key in sorted(equipment)]
 
 
@@ -171,6 +176,7 @@ def get_columns():
         {"label": _("Description"), "fieldname": "equipment_description", "fieldtype": "Data", "width": 240},
         {"label": _("Issue Rows"), "fieldname": "issue_rows", "fieldtype": "Int", "width": 95},
         {"label": _("Gross Issued Stock Value (unadjusted)"), "fieldname": "gross_issued_stock_value", "fieldtype": "Currency", "options": "currency", "width": 225},
+        {"label": _("Unexpected Valuation Rows"), "fieldname": "unexpected_value_rows", "fieldtype": "Int", "width": 170},
         {"label": _("Job Orders"), "fieldname": "job_orders", "fieldtype": "Int", "width": 100},
         {"label": _("Recorded Labor Hours (not cost)"), "fieldname": "recorded_labor_hours", "fieldtype": "Float", "width": 210},
         {"label": _("Labor Hours Coverage"), "fieldname": "hours_completeness", "fieldtype": "Data", "width": 200},
