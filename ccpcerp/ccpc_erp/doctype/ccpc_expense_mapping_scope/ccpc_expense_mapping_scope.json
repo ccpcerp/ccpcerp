@@ -1,0 +1,47 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "company",
+    "item_group",
+    "scope_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "company",
+      "fieldtype": "Link",
+      "label": "Issue Company",
+      "options": "Company",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "item_group",
+      "fieldtype": "Link",
+      "label": "Exact Leaf Item Group",
+      "options": "Item Group",
+      "reqd": 1,
+      "in_list_view": 1
+    },
+    {
+      "fieldname": "scope_key",
+      "fieldtype": "Data",
+      "label": "Immutable Scope Key",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1,
+      "hidden": 1,
+      "no_copy": 1,
+      "length": 64
+    }
+  ],
+  "istable": 0,
+  "module": "CCPC ERP",
+  "name": "CCPC Expense Mapping Scope",
+  "permissions": [],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}
