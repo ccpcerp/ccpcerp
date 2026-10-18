@@ -296,7 +296,7 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         result = self._report()
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["equipment"], self.equipment)
-        self.assertIn("PROVISIONAL equipment attribution", result[0]["scope_note"])
+        self.assertEqual(result[0]["source_quality"], "SNAPSHOT_MATCHES_SOURCE")
 
     def test_real_multiple_issue_rows_sum_once_and_equipment_filter_isolates(self):
         # The original 1-row issue from setUp already exists; append a second
@@ -464,6 +464,17 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
         registry = frappe.get_doc("Equipment Registry", self.equipment)
         with self.assertRaises(frappe.ValidationError):
             registry.before_rename(self.equipment, self.equipment + "-RENAMED")
+        # An older posted issue without a snapshot remains visible as an
+        # unattributed company-level cost; it must not be charged to current
+        # Withdrawal Slip Equipment or simply disappear.
+        frappe.set_user(REPORTER)
+        all_rows = execute({"company": COMPANY})[1]
+        legacy = [r for r in all_rows if r["source_quality"] == "LEGACY_NO_SNAPSHOT"]
+        self.assertEqual(len(legacy), 1)
+        self.assertIsNone(legacy[0]["equipment"])
+        self.assertEqual(legacy[0]["issue_rows"], 1)
+        self.assertGreater(legacy[0]["gross_issued_stock_value"], 0)
+        self.assertEqual(self._report(), [])
 
     def test_real_independent_original_code_survives_bypassed_slip_edit(self):
         # Demonstrate the benefit and remaining privileged-database bypass
@@ -485,5 +496,88 @@ class TestEquipmentMaintenanceRealIntegration(ERPNextTestSuite):
             self.equipment,
         )
         self.assertTrue(has_submitted_equipment_use(self.equipment))
-        # Report still groups by current Slip.equipment; do not certify it.
+        # The independent snapshot still identifies the original Equipment,
+        # and the read-only report now flags the conflicting current Slip.
+        report = self._report()
+        self.assertEqual(len(report), 1)
+        self.assertEqual(report[0]["equipment"], self.equipment)
+        self.assertEqual(report[0]["source_quality"], "SLIP_SNAPSHOT_CONFLICT")
+        self.assertIn("not certified", report[0]["scope_note"])
+
+
+    def _fresh_unissued_slip(self):
+        frappe.set_user(PREPARER)
+        slip = frappe.get_doc({
+            "doctype": "Withdrawal Slip",
+            "requestor": "CI Forged Direct Voucher",
+            "approving_supervisor": PREPARER,
+            "required_by": nowdate(),
+            "company": COMPANY,
+            "requesting_company": COMPANY,
+            "department": self.department,
+            "work_for_department": self.department,
+            "equipment": self.equipment,
+            "source_warehouse": WAREHOUSE,
+            "physical_location": "Disposable direct-voucher gate",
+            "purpose": "Synthetic forged snapshot validation",
+            "received_by": "CI test receiver",
+            "items": [{
+                "item_code": self.item.name,
+                "requested_qty": 1,
+                "issue_qty": 1,
+                "uom": "_Test UOM",
+            }],
+        }).insert(ignore_permissions=True)
+        frappe.db.set_value("Withdrawal Slip", slip.name, "status", "Stockroom Review")
+        return frappe.get_doc("Withdrawal Slip", slip.name)
+
+    def test_real_forged_direct_stock_entry_insert_rejected_before_posting(self):
+        from ccpcerp.ccpc_erp.withdrawal_slip_stock import _build_material_issue
+        slip = self._fresh_unissued_slip()
+        frappe.set_user(ISSUER)
+        forged = _build_material_issue(slip)
+        self.assertEqual(len(forged.items), 1)
+        forged.items[0].ccpc_equipment_at_issue = None
+        with self.assertRaises(frappe.ValidationError):
+            forged.insert(ignore_permissions=True)
+        self.assertEqual(frappe.db.count("Stock Entry", {
+            "withdrawal_slip": slip.name, "docstatus": 1,
+        }), 0)
+        self.assertEqual(frappe.db.count("Stock Ledger Entry", {
+            "voucher_no": forged.name,
+        }), 0)
+
+    def test_real_forged_direct_stock_entry_submit_blocked_without_ledger(self):
+        from ccpcerp.ccpc_erp.withdrawal_slip_stock import _build_material_issue
+        slip = self._fresh_unissued_slip()
+        frappe.set_user(ISSUER)
+        draft = _build_material_issue(slip)
+        draft.insert(ignore_permissions=True)
+        self.assertEqual(draft.docstatus, 0)
+        draft.items[0].ccpc_equipment_code_at_issue = "FORGED-SOURCE-CODE"
+        draft.flags.ignore_permissions = True
+        with self.assertRaises(frappe.ValidationError):
+            draft.submit()
+        self.assertEqual(
+            frappe.db.get_value("Stock Entry", draft.name, "docstatus"), 0
+        )
+        self.assertEqual(frappe.db.count("Stock Ledger Entry", {
+            "voucher_type": "Stock Entry", "voucher_no": draft.name,
+        }), 0)
+        self.assertEqual(frappe.db.count("GL Entry", {
+            "voucher_type": "Stock Entry", "voucher_no": draft.name,
+        }), 0)
+
+    def test_real_conflicting_stored_snapshot_is_unattributed_not_lost(self):
+        frappe.set_user("Administrator")
+        item_name = self.entry.items[0].name
+        original_sle_value = -sum(flt(x.stock_value_difference) for x in self._source_sle())
+        frappe.db.set_value("Stock Entry Detail", item_name, "ccpc_equipment_code_at_issue", "UNRELATED-MACHINE")
         self.assertEqual(self._report(), [])
+        frappe.set_user(REPORTER)
+        rows = execute({"company": COMPANY})[1]
+        conflicts = [r for r in rows if r["source_quality"] == "SNAPSHOT_PAIR_CONFLICT"]
+        self.assertEqual(len(conflicts), 1)
+        self.assertIsNone(conflicts[0]["equipment"])
+        self.assertAlmostEqual(conflicts[0]["gross_issued_stock_value"], original_sle_value, places=2)
+        self.assertIn("requires review", conflicts[0]["scope_note"])
