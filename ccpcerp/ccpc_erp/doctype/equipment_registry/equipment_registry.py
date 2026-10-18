@@ -66,6 +66,44 @@ def has_protected_equipment_history(equipment):
 
 def has_submitted_equipment_use(equipment):
 	"""Return whether an Equipment tag has immutable stock/accounting history."""
+	# Historical Withdrawal Slip issues might not have a site-specific
+	# Stock Entry(.Detail).equipment field. Always check the actual submitted
+	# source document link before allowing an Equipment Registry rename.
+	if frappe.db.has_column("Stock Entry", "withdrawal_slip") and frappe.db.sql(
+		"""
+		SELECT 1
+		FROM `tabStock Entry` se
+		INNER JOIN `tabWithdrawal Slip` ws ON ws.name = se.withdrawal_slip
+		WHERE se.docstatus IN (1, 2)
+		  AND se.purpose = 'Material Issue'
+		  AND ws.equipment = %(equipment)s
+		LIMIT 1
+		""",
+		{"equipment": equipment},
+	):
+		return True
+
+	# The independent original-number Data snapshot survives Link-renaming
+	# behavior. Check both fields if present: old submitted rows can have
+	# either or neither, and must never be silently treated as reassignable.
+	source_fields = []
+	for fieldname in ("ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue"):
+		if frappe.db.has_column("Stock Entry Detail", fieldname):
+			source_fields.append("sed.`" + fieldname + "` = %(equipment)s")
+	if source_fields and frappe.db.sql(
+		"""
+		SELECT 1
+		FROM `tabStock Entry Detail` sed
+		INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+		WHERE se.docstatus IN (1, 2)
+		  AND se.purpose = 'Material Issue'
+		  AND (""" + " OR ".join(source_fields) + """)
+		LIMIT 1
+		""",
+		{"equipment": equipment},
+	):
+		return True
+
 	usage_doctypes = (
 		"Stock Entry Detail",
 		"Purchase Invoice Item",

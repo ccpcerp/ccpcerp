@@ -1,0 +1,83 @@
+# Disposable, read-only report unit gate; no database, sites, secrets or deployment.
+name: Equipment Maintenance Baseline - isolated mocked review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - review/withdrawal-cancellation-ledger-ci-2026-10-16
+    paths:
+      - .github/workflows/equipment-maintenance-baseline-review.yml
+      - ccpcerp/ccpc_erp/report/ccpc_equipment_maintenance_baseline/**
+
+permissions:
+  contents: read
+
+jobs:
+  mocked-report-contract:
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' && github.head_ref == 'review/withdrawal-beneficiary-equipment-integration-2026-10-18' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact PR source without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Validate report files and execute mocked report tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from datetime import date
+          from types import ModuleType, SimpleNamespace
+          import sys, unittest
+
+          root = Path("ccpcerp/ccpc_erp/report/ccpc_equipment_maintenance_baseline")
+          for path in root.glob("*.py"):
+              compile(path.read_text(encoding="utf-8"), str(path), "exec")
+          metadata = json.loads((root / "ccpc_equipment_maintenance_baseline.json").read_text())
+          assert metadata["report_type"] == "Script Report"
+          assert metadata["roles"] == [{"role": "System Manager"}]
+          assert metadata["apply_user_permissions"] == 1
+
+          # Stub only the minimal Frappe surface for non-DB pure/mock tests.
+          # No real Frappe bench/site/GL is created or claimed to be tested.
+          class AttrDict(dict):
+              def __getattr__(self, name):
+                  return self.get(name)
+
+          class ValidationError(Exception):
+              pass
+
+          class PermissionError(Exception):
+              pass
+
+          frappe = ModuleType("frappe")
+          frappe.ValidationError = ValidationError
+          frappe.PermissionError = PermissionError
+          frappe._dict = AttrDict
+          frappe.get_roles = lambda: ["System Manager"]
+          frappe.has_permission = lambda *_args, **_kwargs: True
+          frappe.throw = lambda message, error=ValidationError: (_ for _ in ()).throw(error(str(message)))
+          frappe.db = SimpleNamespace(exists=lambda *_args: True, get_value=lambda *_args: "PHP", sql=lambda *_args, **_kwargs: [])
+          frappe._ = lambda text: text
+          utils = ModuleType("frappe.utils")
+          utils.flt = lambda val: float(val or 0)
+          utils.getdate = lambda val: date.fromisoformat(str(val))
+          frappe.utils = utils
+          sys.modules["frappe"] = frappe
+          sys.modules["frappe.utils"] = utils
+
+          target = "ccpcerp.ccpc_erp.report.ccpc_equipment_maintenance_baseline.test_ccpc_equipment_maintenance_baseline"
+          suite = unittest.defaultTestLoader.loadTestsFromName(target)
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if not result.wasSuccessful() or result.testsRun != 12:
+              raise SystemExit(f"Equipment mocked checks not fully passed: {result.testsRun}")
+          print("12/12 mocked equipment baseline checks PASSED. No database/GL verification.")
+          PY

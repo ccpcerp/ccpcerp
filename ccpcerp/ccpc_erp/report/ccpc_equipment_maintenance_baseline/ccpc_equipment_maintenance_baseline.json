@@ -1,0 +1,20 @@
+{
+ "add_total_row": 0,
+ "apply_user_permissions": 1,
+ "disabled": 0,
+ "docstatus": 0,
+ "doctype": "Report",
+ "is_standard": "Yes",
+ "module": "CCPC ERP",
+ "name": "CCPC Equipment Maintenance Baseline",
+ "owner": "Administrator",
+ "prepared_report": 0,
+ "ref_doctype": "Equipment Registry",
+ "report_name": "CCPC Equipment Maintenance Baseline",
+ "report_type": "Script Report",
+ "roles": [
+  {
+   "role": "System Manager"
+  }
+ ]
+}

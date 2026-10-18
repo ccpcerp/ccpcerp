@@ -91,6 +91,7 @@ doc_events = {
 			"ccpcerp.ccpc_erp.equipment_costing.validate_equipment_costing",
 			"ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_withdrawal_slip_stock_entry",
 		],
+		"before_update_after_submit": "ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_submitted_issue_equipment_snapshot",
 		"on_submit": "ccpcerp.ccpc_erp.withdrawal_slip_stock.sync_withdrawal_slip_issue_status",
 		"on_cancel": "ccpcerp.ccpc_erp.withdrawal_slip_stock.sync_withdrawal_slip_issue_status",
 	},

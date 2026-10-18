@@ -9,6 +9,10 @@ from frappe import _
 from frappe.utils import flt, get_datetime
 
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip.withdrawal_slip import _get_actual_qty
+from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import (
+	apply_issue_beneficiary,
+	validate_issue_beneficiary,
+)
 
 
 ISSUABLE_STATES = {"Stockroom Review"}
@@ -28,7 +32,7 @@ def _clear_withdrawal_slip_cache_after_commit():
 def _lock_withdrawal_slip(withdrawal_slip):
 	"""Serialize issue creation and submission on the same parent row."""
 	rows = frappe.db.sql(
-		"""SELECT status, received_by, company, source_warehouse,
+		"""SELECT status, received_by, company, source_warehouse, equipment, work_for_department,
 		owner, approving_supervisor
 		FROM `tabWithdrawal Slip` WHERE name = %s FOR UPDATE""",
 		(withdrawal_slip,),
@@ -95,7 +99,7 @@ def _get_issuable_slip(withdrawal_slip, locked):
 	slip.check_permission("write")
 	# A previous nonlocking read may have opened a REPEATABLE READ snapshot.
 	# Never issue from a stale Slip document after acquiring the row lock.
-	for fieldname in ("status", "received_by", "company", "source_warehouse", "owner", "approving_supervisor"):
+	for fieldname in ("status", "received_by", "company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
 		if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 			frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 	if slip.status not in ISSUABLE_STATES:
@@ -126,6 +130,9 @@ def _build_material_issue(slip):
 		stock_entry.equipment = slip.equipment
 
 	detail_meta = frappe.get_meta("Stock Entry Detail")
+	_snapshot_fields = ("ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue")
+	if not all(detail_meta.has_field(fieldname) for fieldname in _snapshot_fields):
+		frappe.throw(_("Issue-time Equipment snapshot fields are missing. Run the reviewed CCPC migration before issuing stock."))
 	for row in slip.get("items") or []:
 		requested_qty = flt(row.requested_qty)
 		issue_qty = flt(row.issue_qty)
@@ -149,6 +156,8 @@ def _build_material_issue(slip):
 			"conversion_factor": 1,
 			"s_warehouse": slip.source_warehouse,
 			"withdrawal_slip_item": row.name,
+			"ccpc_equipment_at_issue": slip.equipment or None,
+			"ccpc_equipment_code_at_issue": slip.equipment or None,
 		}
 		if detail_meta.has_field("equipment"):
 			values["equipment"] = slip.equipment
@@ -156,6 +165,9 @@ def _build_material_issue(slip):
 
 	if not stock_entry.items:
 		frappe.throw(_("Withdrawal Slip {0} has no items to issue.").format(slip.name))
+	# Approved beneficiary Department A, alongside the immutable Equipment D snapshot.
+	# Accounting-approved account and Cost Center maps B/C remain separately pending.
+	apply_issue_beneficiary(stock_entry, slip)
 	return stock_entry
 
 
@@ -234,7 +246,7 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	locked = _lock_withdrawal_slip(doc.withdrawal_slip) if method == "before_submit" else None
 	slip = frappe.get_doc("Withdrawal Slip", doc.withdrawal_slip)
 	if locked:
-		for fieldname in ("status", "received_by", "company", "source_warehouse", "owner", "approving_supervisor"):
+		for fieldname in ("status", "received_by", "company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
 			if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 				frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 		_assert_independent_issuer(locked)
@@ -256,6 +268,7 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 		frappe.throw(_("Default Source Warehouse must match the Withdrawal Slip Source Warehouse."))
 
 	_validate_provenance_immutable(doc)
+	_validate_equipment_issue_snapshot(doc, slip)
 	slip_items = {row.name: row for row in slip.get("items") or []}
 	current_by_slip_item = defaultdict(float)
 	current_by_item = defaultdict(float)
@@ -339,6 +352,8 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 					)
 				)
 
+		# Before posting any stock/GL, reject a forged or stale beneficiary Department.
+		validate_issue_beneficiary(doc, slip)
 		doc.withdrawal_slip_issued_by = frappe.session.user
 
 
@@ -447,6 +462,52 @@ def _get_latest_submitted_issue(withdrawal_slip):
 	return rows[0] if rows else None
 
 
+def _validate_equipment_issue_snapshot(doc, slip):
+	"""Fail closed for new original linked issues; never silently reattribute costs.
+
+	This is a linked original Material Issue validation only. It does not
+	backfill historical submitted Stock Entries or set accounting dimensions.
+	"""
+	detail_meta = frappe.get_meta("Stock Entry Detail")
+	for fieldname in ("ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue"):
+		if not detail_meta.has_field(fieldname):
+			frappe.throw(_("Missing issue-time Equipment provenance field {0}.").format(frappe.bold(fieldname)))
+
+	expected = slip.equipment or None
+	if expected:
+		if frappe.db.get_value("Equipment Registry", expected, "company") != doc.company:
+			frappe.throw(_("Issue Equipment must exist and belong to the Material Issue Company."))
+
+	# If an optional site-specific equipment field exists, its populated value
+	# must agree with the canonical issue-time pair. Do not require such fields
+	# on sites where ERPNext never provisioned them.
+	if frappe.get_meta("Stock Entry").has_field("equipment") and (doc.get("equipment") or None) != expected:
+		frappe.throw(_("Material Issue header Equipment must match the Withdrawal Slip."))
+	for row in doc.get("items") or []:
+		link = row.get("ccpc_equipment_at_issue") or None
+		code = row.get("ccpc_equipment_code_at_issue") or None
+		if link != expected or code != expected:
+			frappe.throw(
+				_("Row {0}: Equipment at Issue must be captured from the linked Withdrawal Slip, without substitution.").format(
+					row.idx
+				)
+			)
+		if detail_meta.has_field("equipment") and (row.get("equipment") or None) != expected:
+			frappe.throw(_("Row {0}: Equipment must match its issue-time provenance.").format(row.idx))
+
+
+def validate_submitted_issue_equipment_snapshot(doc, method=None):
+	"""Guard the original issue-row source if an update-after-submit path exists."""
+	if doc.docstatus != 1 or not doc.get("withdrawal_slip"):
+		return
+	before = doc.get_doc_before_save()
+	if not before:
+		frappe.throw(_("Original submitted issue provenance cannot be changed without a prior source document."))
+	if {row.name for row in (before.get("items") or [])} != {row.name for row in (doc.get("items") or [])}:
+		frappe.throw(_("Original submitted issue rows cannot be added, removed or replaced."))
+	_validate_provenance_immutable(doc)
+
+
 def _validate_provenance_immutable(doc):
 	if doc.is_new():
 		return
@@ -463,6 +524,10 @@ def _validate_provenance_immutable(doc):
 			frappe.throw(
 				_("Row {0}: Withdrawal Slip Item reference cannot be changed.").format(row.idx)
 			)
+		if old_row:
+			for fieldname in ("ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue"):
+				if (old_row.get(fieldname) or None) != (row.get(fieldname) or None):
+					frappe.throw(_("Row {0}: original issue-time Equipment provenance cannot be modified.").format(row.idx))
 
 
 def _stock_qty(row):
