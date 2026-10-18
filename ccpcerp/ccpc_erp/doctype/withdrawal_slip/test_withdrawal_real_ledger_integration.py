@@ -51,6 +51,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 in {
                     "review/withdrawal-cancellation-ledger-ci-2026-10-16",
                     "review/withdrawal-issue-accounting-ci-2026-10-17",
+                    "review/withdrawal-beneficiary-equipment-integration-2026-10-18",
                 }
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
                 and (
