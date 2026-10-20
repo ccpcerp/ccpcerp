@@ -89,7 +89,7 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
         self.assertEqual(revision.owner, PREPARER)
         frappe.set_user("Administrator")
         frappe.db.sql(
-            "UPDATE \`tab" + doctype + "\` "
+            "UPDATE `tab" + doctype + "` "
             "SET approval_state='Approved', approved_by=%s, approved_at=%s, approval_reference=%s "
             "WHERE name=%s",
             (APPROVER, now_datetime(), "SYNTHETIC CI ONLY", revision.name),
