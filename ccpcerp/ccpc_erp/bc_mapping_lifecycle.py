@@ -132,28 +132,34 @@ def _propose_change(kind, old_revision, proposed_value, cutoff, reason):
     next_no = max((int(r.revision_no) for r in numbers), default=0) + 1
     # Draft insertion validates the real Company-owned master. The restricted
     # lifecycle provenance is then populated server-side, never via Doc.save.
-    draft = frappe.get_doc({
-        "doctype": rev_dt, "mapping_scope": scope.name,
-        "revision_no": next_no, value_field: value,
-        "approval_state": "Draft", "effective_from": cutoff or None,
-    }).insert(ignore_permissions=True)
-    _require(draft.owner == maker, "Lifecycle request must belong to its actual Finance preparer.")
-    frappe.db.sql(
-        "UPDATE " + table +
-        " SET supersedes=%s, revocation_reason=%s "
-        "WHERE name=%s AND approval_state='Draft'",
-        (old.name, reason if retirement else None, draft.name),
-    )
-    details = {
-        "kind": kind, "company": company, "scope": scope.name,
-        "source": scope["item_group" if kind == "Expense" else "beneficiary_department"],
-        "predecessor": old.name, "proposal": draft.name, "prepared_by": maker,
-        "old_value": old[value_field], "new_value": value,
-        "retirement": retirement, "reason": reason or "",
-        "requested_cutoff": str(cutoff or "immediately on independent approval"),
-    }
-    version = _audit(rev_dt, draft.name, "proposed_retirement" if retirement
-                     else "proposed_replacement", details, [])
+    savepoint = "ccpc_mapping_lifecycle_proposal"
+    frappe.db.savepoint(savepoint)
+    try:
+        draft = frappe.get_doc({
+            "doctype": rev_dt, "mapping_scope": scope.name,
+            "revision_no": next_no, value_field: value,
+            "approval_state": "Draft", "effective_from": cutoff or None,
+        }).insert(ignore_permissions=True)
+        _require(draft.owner == maker, "Lifecycle request must belong to its actual Finance preparer.")
+        frappe.db.sql(
+            "UPDATE " + table +
+            " SET supersedes=%s, revocation_reason=%s "
+            "WHERE name=%s AND approval_state='Draft'",
+            (old.name, reason if retirement else None, draft.name),
+        )
+        details = {
+            "kind": kind, "company": company, "scope": scope.name,
+            "source": scope["item_group" if kind == "Expense" else "beneficiary_department"],
+            "predecessor": old.name, "proposal": draft.name, "prepared_by": maker,
+            "old_value": old[value_field], "new_value": value,
+            "retirement": retirement, "reason": reason or "",
+            "requested_cutoff": str(cutoff or "immediately on independent approval"),
+        }
+        version = _audit(rev_dt, draft.name, "proposed_retirement" if retirement
+                         else "proposed_replacement", details, [])
+    except Exception:
+        frappe.db.rollback(save_point=savepoint)
+        raise
     return {"name": draft.name, "state": "Draft", "supersedes": old.name,
             "change": "Retire" if retirement else "Replace", "version": version}
 
