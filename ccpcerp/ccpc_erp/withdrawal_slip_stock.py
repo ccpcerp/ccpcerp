@@ -15,6 +15,7 @@ from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import (
 )
 from ccpcerp.ccpc_erp.bc_issue_runtime import (
 	assign_original_issue_b_c,
+	stamp_original_issue_posting,
 	validate_original_issue_b_c,
 )
 
@@ -169,8 +170,9 @@ def _build_material_issue(slip):
 
 	if not stock_entry.items:
 		frappe.throw(_("Withdrawal Slip {0} has no items to issue.").format(slip.name))
-	# Approved beneficiary Department A, alongside the immutable Equipment D snapshot.
-	# Accounting-approved account and Cost Center maps B/C remain separately pending.
+	# Original issues use one server-stamped, same-day posting instant; no
+	# API/client backdating or mismatched effective mapping cutoff is allowed.
+	stamp_original_issue_posting(stock_entry)
 	apply_issue_beneficiary(stock_entry, slip)
 	# Resolve approved B/C financial values from locked server records only.
 	# Draft/unsigned or missing Company-specific maps block the whole issue.
