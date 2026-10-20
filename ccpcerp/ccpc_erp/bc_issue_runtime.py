@@ -85,7 +85,8 @@ def _real_authority(user, role, company):
     _require(bool(assigned), "Mapping actor lacks an explicit Finance mapping role.")
     granted = frappe.db.sql(
         "SELECT name FROM `tabUser Permission` WHERE user=%s AND allow='Company' "
-        "AND for_value=%s ORDER BY name FOR UPDATE",
+        "AND for_value=%s AND apply_to_all_doctypes=1 "
+        "AND IFNULL(applicable_for, '')='' ORDER BY name FOR UPDATE",
         (user, company), as_dict=True,
     )
     _require(bool(granted), "Mapping actor lacks explicit Company-scoped permission.")
