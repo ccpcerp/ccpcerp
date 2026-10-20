@@ -98,6 +98,7 @@ def _lock_revision(revision_doctype, name):
     rows = frappe.db.sql(
         "SELECT name, mapping_scope, revision_no, owner, modified, approval_state, "
         "approval_reference, approved_by, approved_at, effective_from, effective_until, "
+        "supersedes, revocation_reason, "
         + ("expense_account" if revision_doctype == "CCPC Expense Mapping Revision" else "cost_center") +
         " FROM `tab" + revision_doctype + "` WHERE name=%s FOR UPDATE",
         (name,), as_dict=True,
@@ -163,7 +164,9 @@ def get_mapping_review(kind, revision):
     return {"name": row.name, "company": company, "source": scope[0][source_field],
             "value": row[value_field], "owner": row.owner,
             "state": row.approval_state, "effective_from": row.effective_from,
-            "effective_until": row.effective_until, "modified": str(row.modified)}
+            "effective_until": row.effective_until, "modified": str(row.modified),
+            "supersedes": row.supersedes, "retirement_reason": row.revocation_reason,
+            "change": ("Retire" if row.revocation_reason else "Replace") if row.supersedes else "New"}
 
 
 @frappe.whitelist(methods=["POST"])
@@ -204,6 +207,8 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
              "Mapping was modified since Finance review; review it again.")
     _require(not doc.approved_by and not doc.approved_at,
              "Draft contains forged approval history.")
+    _require(not doc.supersedes and not doc.revocation_reason,
+             "Lifecycle drafts require independent change approval, not initial approval.")
     maker, checker = assert_independent_review(doc.owner, checker)
     _real_authority(maker, "CCPC Mapping Preparer", company)
     _master_validated(master_dt, doc[value_field], company)
