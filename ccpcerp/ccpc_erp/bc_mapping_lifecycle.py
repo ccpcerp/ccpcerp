@@ -90,7 +90,10 @@ def _propose_change(kind, old_revision, proposed_value, cutoff, reason):
     now = _utc(now_datetime())
     _open_predecessor(old, scope.name, now)
     _only_predecessor_approved(rev_dt, scope.name, old.name)
-    _master_validated(master_dt, old[value_field], company)
+    # Retirement/replacement must remain possible after the old master was
+    # disabled. Its original approval stays in history; only new masters need
+    # to satisfy current Company/leaf eligibility.
+    _canonical(old[value_field], "Predecessor financial master")
 
     retirement = reason is not None
     if retirement:
@@ -186,7 +189,10 @@ def approve_mapping_change(kind, revision, expected_modified, approval_reference
     approved_utc = _utc(approved_at)
     _open_predecessor(old, scope.name, approved_utc)
     _only_predecessor_approved(rev_dt, scope.name, old.name)
-    _master_validated(master_dt, old[value_field], company)
+    # Retirement/replacement must remain possible after the old master was
+    # disabled. Its original approval stays in history; only new masters need
+    # to satisfy current Company/leaf eligibility.
+    _canonical(old[value_field], "Predecessor financial master")
     is_retirement = bool(draft.revocation_reason)
     if is_retirement:
         _require(isinstance(draft.revocation_reason, str) and
