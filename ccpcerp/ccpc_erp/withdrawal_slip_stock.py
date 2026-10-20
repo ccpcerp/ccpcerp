@@ -539,8 +539,8 @@ def _validate_provenance_immutable(doc):
 				"ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue",
 				"ccpc_item_group_at_issue", "ccpc_expense_mapping_revision",
 				"ccpc_center_mapping_revision",
+				"expense_account", "cost_center", "department",
 			):
-
 				if (old_row.get(fieldname) or None) != (row.get(fieldname) or None):
 					frappe.throw(_("Row {0}: original issue-time Equipment or financial mapping provenance cannot be modified.").format(row.idx))
 
