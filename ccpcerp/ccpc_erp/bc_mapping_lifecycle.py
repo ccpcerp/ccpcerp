@@ -59,15 +59,23 @@ def _open_predecessor(row, scope_id, at):
              "The predecessor must have a valid past approval.")
 
 
-def _only_predecessor_approved(rev_dt, scope_id, old_name):
+def _only_predecessor_approved(rev_dt, scope_id, old):
     table = chr(96) + "tab" + rev_dt + chr(96)
     rows = frappe.db.sql(
-        "SELECT name FROM " + table +
+        "SELECT name, effective_from, effective_until FROM " + table +
         " WHERE mapping_scope=%s AND approval_state='Approved' "
         "ORDER BY name FOR UPDATE", (scope_id,), as_dict=True,
     )
-    _require([r.name for r in rows] == [old_name],
-             "Additional Approved revisions require separate Finance reconciliation.")
+    # Old, closed Approved revisions are deliberately retained as historical
+    # mapping evidence. Only the predecessor may have an open-ended interval.
+    open_rows = [r.name for r in rows if r.effective_until is None]
+    _require(open_rows == [old.name],
+             "There must be exactly one currently open Approved predecessor.")
+    for row in rows:
+        if row.name != old.name:
+            _require(row.effective_until is not None and
+                     _utc(row.effective_until) <= _utc(old.effective_from),
+                     "Historical Approved mapping overlaps the current predecessor.")
 
 
 def _audit(rev_dt, name, event, details, changes):
@@ -89,7 +97,7 @@ def _propose_change(kind, old_revision, proposed_value, cutoff, reason):
     )
     now = _utc(now_datetime())
     _open_predecessor(old, scope.name, now)
-    _only_predecessor_approved(rev_dt, scope.name, old.name)
+    _only_predecessor_approved(rev_dt, scope.name, old)
     # Retirement/replacement must remain possible after the old master was
     # disabled. Its original approval stays in history; only new masters need
     # to satisfy current Company/leaf eligibility.
@@ -188,7 +196,7 @@ def approve_mapping_change(kind, revision, expected_modified, approval_reference
     approved_at = now_datetime().replace(microsecond=0)
     approved_utc = _utc(approved_at)
     _open_predecessor(old, scope.name, approved_utc)
-    _only_predecessor_approved(rev_dt, scope.name, old.name)
+    _only_predecessor_approved(rev_dt, scope.name, old)
     # Retirement/replacement must remain possible after the old master was
     # disabled. Its original approval stays in history; only new masters need
     # to satisfy current Company/leaf eligibility.
