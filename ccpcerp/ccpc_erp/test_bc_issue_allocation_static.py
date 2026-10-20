@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from ccpcerp.ccpc_erp.bc_issue_allocation import (
     CenterEvidence, ExpenseEvidence, IssueLine,
     assert_original_issue_rows_equal, resolve_original_issue_allocation,
+    prepare_original_issue_accounting_rows,
 )
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
 
@@ -145,6 +146,53 @@ class IssueAllocationTests(unittest.TestCase):
             assert_original_issue_rows_equal(expected,[row,row])
         with self.assertRaises(MappingPolicyError):
             assert_original_issue_rows_equal(expected,[])
+
+
+    def test_new_issue_bridge_injects_only_approved_accounts_and_keeps_input_untouched(self):
+        approved = issue(
+            lines=[IssueLine("WSI-1", "PART-1", "_Test Materials"),
+                   IssueLine("WSI-2", "PART-2", "_Test Parts")],
+            expenses=[expense(), expense(revision="EXP-2", item_group="_Test Parts",
+                                         expense_account="_Test Repairs Expense")],
+        )
+        rows = [
+            {"withdrawal_slip_item": "WSI-1", "item_code": "PART-1", "qty": 2, "s_warehouse": "_Test Warehouse"},
+            {"withdrawal_slip_item": "WSI-2", "item_code": "PART-2", "qty": 1, "s_warehouse": "_Test Warehouse"},
+        ]
+        prepared = prepare_original_issue_accounting_rows(approved, rows)
+        self.assertEqual([r["expense_account"] for r in prepared],
+                         ["_Test Consumables Expense", "_Test Repairs Expense"])
+        self.assertEqual([r["cost_center"] for r in prepared], ["_Test Plant Center"] * 2)
+        self.assertTrue(all("expense_account" not in r for r in rows))
+        self.assertEqual([r["qty"] for r in prepared], [2, 1])
+        self.assertTrue(assert_original_issue_rows_equal(approved, prepared))
+
+    def test_bridge_refuses_prepopulated_finance_values_even_when_matching(self):
+        approved = issue()
+        clean = {"withdrawal_slip_item": "WSI-1", "item_code": "PART-1"}
+        for value in ("Fake Account", "_Test Consumables Expense"):
+            with self.subTest(value=value), self.assertRaises(MappingPolicyError):
+                prepare_original_issue_accounting_rows(approved, [dict(clean, expense_account=value)])
+        with self.assertRaises(MappingPolicyError):
+            prepare_original_issue_accounting_rows(approved, [dict(clean, cost_center="_Test Plant Center")])
+
+    def test_bridge_denies_substituted_item_missing_row_and_duplicate(self):
+        approved = issue()
+        clean = {"withdrawal_slip_item": "WSI-1", "item_code": "PART-1"}
+        for rows in (
+            [], [dict(clean, item_code="FORGED")], [dict(clean, withdrawal_slip_item="OTHER")],
+            [clean, clean], ["not a row"]
+        ):
+            with self.subTest(rows=rows), self.assertRaises(MappingPolicyError):
+                prepare_original_issue_accounting_rows(approved, rows)
+
+    def test_before_submit_guard_detects_cost_center_substitution_after_bridge(self):
+        approved = issue()
+        fresh = {"withdrawal_slip_item": "WSI-1", "item_code": "PART-1", "qty": 1}
+        valid = prepare_original_issue_accounting_rows(approved, [fresh])
+        altered = dict(valid[0], cost_center="Other Center")
+        with self.assertRaises(MappingPolicyError):
+            assert_original_issue_rows_equal(approved, [altered])
 
 
 if __name__ == "__main__":
