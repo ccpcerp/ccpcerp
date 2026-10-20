@@ -13,6 +13,10 @@ from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import (
 	apply_issue_beneficiary,
 	validate_issue_beneficiary,
 )
+from ccpcerp.ccpc_erp.bc_issue_runtime import (
+	assign_original_issue_b_c,
+	validate_original_issue_b_c,
+)
 
 
 ISSUABLE_STATES = {"Stockroom Review"}
@@ -168,6 +172,9 @@ def _build_material_issue(slip):
 	# Approved beneficiary Department A, alongside the immutable Equipment D snapshot.
 	# Accounting-approved account and Cost Center maps B/C remain separately pending.
 	apply_issue_beneficiary(stock_entry, slip)
+	# Resolve approved B/C financial values from locked server records only.
+	# Draft/unsigned or missing Company-specific maps block the whole issue.
+	assign_original_issue_b_c(stock_entry, slip)
 	return stock_entry
 
 
@@ -354,6 +361,9 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 
 		# Before posting any stock/GL, reject a forged or stale beneficiary Department.
 		validate_issue_beneficiary(doc, slip)
+		# Strict re-resolution immediately before SLE/GL posting; never rely on
+		# saved-row account defaults or caller-supplied revision identities.
+		validate_original_issue_b_c(doc, slip)
 		doc.withdrawal_slip_issued_by = frappe.session.user
 
 
@@ -525,9 +535,14 @@ def _validate_provenance_immutable(doc):
 				_("Row {0}: Withdrawal Slip Item reference cannot be changed.").format(row.idx)
 			)
 		if old_row:
-			for fieldname in ("ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue"):
+			for fieldname in (
+				"ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue",
+				"ccpc_item_group_at_issue", "ccpc_expense_mapping_revision",
+				"ccpc_center_mapping_revision",
+			):
+
 				if (old_row.get(fieldname) or None) != (row.get(fieldname) or None):
-					frappe.throw(_("Row {0}: original issue-time Equipment provenance cannot be modified.").format(row.idx))
+					frappe.throw(_("Row {0}: original issue-time Equipment or financial mapping provenance cannot be modified.").format(row.idx))
 
 
 def _stock_qty(row):
