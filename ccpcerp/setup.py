@@ -544,6 +544,7 @@ def after_migrate():
 	backfill_purchase_order_approval_status()
 	ensure_purchase_order_approval_workflow()
 	ensure_withdrawal_slip_requestor_permissions()
+	ensure_bc_finance_mapping_roles()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 	backfill_withdrawal_slip_issue_qty()
@@ -1264,6 +1265,17 @@ def ensure_withdrawal_slip_requestor_permissions():
 	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
 	for doctype in WITHDRAWAL_SLIP_REQUESTOR_REFERENCE_DOCTYPES:
 		_ensure_custom_permission(doctype, WITHDRAWAL_SLIP_REQUESTOR_ROLE, {"read"})
+
+
+def ensure_bc_finance_mapping_roles():
+	"""Install explicit Finance mapping roles but grant them to NO users.
+
+	Company-scoped User Permissions and named roles are separately authorized
+	by genuine Accounting management during controlled deployment. Creating the
+	role definitions grants nobody a right to approve or post.
+	"""
+	_ensure_role("CCPC Mapping Preparer")
+	_ensure_role("CCPC Accounting Mapping Approver")
 
 
 def ensure_withdrawal_slip_stock_entry_fields():
