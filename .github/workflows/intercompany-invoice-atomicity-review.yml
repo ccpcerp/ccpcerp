@@ -116,6 +116,14 @@ jobs:
           bench --site "$TEST_SITE" run-tests \
             --module ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_material_billing_batch
 
+      - name: Validate all four intercompany invoice failure paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_billing_approval_failures
+
       - name: Execute real MariaDB invoice-pair rollback probes
         shell: bash
         run: |
