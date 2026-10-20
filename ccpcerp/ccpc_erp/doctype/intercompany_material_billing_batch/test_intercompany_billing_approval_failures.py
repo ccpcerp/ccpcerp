@@ -6,6 +6,7 @@ rollback, deadlock behavior, or absence of persisted orphan invoices. Real datab
 MariaDB savepoint probe; mocked calls alone do not prove persisted outcomes.
 """
 
+import frappe
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -47,6 +48,24 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
         self.purchase_invoice.name = "PINV-TEST-001"
         self.batch._build_sales_invoice.return_value = self.sales_invoice
         self.batch._build_purchase_invoice.return_value = self.purchase_invoice
+
+    def test_cross_currency_draft_pair_denied_before_any_invoice_creation(self):
+        self.batch._get_company_invoice_defaults.side_effect = [
+            {"company": "CCPC", "currency": "PHP"},
+            {"company": "RMC", "currency": "USD"},
+        ]
+        with (
+            patch(f"{MODULE}.frappe.db.savepoint") as savepoint,
+            self.assertRaisesRegex(frappe.ValidationError, "currency mismatch"),
+        ):
+            IntercompanyMaterialBillingBatch.approve_and_create_invoices(self.batch)
+        savepoint.assert_not_called()
+        self.batch._get_internal_party.assert_not_called()
+        self.batch._build_sales_invoice.assert_not_called()
+        self.batch._build_purchase_invoice.assert_not_called()
+        self.assertEqual(self.batch.status, "Under Review")
+        self.assertIsNone(self.batch.sales_invoice)
+        self.assertIsNone(self.batch.purchase_invoice)
 
     def approve(self):
         # Mock the SQL savepoint API only in this pure unit suite. The actual
