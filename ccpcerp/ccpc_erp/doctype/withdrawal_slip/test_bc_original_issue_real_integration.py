@@ -13,10 +13,16 @@ from frappe.utils import flt, now_datetime
 
 from erpnext.tests.utils import ERPNextTestSuite
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
-from ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration import (
-    COMPANY, PREPARER, ISSUER, QTY_ISSUED, UNIT_RATE, QTY_RECEIVED,
-    TestWithdrawalRealLedgerIntegration,
+from ccpcerp.ccpc_erp.doctype.withdrawal_slip import (
+    test_withdrawal_real_ledger_integration as _base_real,
 )
+
+COMPANY = _base_real.COMPANY
+PREPARER = _base_real.PREPARER
+ISSUER = _base_real.ISSUER
+QTY_ISSUED = _base_real.QTY_ISSUED
+UNIT_RATE = _base_real.UNIT_RATE
+QTY_RECEIVED = _base_real.QTY_RECEIVED
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import issue_withdrawal_slip
 
 
@@ -25,7 +31,7 @@ CI_REF = "review/bc-original-issue-allocation-2026-10-20"
 
 
 class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
-    _bin_qty = TestWithdrawalRealLedgerIntegration._bin_qty
+    _bin_qty = _base_real.TestWithdrawalRealLedgerIntegration._bin_qty
 
     def setUp(self):
         if not (
@@ -36,7 +42,7 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
             and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
         ):
             raise RuntimeError("B/C posting probe restricted to single disposable GitHub Actions site")
-        TestWithdrawalRealLedgerIntegration.setUp(self)
+        _base_real.TestWithdrawalRealLedgerIntegration.setUp(self)
         self.assertTrue(frappe.get_meta("Stock Entry Detail").has_field("ccpc_expense_mapping_revision"))
         self.assertTrue(frappe.get_meta("Stock Entry Detail").has_field("ccpc_center_mapping_revision"))
         self.assertTrue(frappe.get_meta("Stock Entry Detail").has_field("ccpc_item_group_at_issue"))
