@@ -110,6 +110,13 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
         self.assertEqual(result["state"], "Approved")
         self.assertEqual(result["approved_by"], APPROVER)
         self.assertTrue(result["version"], "Approval must atomically create audit history")
+        import json
+        snapshot = json.loads(frappe.get_doc("Version", result["version"]).data)["ccpc_mapping_decision"]
+        for key, actual in {
+            "company": COMPANY, "kind": kind, "source": source, "value": value,
+            "prepared_by": PREPARER, "approved_by": APPROVER, "revision": draft["name"],
+        }.items():
+            self.assertEqual(snapshot[key], actual)
         with self.assertRaises(MappingPolicyError):
             approve_mapping(kind, draft["name"], reviewed["modified"], "REPLAY")
         return draft["name"]
@@ -168,3 +175,73 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
         with self.assertRaises(Exception):
             issue_withdrawal_slip(self.slip_name)
         self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED - QTY_ISSUED, places=5)
+
+    def test_c_finance_security_denials_and_overlap_on_real_database(self):
+        """Validate financial roles, no self-approval, non-overlap and sealed approvals."""
+        frappe.set_user("Administrator")
+        self.assertTrue(frappe.db.exists("Role", "CCPC Mapping Preparer"))
+        self.assertTrue(frappe.db.exists("Role", "CCPC Accounting Mapping Approver"))
+        self._ensure_user_role(PREPARER, "CCPC Mapping Preparer")
+        self._ensure_user_role(APPROVER, "CCPC Accounting Mapping Approver")
+        expense = "Stock Adjustment - _TC"
+        frappe.set_user(ISSUER)
+        with self.assertRaises(MappingPolicyError):
+            propose_mapping("Expense", COMPANY, "_Test Item Group", expense)
+        frappe.set_user(PREPARER)
+        first = propose_mapping("Expense", COMPANY, "_Test Item Group", expense)
+        second = propose_mapping("Expense", COMPANY, "_Test Item Group", expense)
+        self.assertNotEqual(first["name"], second["name"])
+        with self.assertRaises(MappingPolicyError):
+            propose_mapping("Expense", COMPANY, "All Item Groups", expense)
+        frappe.set_user(ISSUER)
+        with self.assertRaises(MappingPolicyError):
+            get_mapping_review("Expense", first["name"])
+        frappe.set_user("Administrator")
+        # Even if a preparer holds BOTH roles, the creator cannot self-approve.
+        self._ensure_user_role(PREPARER, "CCPC Accounting Mapping Approver")
+        frappe.set_user(PREPARER)
+        own = get_mapping_review("Expense", first["name"])
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping("Expense", first["name"], own["modified"], "SELF APPROVAL")
+        self.assertEqual(frappe.db.get_value(
+            "CCPC Expense Mapping Revision", first["name"], "approval_state"), "Draft")
+        frappe.set_user(APPROVER)
+        review = get_mapping_review("Expense", first["name"])
+        approved = approve_mapping("Expense", first["name"], review["modified"], "FIRST REVISION")
+        self.assertEqual(approved["state"], "Approved")
+        overlapping = get_mapping_review("Expense", second["name"])
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping("Expense", second["name"], overlapping["modified"], "OVERLAP")
+        self.assertEqual(frappe.db.get_value(
+            "CCPC Expense Mapping Revision", second["name"], "approval_state"), "Draft")
+        sealed = frappe.get_doc("CCPC Expense Mapping Revision", first["name"])
+        sealed.approval_reference = "UNAUTHORIZED CHANGE"
+        with self.assertRaises(Exception):
+            sealed.save(ignore_permissions=True)
+        self.assertEqual(frappe.db.get_value(
+            "CCPC Expense Mapping Revision", first["name"], "approval_reference"), "FIRST REVISION")
+
+    def test_d_finance_cross_company_and_backdate_denials(self):
+        """Disallow foreign financial masters and backdated issue times."""
+        from ccpcerp.ccpc_erp.bc_issue_runtime import _validated_voucher_posting_utc
+        from frappe.utils import nowdate, nowtime, add_days
+        frappe.set_user("Administrator")
+        self._ensure_user_role(PREPARER, "CCPC Mapping Preparer")
+        frappe.set_user(PREPARER)
+        for args in (
+            ("Expense", "NONEXISTENT CI COMPANY", "_Test Item Group", "Stock Adjustment - _TC"),
+            ("Expense", COMPANY, "_Test Item Group", "NONEXISTENT CI EXPENSE ACCOUNT"),
+            ("Center", COMPANY, "NONEXISTENT CI DEPARTMENT", "NONEXISTENT CI COST CENTER"),
+        ):
+            with self.subTest(args=args), self.assertRaises(MappingPolicyError):
+                propose_mapping(*args)
+        with self.assertRaises(MappingPolicyError):
+            _validated_voucher_posting_utc({
+                "set_posting_time": 1, "posting_date": add_days(nowdate(), -1),
+                "posting_time": nowtime(),
+            })
+        with self.assertRaises(MappingPolicyError):
+            _validated_voucher_posting_utc({
+                "set_posting_time": 0, "posting_date": nowdate(),
+                "posting_time": nowtime(),
+            })
