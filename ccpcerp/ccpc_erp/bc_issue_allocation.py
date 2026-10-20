@@ -206,3 +206,52 @@ def assert_original_issue_rows_equal(allocation, source_rows):
     if seen != set(by_row):
         raise MappingPolicyError("Stock Entry row membership does not match approved intent.")
     return True
+
+
+def prepare_original_issue_accounting_rows(allocation, fresh_rows):
+    """Build new voucher rows with B/C values only from validated allocations.
+
+    INERT PURE BRIDGE: Never call this with user-provided allocation evidence. The
+    future server-side caller must resolve signed, currently effective revisions
+    from locked ERPNext rows, verify Item categories, and then use these copies
+    ONLY while constructing a *new* Withdrawal-linked Material Issue. This does
+    not authorize posting, alter existing saved drafts, or persist revisions.
+
+    A pre-populated account/center on an input row is suspicious even if its
+    value happens to equal the approved one: do not silently accept overrides
+    or disguise application defaults as independently approved B/C choices.
+    """
+    if not isinstance(allocation, (tuple, list)) or not allocation:
+        raise MappingPolicyError("An original-issue allocation is required.")
+    if not isinstance(fresh_rows, (tuple, list)) or len(fresh_rows) != len(allocation):
+        raise MappingPolicyError("Original issue row count differs from the approved allocation.")
+    expected = {}
+    for item in allocation:
+        if not isinstance(item, IssueRowAllocation) or not isinstance(item.source_row, str):
+            raise MappingPolicyError("Invalid approved allocation row structure.")
+        if item.source_row in expected:
+            raise MappingPolicyError("Duplicate approved source-row identity.")
+        _named(item.expense_account, "Expense Account")
+        _named(item.cost_center, "Cost Center")
+        expected[item.source_row] = item
+
+    prepared = []
+    observed = set()
+    for row in fresh_rows:
+        if not isinstance(row, dict):
+            raise MappingPolicyError("New Material Issue rows must be canonical server-built dictionaries.")
+        source = row.get("withdrawal_slip_item")
+        match = expected.get(source)
+        if match is None or source in observed or row.get("item_code") != match.item_code:
+            raise MappingPolicyError("Material Issue item/source provenance does not match the approved allocation.")
+        if row.get("expense_account") not in (None, "") or row.get("cost_center") not in (None, ""):
+            raise MappingPolicyError("Unapproved account or Cost Center pre-populated on new Material Issue.")
+        observed.add(source)
+        copy = dict(row)
+        copy["expense_account"] = match.expense_account
+        copy["cost_center"] = match.cost_center
+        prepared.append(copy)
+    if observed != set(expected):
+        raise MappingPolicyError("Missing approved source rows in the original Material Issue.")
+    assert_original_issue_rows_equal(allocation, prepared)
+    return tuple(prepared)
