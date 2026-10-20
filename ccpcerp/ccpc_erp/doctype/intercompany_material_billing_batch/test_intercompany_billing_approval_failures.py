@@ -34,8 +34,8 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
         self.batch.approved_on = None
 
         self.batch._get_company_invoice_defaults.side_effect = [
-            {"company": "CCPC"},
-            {"company": "RMC"},
+            {"company": "CCPC", "currency": "PHP"},
+            {"company": "RMC", "currency": "PHP"},
         ]
         self.batch._get_internal_party.side_effect = [
             "RMC Customer",
