@@ -1,10 +1,10 @@
 # Copyright (c) 2026, CCPC and contributors
 """DISPOSABLE real Frappe/MariaDB B/C original stock issue acceptance probe.
 
-Not a production-approval workflow test: for the positive case only, synthetic
-test mapping rows are set to Approved through SQL after Draft insertion.
-That emulates a future server approval service WITHOUT enabling one. This test
-must NEVER be run on persistent DEVELOPMENT or PRODUCTION sites.
+Exercises the authenticated proposal, independent reviewer and real
+Stock Entry + GL posting against a disposable site. The Company, users, Accounts
+and Departments are synthetic ERPNext fixtures, NOT real CCPC finance approvals.
+Never run on persistent DEVELOPMENT or PRODUCTION sites.
 """
 import os
 
@@ -13,6 +13,9 @@ from frappe.utils import flt, now_datetime
 
 from erpnext.tests.utils import ERPNextTestSuite
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
+from ccpcerp.ccpc_erp.bc_mapping_workflow import (
+    approve_mapping, get_mapping_review, propose_mapping,
+)
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip import (
     test_withdrawal_real_ledger_integration as _base_real,
 )
@@ -84,29 +87,38 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
                 "apply_to_all_doctypes": 1,
             }).insert(ignore_permissions=True)
 
-    def _synthetic_approved_revision(self, *, doctype, scope, field, value):
-        """CI-ONLY direct row update; never an operational approval API."""
+    def _authorized_revision(self, *, kind, source, value):
+        """Approve a genuine synthetic draft with two authenticated Finance users."""
         frappe.set_user(PREPARER)
-        revision = frappe.get_doc({
-            "doctype": doctype, "mapping_scope": scope,
-            "revision_no": 1, field: value, "approval_state": "Draft",
-            "effective_from": frappe.utils.add_days(now_datetime(), -1),
-        }).insert(ignore_permissions=True)
-        self.assertEqual(revision.owner, PREPARER)
-        frappe.set_user("Administrator")
-        frappe.db.sql(
-            "UPDATE `tab" + doctype + "` "
-            "SET approval_state='Approved', approved_by=%s, approved_at=%s, approval_reference=%s "
-            "WHERE name=%s",
-            (APPROVER, now_datetime(), "SYNTHETIC CI ONLY", revision.name),
+        draft = propose_mapping(kind, COMPANY, source, value)
+        self.assertEqual(draft["state"], "Draft")
+        self.assertEqual(frappe.db.get_value(
+            "CCPC " + kind + " Mapping Revision", draft["name"], "approval_state"
+        ), "Draft")
+        # The preparer is NEVER a valid independent Finance approver.
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping(kind, draft["name"], "forged-version", "SYNTHETIC CI")
+        frappe.set_user(APPROVER)
+        reviewed = get_mapping_review(kind, draft["name"])
+        self.assertEqual(reviewed["owner"], PREPARER)
+        self.assertEqual(reviewed["value"], value)
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping(kind, draft["name"], "stale-review-token", "SYNTHETIC CI")
+        result = approve_mapping(
+            kind, draft["name"], reviewed["modified"], "CI INDEPENDENT REVIEW ONLY"
         )
-        return revision.name
+        self.assertEqual(result["state"], "Approved")
+        self.assertEqual(result["approved_by"], APPROVER)
+        self.assertTrue(result["version"], "Approval must atomically create audit history")
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping(kind, draft["name"], reviewed["modified"], "REPLAY")
+        return draft["name"]
 
-    def test_b_synthetic_signed_issue_posts_correct_stock_expense_gl(self):
+    def test_b_genuine_finance_approval_issue_posts_correct_stock_expense_gl(self):
         """Prove original issue builder and before_submit against genuine ledger.
 
-        NOT a proof of Finance approval workflow (fixture deliberately bypasses
-        current Draft-only activation). No Company or human identities from CCPC.
+        Full Finance G1 maker/checker + ledger path with synthetic test-only
+        Company, Accounts and identities, NOT actual CCPC mapping authorization.
         """
         frappe.set_user("Administrator")
         self._ensure_user_role(PREPARER, "CCPC Mapping Preparer")
@@ -123,23 +135,11 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
         self.assertTrue(centers, "Synthetic fixture lacks a leaf Cost Center")
         center = centers[0]
 
-        frappe.set_user(PREPARER)
-        ex_scope = frappe.get_doc({
-            "doctype": "CCPC Expense Mapping Scope",
-            "company": COMPANY, "item_group": "_Test Item Group",
-        }).insert(ignore_permissions=True)
-        cn_scope = frappe.get_doc({
-            "doctype": "CCPC Center Mapping Scope", "company": COMPANY,
-            "beneficiary_department": self.department,
-            "selector_kind": "Department Only", "selector_key": "DEPARTMENT_ONLY",
-        }).insert(ignore_permissions=True)
-        ex_revision = self._synthetic_approved_revision(
-            doctype="CCPC Expense Mapping Revision", scope=ex_scope.name,
-            field="expense_account", value=account,
+        ex_revision = self._authorized_revision(
+            kind="Expense", source="_Test Item Group", value=account,
         )
-        cn_revision = self._synthetic_approved_revision(
-            doctype="CCPC Center Mapping Revision", scope=cn_scope.name,
-            field="cost_center", value=center,
+        cn_revision = self._authorized_revision(
+            kind="Center", source=self.department, value=center,
         )
         frappe.set_user(ISSUER)
         result = issue_withdrawal_slip(self.slip_name)
