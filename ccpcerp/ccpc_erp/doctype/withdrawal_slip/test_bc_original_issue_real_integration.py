@@ -235,6 +235,17 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
         ):
             with self.subTest(args=args), self.assertRaises(MappingPolicyError):
                 propose_mapping(*args)
+        # A Company permission restricted to other document types is not
+        # sufficient Finance authority for the full B/C allocation workflow.
+        perm = frappe.db.get_value("User Permission", {
+            "user": PREPARER, "allow": "Company", "for_value": COMPANY,
+        }, "name")
+        self.assertTrue(perm)
+        frappe.set_user("Administrator")
+        frappe.db.set_value("User Permission", perm, "apply_to_all_doctypes", 0)
+        frappe.set_user(PREPARER)
+        with self.assertRaises(MappingPolicyError):
+            propose_mapping("Expense", COMPANY, "_Test Item Group", "Stock Adjustment - _TC")
         with self.assertRaises(MappingPolicyError):
             _validated_voucher_posting_utc({
                 "set_posting_time": 1, "posting_date": add_days(nowdate(), -1),
