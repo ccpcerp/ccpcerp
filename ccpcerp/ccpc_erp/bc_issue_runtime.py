@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import frappe
 from frappe import _
-from frappe.utils import get_datetime, get_system_timezone
+from frappe.utils import get_datetime, get_system_timezone, now_datetime, nowdate, nowtime
 
 from ccpcerp.ccpc_erp.bc_issue_allocation import (
     ExpenseEvidence, CenterEvidence, resolve_original_issue_allocation,
@@ -177,7 +177,38 @@ def _locked_source_lines(slip, beneficiary):
     )
 
 
-def resolve_locked_original_issue(slip):
+def _validated_voucher_posting_utc(entry):
+    """Use the posted voucher instant; prevent unapproved backdating/cutoff bypass.
+
+    Initial review release path accepts server-stamped same-day issues only.
+    Formal future G2 exception/backposting policy requires Accounting signoff.
+    """
+    _require(entry.get("set_posting_time") in (1, True),
+             "Original Withdrawal issues require a server-stamped posting instant.")
+    local_now = now_datetime()
+    date = entry.get("posting_date")
+    clock = entry.get("posting_time")
+    _require(str(date) == nowdate() and bool(clock),
+             "Original issue posting must use current site-local date and time.")
+    chosen = get_datetime(str(date) + " " + str(clock))
+    if chosen.tzinfo is None:
+        chosen = chosen.replace(tzinfo=ZoneInfo(get_system_timezone()))
+    posted = chosen.astimezone(timezone.utc)
+    age = (_utc(local_now) - posted).total_seconds()
+    _require(-30 <= age <= 180,
+             "Issue posting timestamp is stale, future, or backdated.")
+    return posted
+
+
+def stamp_original_issue_posting(entry):
+    """Server-only newly constructed issue timestamp, never caller-supplied."""
+    entry.set_posting_time = 1
+    entry.posting_date = nowdate()
+    entry.posting_time = nowtime()
+    _validated_voucher_posting_utc(entry)
+
+
+def resolve_locked_original_issue(slip, entry):
     """Return provenanced B/C intents from real locked server masters, never HTTP.
 
     For now G3 deliberately supports exactly one Department-only Cost Center.
@@ -188,7 +219,7 @@ def resolve_locked_original_issue(slip):
     _canonical(slip.company, "Issue Company")
     beneficiary = resolve_beneficiary_department(slip)
     lines = _locked_source_lines(slip, beneficiary)
-    posting = datetime.now(timezone.utc)
+    posting = _validated_voucher_posting_utc(entry)
     expenses = []
     centers = []
     # Deterministic scope locks by Item Group, then beneficiary Center scope.
@@ -244,7 +275,7 @@ def resolve_locked_original_issue(slip):
 
 def assign_original_issue_b_c(entry, slip):
     """Assign only to fresh, server-constructed original Material Issue details."""
-    allocations = resolve_locked_original_issue(slip)
+    allocations = resolve_locked_original_issue(slip, entry)
     data = [{
         "withdrawal_slip_item": row.get("withdrawal_slip_item"),
         "item_code": row.get("item_code"),
@@ -264,7 +295,7 @@ def assign_original_issue_b_c(entry, slip):
 
 def validate_original_issue_b_c(entry, slip):
     """Re-resolve under locks at before_submit, guarding all accounting fields."""
-    allocations = resolve_locked_original_issue(slip)
+    allocations = resolve_locked_original_issue(slip, entry)
     by_source = {a.source_row: a for a in allocations}
     source = []
     for row in entry.get("items") or []:
