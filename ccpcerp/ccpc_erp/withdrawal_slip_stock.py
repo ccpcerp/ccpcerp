@@ -13,6 +13,11 @@ from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import (
 	apply_issue_beneficiary,
 	validate_issue_beneficiary,
 )
+from ccpcerp.ccpc_erp.bc_issue_runtime import (
+	assign_original_issue_b_c,
+	stamp_original_issue_posting,
+	validate_original_issue_b_c,
+)
 
 
 ISSUABLE_STATES = {"Stockroom Review"}
@@ -165,9 +170,13 @@ def _build_material_issue(slip):
 
 	if not stock_entry.items:
 		frappe.throw(_("Withdrawal Slip {0} has no items to issue.").format(slip.name))
-	# Approved beneficiary Department A, alongside the immutable Equipment D snapshot.
-	# Accounting-approved account and Cost Center maps B/C remain separately pending.
+	# Original issues use one server-stamped, same-day posting instant; no
+	# API/client backdating or mismatched effective mapping cutoff is allowed.
+	stamp_original_issue_posting(stock_entry)
 	apply_issue_beneficiary(stock_entry, slip)
+	# Resolve approved B/C financial values from locked server records only.
+	# Draft/unsigned or missing Company-specific maps block the whole issue.
+	assign_original_issue_b_c(stock_entry, slip)
 	return stock_entry
 
 
@@ -354,6 +363,9 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 
 		# Before posting any stock/GL, reject a forged or stale beneficiary Department.
 		validate_issue_beneficiary(doc, slip)
+		# Strict re-resolution immediately before SLE/GL posting; never rely on
+		# saved-row account defaults or caller-supplied revision identities.
+		validate_original_issue_b_c(doc, slip)
 		doc.withdrawal_slip_issued_by = frappe.session.user
 
 
@@ -505,6 +517,11 @@ def validate_submitted_issue_equipment_snapshot(doc, method=None):
 		frappe.throw(_("Original submitted issue provenance cannot be changed without a prior source document."))
 	if {row.name for row in (before.get("items") or [])} != {row.name for row in (doc.get("items") or [])}:
 		frappe.throw(_("Original submitted issue rows cannot be added, removed or replaced."))
+	# Preserve the original financial context underlying the posted expense GL;
+	# a report must never silently reinterpret a historical issue.
+	for fieldname in ("company", "department", "posting_date", "posting_time"):
+		if (before.get(fieldname) or None) != (doc.get(fieldname) or None):
+			frappe.throw(_("Submitted Withdrawal Material Issue financial context cannot be changed."))
 	_validate_provenance_immutable(doc)
 
 
@@ -525,9 +542,14 @@ def _validate_provenance_immutable(doc):
 				_("Row {0}: Withdrawal Slip Item reference cannot be changed.").format(row.idx)
 			)
 		if old_row:
-			for fieldname in ("ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue"):
+			for fieldname in (
+				"ccpc_equipment_at_issue", "ccpc_equipment_code_at_issue",
+				"ccpc_item_group_at_issue", "ccpc_expense_mapping_revision",
+				"ccpc_center_mapping_revision",
+				"expense_account", "cost_center", "department",
+			):
 				if (old_row.get(fieldname) or None) != (row.get(fieldname) or None):
-					frappe.throw(_("Row {0}: original issue-time Equipment provenance cannot be modified.").format(row.idx))
+					frappe.throw(_("Row {0}: original issue-time Equipment or financial mapping provenance cannot be modified.").format(row.idx))
 
 
 def _stock_qty(row):

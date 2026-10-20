@@ -544,6 +544,7 @@ def after_migrate():
 	backfill_purchase_order_approval_status()
 	ensure_purchase_order_approval_workflow()
 	ensure_withdrawal_slip_requestor_permissions()
+	ensure_bc_finance_mapping_roles()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 	backfill_withdrawal_slip_issue_qty()
@@ -1266,6 +1267,17 @@ def ensure_withdrawal_slip_requestor_permissions():
 		_ensure_custom_permission(doctype, WITHDRAWAL_SLIP_REQUESTOR_ROLE, {"read"})
 
 
+def ensure_bc_finance_mapping_roles():
+	"""Install explicit Finance mapping roles but grant them to NO users.
+
+	Company-scoped User Permissions and named roles are separately authorized
+	by genuine Accounting management during controlled deployment. Creating the
+	role definitions grants nobody a right to approve or post.
+	"""
+	_ensure_role("CCPC Mapping Preparer")
+	_ensure_role("CCPC Accounting Mapping Approver")
+
+
 def ensure_withdrawal_slip_stock_entry_fields():
 	create_custom_fields(
 		{
@@ -1315,6 +1327,36 @@ def ensure_withdrawal_slip_stock_entry_fields():
 					"label": "Equipment Number at Issue (Original)",
 					"fieldtype": "Data",
 					"insert_after": "ccpc_equipment_at_issue",
+					"read_only": 1,
+					"no_copy": 1,
+					"hidden": 1,
+				},
+				{
+					"fieldname": "ccpc_item_group_at_issue",
+					"label": "Item Group at Original Issue",
+					"fieldtype": "Link",
+					"options": "Item Group",
+					"insert_after": "ccpc_equipment_code_at_issue",
+					"read_only": 1,
+					"no_copy": 1,
+					"hidden": 1,
+				},
+				{
+					"fieldname": "ccpc_expense_mapping_revision",
+					"label": "Approved Expense Mapping Revision at Issue",
+					"fieldtype": "Link",
+					"options": "CCPC Expense Mapping Revision",
+					"insert_after": "ccpc_item_group_at_issue",
+					"read_only": 1,
+					"no_copy": 1,
+					"hidden": 1,
+				},
+				{
+					"fieldname": "ccpc_center_mapping_revision",
+					"label": "Approved Center Mapping Revision at Issue",
+					"fieldtype": "Link",
+					"options": "CCPC Center Mapping Revision",
+					"insert_after": "ccpc_expense_mapping_revision",
 					"read_only": 1,
 					"no_copy": 1,
 					"hidden": 1,
