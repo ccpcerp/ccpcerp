@@ -6,7 +6,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches:
-      - review/intercompany-invoice-transaction-2026-10-20
+      - review/bc-original-issue-allocation-2026-10-20
     paths:
       - ".github/workflows/intercompany-invoice-atomicity-review.yml"
       - "ccpcerp/ccpc_erp/doctype/intercompany_material_billing_batch/*.py"
