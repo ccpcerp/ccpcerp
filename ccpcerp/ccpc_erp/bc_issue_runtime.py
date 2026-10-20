@@ -20,7 +20,9 @@ from ccpcerp.ccpc_erp.bc_issue_allocation import (
     prepare_original_issue_accounting_rows, assert_original_issue_rows_equal,
 )
 from ccpcerp.ccpc_erp.bc_issue_locked_source import read_locked_issue_item_groups
-from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
+from ccpcerp.ccpc_erp.bc_mapping_policy import (
+    MappingPolicyError, is_effective_after_approval,
+)
 from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import resolve_beneficiary_department
 
 
@@ -231,6 +233,13 @@ def resolve_locked_original_issue(slip, entry):
             _require(row.mapping_scope == scope, "Expense revision scope mismatch.")
             if row.approval_state != "Approved":
                 continue
+            # Historical Approved rows remain signed for audit, but must not
+            # require still-active roles or enabled masters after their cutoff.
+            if not is_effective_after_approval(
+                _utc(row.effective_from), _utc(row.effective_until),
+                _utc(row.approved_at), posting,
+            ):
+                continue
             _assert_approval_provenance(row, slip.company)
             account = _master("Account", row.expense_account)
             expenses.append(ExpenseEvidence(
@@ -258,6 +267,11 @@ def resolve_locked_original_issue(slip, entry):
         _require(row.mapping_scope == scope_row.name, "Center revision scope mismatch.")
         if row.approval_state != "Approved":
             continue
+        if not is_effective_after_approval(
+            _utc(row.effective_from), _utc(row.effective_until),
+            _utc(row.approved_at), posting,
+        ):
+            continue
         _assert_approval_provenance(row, slip.company)
         center = _master("Cost Center", row.cost_center)
         centers.append(CenterEvidence(
@@ -268,10 +282,24 @@ def resolve_locked_original_issue(slip, entry):
             prepared_by=row.owner, approved_by=row.approved_by, approved_at=_utc(row.approved_at),
             effective_from=_utc(row.effective_from), effective_until=_utc(row.effective_until),
         ))
-    return resolve_original_issue_allocation(
+    allocations = resolve_original_issue_allocation(
         company=slip.company, beneficiary_department=beneficiary, posting_at=posting,
         lines=lines, expense_evidence=expenses, center_evidence=centers,
     )
+    # A server-stamped voucher can wait on Finance locks while a future
+    # replacement or retirement crosses its cutoff. Do not post an old
+    # mapping after its closure just because the voucher timestamp predates
+    # the cutoff. Reject the crossing and require a fresh server-stamped issue.
+    check_now = _utc(now_datetime())
+    selected = {e.revision: e for e in expenses + centers}
+    for allocation in allocations:
+        for name in (allocation.expense_revision, allocation.center_revision):
+            evidence = selected[name]
+            _require(is_effective_after_approval(
+                evidence.effective_from, evidence.effective_until,
+                evidence.approved_at, check_now,
+            ), "Financial mapping cutoff crossed during issue; retry a fresh voucher.")
+    return allocations
 
 
 def assign_original_issue_b_c(entry, slip):
