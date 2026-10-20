@@ -73,24 +73,24 @@ def _real_authority(user, role, company):
     """
     _canonical(user, "Mapping actor")
     _require(user not in ("Administrator", "Guest"), "Named Finance mapping actors are required.")
-    enabled = frappe.db.sql("SELECT enabled FROM \`tabUser\` WHERE name=%s FOR UPDATE",
+    enabled = frappe.db.sql("SELECT enabled FROM `tabUser` WHERE name=%s FOR UPDATE",
                             (user,), as_dict=True)
     _require(len(enabled) == 1 and enabled[0].get("enabled") == 1,
              "Mapping actor is not an enabled ERPNext user.")
     assigned = frappe.db.sql(
-        "SELECT name FROM \`tabHas Role\` WHERE parenttype='User' "
+        "SELECT name FROM `tabHas Role` WHERE parenttype='User' "
         "AND parent=%s AND role=%s ORDER BY name FOR UPDATE",
         (user, role), as_dict=True,
     )
     _require(bool(assigned), "Mapping actor lacks an explicit Finance mapping role.")
     granted = frappe.db.sql(
-        "SELECT name FROM \`tabUser Permission\` WHERE user=%s AND allow='Company' "
+        "SELECT name FROM `tabUser Permission` WHERE user=%s AND allow='Company' "
         "AND for_value=%s ORDER BY name FOR UPDATE",
         (user, company), as_dict=True,
     )
     _require(bool(granted), "Mapping actor lacks explicit Company-scoped permission.")
     stockroom = frappe.db.sql(
-        "SELECT name FROM \`tabHas Role\` WHERE parenttype='User' AND parent=%s "
+        "SELECT name FROM `tabHas Role` WHERE parenttype='User' AND parent=%s "
         "AND role='Stockroom Personnel' ORDER BY name FOR UPDATE",
         (user,), as_dict=True,
     )
@@ -116,7 +116,7 @@ def _lock_scope(doctype, company, scope_field, scope_value, *, department_only=F
     suffix = " AND selector_kind='Department Only' AND selector_key='DEPARTMENT_ONLY'" if department_only else ""
     rows = frappe.db.sql(
         "SELECT name, company, " + scope_field +
-        " FROM \`tab" + doctype + "\` WHERE company=%s AND " + scope_field +
+        " FROM `tab" + doctype + "` WHERE company=%s AND " + scope_field +
         "=%s" + suffix + " ORDER BY name FOR UPDATE",
         (company, scope_value), as_dict=True,
     )
@@ -147,7 +147,7 @@ def _master(doctype, record):
     rows = frappe.db.sql(
         "SELECT name, company, is_group, disabled" +
         (", root_type" if doctype == "Account" else "") +
-        " FROM \`tab" + doctype + "\` WHERE name=%s FOR UPDATE",
+        " FROM `tab" + doctype + "` WHERE name=%s FOR UPDATE",
         (record,), as_dict=True,
     )
     result = _one(rows, doctype)
@@ -159,7 +159,7 @@ def _locked_source_lines(slip, beneficiary):
     slip_items = list(slip.get("items") or [])
     _require(bool(slip_items), "Withdrawal Slip has no source items.")
     rows = frappe.db.sql(
-        "SELECT name, item_code FROM \`tabWithdrawal Slip Item\` "
+        "SELECT name, item_code FROM `tabWithdrawal Slip Item` "
         "WHERE parent=%s AND parenttype='Withdrawal Slip' ORDER BY name FOR UPDATE",
         (slip.name,), as_dict=True,
     )
@@ -212,7 +212,7 @@ def resolve_locked_original_issue(slip):
             ))
     # Reject unsupported multi-center scope candidates rather than an arbitrary first match.
     all_center_scopes = frappe.db.sql(
-        "SELECT name, selector_kind, selector_key FROM \`tabCCPC Center Mapping Scope\` "
+        "SELECT name, selector_kind, selector_key FROM `tabCCPC Center Mapping Scope` "
         "WHERE company=%s AND beneficiary_department=%s ORDER BY name FOR UPDATE",
         (slip.company, beneficiary), as_dict=True,
     )
