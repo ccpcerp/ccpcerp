@@ -134,6 +134,10 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
         self.batch._save_authorized_workflow_transition.assert_called_once_with(
             "Under Review", "Approved"
         )
-        # The failed save must now restore the in-memory Under Review status
-        # and clear both references; SQL rollback has a separate real DB test.
-        self.assert_not_marked_approved()
+        # The final save was attempted, but a failure must not leave
+        # in-memory Approved state or references to rolled-back invoices.
+        self.assertEqual(self.batch.status, "Under Review")
+        self.assertIsNone(self.batch.sales_invoice)
+        self.assertIsNone(self.batch.purchase_invoice)
+        self.assertIsNone(self.batch.approved_by)
+        self.assertIsNone(self.batch.approved_on)
