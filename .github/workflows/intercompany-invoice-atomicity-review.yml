@@ -30,6 +30,7 @@ jobs:
       CI_DB_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
       CI_ADMIN_PASSWORD: ci-admin-${{ github.run_id }}-${{ github.run_attempt }}
       CCPC_ALLOW_IC_SQL_PROBE: isolated-only
+      CCPC_ALLOW_IC_REAL_INVOICES: isolated-only
 
     services:
       mariadb:
@@ -132,6 +133,14 @@ jobs:
           bench --site "$TEST_SITE" run-tests \
             --module ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_atomic_pair_database
 
+      - name: Execute genuine ERPNext two-Company draft invoice tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_real_draft_invoice_database
+
       - name: Report honest test boundary
         if: always()
         shell: bash
@@ -142,7 +151,7 @@ jobs:
             echo "Reviewed app commit: $GITHUB_SHA"
             echo "SQL rollback probes write actual test-only ToDo markers into disposable MariaDB."
             echo "Invoice objects and billing batch are mocked in rollback probes:"
-            echo "this proves transaction savepoint behavior, NOT yet genuine ERPNext invoices."
-            echo "Unit compatibility tests are separately mocked and are NOT database acceptance."
+            echo "The separate real invoice tests perform actual ERPNext Sales/Purchase Invoice inserts and cross-links."
+            echo "Source eligibility and batch workflow in the invoice probe remain simulated, NOT full acceptance."
             echo "No persistent DEVELOPMENT/PRODUCTION touched. No live billing authorization."
           } >> "$GITHUB_STEP_SUMMARY"
