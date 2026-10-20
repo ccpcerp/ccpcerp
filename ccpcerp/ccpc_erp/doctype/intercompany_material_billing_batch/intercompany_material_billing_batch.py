@@ -1459,6 +1459,20 @@ class IntercompanyMaterialBillingBatch(Document):
             self.requesting_company
         )
 
+        # Frozen source rates cannot safely be copied as numerically identical
+        # amounts between unlike currencies. Do not silently invent an FX rate
+        # or post a mismatched intercompany claim. A reviewed FX conversion
+        # policy is a separate future Accounting decision.
+        issuing_currency = issuing_defaults.get("currency")
+        requesting_currency = requesting_defaults.get("currency")
+        if (not issuing_currency or not requesting_currency
+                or issuing_currency != requesting_currency):
+            frappe.throw(
+                _("Intercompany invoice currency mismatch: both Companies must "
+                  "use the same currency until an approved FX conversion "
+                  "and reconciliation policy is implemented.")
+            )
+
         customer = self._get_internal_party(
             "Customer",
             self.requesting_company,
