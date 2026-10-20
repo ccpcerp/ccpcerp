@@ -7,14 +7,20 @@ and Departments are synthetic ERPNext fixtures, NOT real CCPC finance approvals.
 Never run on persistent DEVELOPMENT or PRODUCTION sites.
 """
 import os
+import json
+from unittest.mock import patch
 
 import frappe
-from frappe.utils import flt, now_datetime
+from frappe.utils import flt, now_datetime, add_to_date
 
 from erpnext.tests.utils import ERPNextTestSuite
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
 from ccpcerp.ccpc_erp.bc_mapping_workflow import (
     approve_mapping, get_mapping_review, propose_mapping,
+)
+from ccpcerp.ccpc_erp.bc_mapping_lifecycle import (
+    propose_mapping_replacement, propose_mapping_retirement,
+    approve_mapping_change,
 )
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip import (
     test_withdrawal_real_ledger_integration as _base_real,
@@ -220,6 +226,152 @@ class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
             sealed.save(ignore_permissions=True)
         self.assertEqual(frappe.db.get_value(
             "CCPC Expense Mapping Revision", first["name"], "approval_reference"), "FIRST REVISION")
+
+
+    def test_e_future_replacement_preserves_posted_gl_and_uses_maker_checker(self):
+        """A reviewed replacement closes the old interval without rewriting GL."""
+        frappe.set_user("Administrator")
+        self._ensure_user_role(PREPARER, "CCPC Mapping Preparer")
+        self._ensure_user_role(APPROVER, "CCPC Accounting Mapping Approver")
+        eligible = frappe.get_all("Account", filters={
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+            "root_type": "Expense",
+        }, pluck="name", order_by="name", limit_page_length=100)
+        old_account = "Stock Adjustment - _TC"
+        self.assertIn(old_account, eligible)
+        alternatives = [a for a in eligible if a != old_account]
+        self.assertTrue(alternatives, "Disposable ERPNext fixture needs a second leaf Expense Account")
+        new_account = alternatives[0]
+        center = frappe.get_all("Cost Center", filters={
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+        }, pluck="name", limit_page_length=1)[0]
+        old_revision = self._authorized_revision(
+            kind="Expense", source="_Test Item Group", value=old_account,
+        )
+        self._authorized_revision(
+            kind="Center", source=self.department, value=center,
+        )
+        frappe.set_user(ISSUER)
+        entry = frappe.get_doc("Stock Entry", issue_withdrawal_slip(self.slip_name)["name"])
+        self.assertEqual(entry.items[0].expense_account, old_account)
+        original_gl = frappe.get_all(
+            "GL Entry", filters={"voucher_type": "Stock Entry",
+                                 "voucher_no": entry.name, "is_cancelled": 0},
+            fields=["name", "account", "debit", "credit"],
+            order_by="name",
+        )
+        self.assertTrue(original_gl)
+
+        future = add_to_date(now_datetime().replace(microsecond=0), hours=2)
+        frappe.set_user(PREPARER)
+        with self.assertRaises(MappingPolicyError):
+            propose_mapping_replacement("Expense", old_revision, new_account,
+                                        add_to_date(now_datetime(), hours=-2))
+        replacement = propose_mapping_replacement(
+            "Expense", old_revision, new_account, future,
+        )
+        self.assertEqual(replacement["change"], "Replace")
+        self.assertEqual(replacement["supersedes"], old_revision)
+        frappe.set_user(APPROVER)
+        review = get_mapping_review("Expense", replacement["name"])
+        self.assertEqual(review["change"], "Replace")
+        self.assertEqual(review["supersedes"], old_revision)
+        self.assertEqual(review["value"], new_account)
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping("Expense", replacement["name"],
+                            review["modified"], "INITIAL APPROVAL BYPASS")
+        with self.assertRaises(RuntimeError):
+            with patch("ccpcerp.ccpc_erp.bc_mapping_lifecycle._audit",
+                       side_effect=RuntimeError("CI inject audit failure")):
+                approve_mapping_change(
+                    "Expense", replacement["name"], review["modified"],
+                    "CI FUTURE ACCOUNT CHANGE",
+                )
+        self.assertIsNone(frappe.db.get_value(
+            "CCPC Expense Mapping Revision", old_revision, "effective_until"))
+        self.assertEqual(frappe.db.get_value(
+            "CCPC Expense Mapping Revision", replacement["name"], "approval_state"), "Draft")
+        result = approve_mapping_change(
+            "Expense", replacement["name"], review["modified"],
+            "CI FUTURE ACCOUNT CHANGE",
+        )
+        self.assertEqual(result["state"], "Approved")
+        old_until = frappe.db.get_value(
+            "CCPC Expense Mapping Revision", old_revision, "effective_until",
+        )
+        from ccpcerp.ccpc_erp.bc_issue_runtime import _utc
+        self.assertEqual(_utc(old_until), _utc(future))
+        self.assertEqual(_utc(frappe.db.get_value(
+            "CCPC Expense Mapping Revision", replacement["name"], "effective_from",
+        )), _utc(future))
+        new_audit = json.loads(frappe.get_doc(
+            "Version", result["new_version"],
+        ).data)["ccpc_mapping_lifecycle"]
+        self.assertEqual(new_audit["predecessor"], old_revision)
+        self.assertEqual(new_audit["prepared_by"], PREPARER)
+        self.assertEqual(new_audit["approved_by"], APPROVER)
+        self.assertEqual(new_audit["new_value"], new_account)
+        self.assertEqual(frappe.get_all(
+            "GL Entry", filters={"voucher_type": "Stock Entry",
+                                 "voucher_no": entry.name, "is_cancelled": 0},
+            fields=["name", "account", "debit", "credit"], order_by="name",
+        ), original_gl, "Historically posted GL must not change on mapping replacement")
+        with self.assertRaises(MappingPolicyError):
+            approve_mapping_change("Expense", replacement["name"],
+                                   review["modified"], "REPLAY")
+        frappe.set_user(PREPARER)
+        with self.assertRaises(MappingPolicyError):
+            propose_mapping_replacement("Expense", old_revision, new_account,
+                                        add_to_date(now_datetime(), hours=3))
+
+    def test_f_immediate_retirement_blocks_issue_with_full_audit(self):
+        """A retirement requires a separate checker and never posts fresh stock/GL."""
+        frappe.set_user("Administrator")
+        self._ensure_user_role(PREPARER, "CCPC Mapping Preparer")
+        self._ensure_user_role(APPROVER, "CCPC Accounting Mapping Approver")
+        account = "Stock Adjustment - _TC"
+        center = frappe.get_all("Cost Center", filters={
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+        }, pluck="name", limit_page_length=1)[0]
+        self._authorized_revision(
+            kind="Expense", source="_Test Item Group", value=account,
+        )
+        original_center = self._authorized_revision(
+            kind="Center", source=self.department, value=center,
+        )
+        frappe.set_user(PREPARER)
+        pending = propose_mapping_retirement(
+            "Center", original_center, "CI emergency financial cutoff",
+        )
+        self.assertEqual(pending["change"], "Retire")
+        frappe.set_user(APPROVER)
+        review = get_mapping_review("Center", pending["name"])
+        self.assertEqual(review["change"], "Retire")
+        self.assertEqual(review["retirement_reason"], "CI emergency financial cutoff")
+        result = approve_mapping_change(
+            "Center", pending["name"], review["modified"],
+            "CI INDEPENDENT RETIREMENT",
+        )
+        self.assertEqual(result["state"], "Revoked")
+        old = frappe.db.get_value("CCPC Center Mapping Revision", original_center,
+                                  ["approval_state", "effective_until", "revocation_reason"],
+                                  as_dict=True)
+        self.assertEqual(old.approval_state, "Approved")
+        self.assertTrue(old.effective_until)
+        self.assertEqual(old.revocation_reason, "CI emergency financial cutoff")
+        version = json.loads(frappe.get_doc(
+            "Version", result["old_version"],
+        ).data)["ccpc_mapping_lifecycle"]
+        self.assertEqual(version["event"], "closed_for_retirement")
+        self.assertEqual(version["predecessor"], original_center)
+        frappe.set_user(ISSUER)
+        before = self._bin_qty()
+        with self.assertRaises(MappingPolicyError):
+            issue_withdrawal_slip(self.slip_name)
+        self.assertAlmostEqual(self._bin_qty(), before)
+        self.assertFalse(frappe.db.exists("Stock Entry", {
+            "withdrawal_slip": self.slip_name, "docstatus": 1,
+        }))
 
     def test_d_finance_cross_company_and_backdate_denials(self):
         """Disallow foreign financial masters and backdated issue times."""
