@@ -127,14 +127,20 @@ def _lock_scope(doctype, company, scope_field, scope_value, *, department_only=F
 
 
 def _lock_revisions(doctype, scope):
+    # The B and C DocTypes deliberately have DIFFERENT master-link columns.
+    if doctype == "CCPC Expense Mapping Revision":
+        value_field = "expense_account"
+    elif doctype == "CCPC Center Mapping Revision":
+        value_field = "cost_center"
+    else:
+        raise MappingPolicyError("Unexpected financial mapping revision DocType.")
     return frappe.db.sql(
-        "SELECT name, mapping_scope, owner, expense_account, cost_center, "
-        "approval_state, approval_reference, approved_by, approved_at, "
-        "effective_from, effective_until FROM \`tab" + doctype + "\` "
+        "SELECT name, mapping_scope, owner, " + value_field +
+        ", approval_state, approval_reference, approved_by, approved_at, "
+        "effective_from, effective_until FROM `tab" + doctype + "` "
         "WHERE mapping_scope=%s ORDER BY name FOR UPDATE",
         (scope,), as_dict=True,
     )
-
 
 def _master(doctype, record):
     _canonical(record, doctype)
