@@ -241,13 +241,32 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
     # insertion fails the whole approval request; no implicit commit.
     audit = frappe.get_doc({
         "doctype": "Version", "ref_doctype": rev_dt, "docname": revision,
-        "data": frappe.as_json({"changed": [
-            ["approval_state", "Draft", "Approved"],
-            ["approved_by", None, checker],
-            ["approved_at", None, str(approved_at)],
-            ["effective_from", str(doc.effective_from or ""), str(effective_from)],
-            ["approval_reference", str(doc.approval_reference or ""), approval_reference],
-        ]}),
+        "data": frappe.as_json({
+            "changed": [
+                ["approval_state", "Draft", "Approved"],
+                ["approved_by", None, checker],
+                ["approved_at", None, str(approved_at)],
+                ["effective_from", str(doc.effective_from or ""), str(effective_from)],
+                ["approval_reference", str(doc.approval_reference or ""), approval_reference],
+            ],
+            # Capture the entire reviewed Accounting decision, not just the
+            # status transition. This is an audit snapshot, NOT cryptographic
+            # proof against a privileged database administrator.
+            "ccpc_mapping_decision": {
+                "kind": kind,
+                "revision": revision,
+                "scope": scope_id,
+                "company": company,
+                "source": scope[source_field],
+                "value": doc[value_field],
+                "prepared_by": maker,
+                "approved_by": checker,
+                "approved_at": str(approved_at),
+                "effective_from": str(effective_from),
+                "effective_until": str(effective_until or ""),
+                "approval_reference": approval_reference,
+            },
+        }),
     })
     audit.insert(ignore_permissions=True)
     confirmed = _lock_revision(rev_dt, revision)
