@@ -193,7 +193,7 @@ def approve_mapping_change(kind, revision, expected_modified, approval_reference
     maker, checker = assert_independent_review(draft.owner, checker)
     _real_authority(maker, "CCPC Mapping Preparer", company)
     old = _lock_revision(rev_dt, draft.supersedes)
-    approved_at = now_datetime().replace(microsecond=0)
+    approved_at = now_datetime()
     approved_utc = _utc(approved_at)
     _open_predecessor(old, scope.name, approved_utc)
     _only_predecessor_approved(rev_dt, scope.name, old)
