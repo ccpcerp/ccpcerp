@@ -32,8 +32,11 @@ class TestIntercompanyRealDraftInvoicePair(ERPNextTestSuite):
             raise RuntimeError("Real invoice tests require isolated GitHub-hosted ERPNext site.")
         super().setUp()
         frappe.set_user("Administrator")
+        self.load_test_records("Company")
         self.load_test_records("Sales Invoice")
-        self.seller, self.buyer = "_Test Company", "_Test Company 1"
+        # Both synthetic Companies use INR; currencies with no approved FX
+        # crosswalk are deliberately denied by production billing logic.
+        self.seller, self.buyer = "_Test Company", "_Test Company 5"
         for company in (self.seller, self.buyer):
             self.assertTrue(frappe.db.exists("Company", company),
                             "ERPNext synthetic Company test fixtures are required.")
@@ -41,6 +44,10 @@ class TestIntercompanyRealDraftInvoicePair(ERPNextTestSuite):
             item_code="CI-PAIR-" + frappe.generate_hash(length=12),
             properties={"is_stock_item": 0, "stock_uom": "_Test UOM",
                         "item_group": "_Test Item Group"},
+        )
+        self.assertEqual(
+            frappe.db.get_value("Company", self.seller, "default_currency"),
+            frappe.db.get_value("Company", self.buyer, "default_currency"),
         )
         self.customer = self._party("Customer", self.buyer, self.seller)
         self.supplier = self._party("Supplier", self.seller, self.buyer)
