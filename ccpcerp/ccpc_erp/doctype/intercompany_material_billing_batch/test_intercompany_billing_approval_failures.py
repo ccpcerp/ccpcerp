@@ -2,10 +2,11 @@
 
 These deliberately mock document insertion and saving. They prove which later
 steps are skipped after an exception; they DO NOT prove MariaDB transaction
-rollback, deadlock behavior, or absence of persisted orphan invoices. Those
-require a separately approved DEVELOPMENT database integration test.
+rollback, deadlock behavior, or absence of persisted orphan invoices. Real database rollback is tested separately by the disposable hosted
+MariaDB savepoint probe; mocked calls alone do not prove persisted outcomes.
 """
 
+import frappe
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
@@ -30,10 +31,12 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
         self.batch.status = "Under Review"
         self.batch.sales_invoice = None
         self.batch.purchase_invoice = None
+        self.batch.approved_by = None
+        self.batch.approved_on = None
 
         self.batch._get_company_invoice_defaults.side_effect = [
-            {"company": "CCPC"},
-            {"company": "RMC"},
+            {"company": "CCPC", "currency": "PHP"},
+            {"company": "RMC", "currency": "PHP"},
         ]
         self.batch._get_internal_party.side_effect = [
             "RMC Customer",
@@ -46,15 +49,47 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
         self.batch._build_sales_invoice.return_value = self.sales_invoice
         self.batch._build_purchase_invoice.return_value = self.purchase_invoice
 
+    def test_cross_currency_draft_pair_denied_before_any_invoice_creation(self):
+        self.batch._get_company_invoice_defaults.side_effect = [
+            {"company": "CCPC", "currency": "PHP"},
+            {"company": "RMC", "currency": "USD"},
+        ]
+        with (
+            patch(f"{MODULE}.frappe.db.savepoint") as savepoint,
+            self.assertRaisesRegex(frappe.ValidationError, "currency mismatch"),
+        ):
+            IntercompanyMaterialBillingBatch.approve_and_create_invoices(self.batch)
+        savepoint.assert_not_called()
+        self.batch._get_internal_party.assert_not_called()
+        self.batch._build_sales_invoice.assert_not_called()
+        self.batch._build_purchase_invoice.assert_not_called()
+        self.assertEqual(self.batch.status, "Under Review")
+        self.assertIsNone(self.batch.sales_invoice)
+        self.assertIsNone(self.batch.purchase_invoice)
+
     def approve(self):
-        return IntercompanyMaterialBillingBatch.approve_and_create_invoices(
-            self.batch
-        )
+        # Mock the SQL savepoint API only in this pure unit suite. The actual
+        # MariaDB savepoint behavior is tested separately on disposable CI.
+        with (
+            patch(f"{MODULE}.frappe.db.savepoint") as savepoint,
+            patch(f"{MODULE}.frappe.db.rollback") as rollback,
+        ):
+            try:
+                return IntercompanyMaterialBillingBatch.approve_and_create_invoices(
+                    self.batch
+                )
+            finally:
+                savepoint.assert_called_once()
+                rollback.assert_called_once_with(
+                    save_point=savepoint.call_args.args[0]
+                )
 
     def assert_not_marked_approved(self):
         self.assertEqual(self.batch.status, "Under Review")
         self.assertIsNone(self.batch.sales_invoice)
         self.assertIsNone(self.batch.purchase_invoice)
+        self.assertIsNone(self.batch.approved_by)
+        self.assertIsNone(self.batch.approved_on)
         self.batch._save_authorized_workflow_transition.assert_not_called()
 
     def test_sales_invoice_insert_failure_skips_purchase_and_batch_approval(self):
@@ -118,6 +153,10 @@ class TestIntercompanyApprovalFailurePaths(TestCase):
         self.batch._save_authorized_workflow_transition.assert_called_once_with(
             "Under Review", "Approved"
         )
-        # In-memory fields were assigned before the save raised. This does
-        # NOT establish the database state or rollback: test that separately
-        # using a real DEVELOPMENT MariaDB transaction.
+        # The final save was attempted, but a failure must not leave
+        # in-memory Approved state or references to rolled-back invoices.
+        self.assertEqual(self.batch.status, "Under Review")
+        self.assertIsNone(self.batch.sales_invoice)
+        self.assertIsNone(self.batch.purchase_invoice)
+        self.assertIsNone(self.batch.approved_by)
+        self.assertIsNone(self.batch.approved_on)
