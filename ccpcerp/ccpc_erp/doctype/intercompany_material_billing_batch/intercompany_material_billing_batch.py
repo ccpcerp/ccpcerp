@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 from collections import Counter
+from uuid import uuid4
 
 import frappe
 from frappe import _
@@ -1467,34 +1468,52 @@ class IntercompanyMaterialBillingBatch(Document):
             self.issuing_company,
         )
 
-        sales_invoice = self._build_sales_invoice(
-            customer,
-            issuing_defaults,
-        )
-        sales_invoice.insert(ignore_permissions=True)
-        self._validate_generated_invoice(sales_invoice)
-
-        purchase_invoice = self._build_purchase_invoice(
-            supplier,
-            requesting_defaults,
-            sales_invoice.name,
-        )
-        purchase_invoice.insert(ignore_permissions=True)
-        self._validate_generated_invoice(purchase_invoice)
-
-        sales_invoice.inter_company_invoice_reference = purchase_invoice.name
-        sales_invoice.save(ignore_permissions=True)
-
-        now = now_datetime()
-        self.approved_by = frappe.session.user
-        self.approved_on = now
-        self.sales_invoice = sales_invoice.name
-        self.purchase_invoice = purchase_invoice.name
-        self.status = "Approved"
-        self._save_authorized_workflow_transition(
-            "Under Review",
-            "Approved",
-        )
+        # Inserting two separate ERPNext invoices is one financial decision.
+        # Frappe normally rolls back an uncaught failed HTTP request, but callers
+        # may catch an exception and commit their wider transaction. A dedicated
+        # savepoint prevents orphan draft invoices in that case as well.
+        # Use a unique identifier to avoid colliding with a caller's savepoint.
+        approval_savepoint = "ccpc_ic_pair_" + uuid4().hex
+        frappe.db.savepoint(approval_savepoint)
+        try:
+            sales_invoice = self._build_sales_invoice(
+                customer,
+                issuing_defaults,
+            )
+            sales_invoice.insert(ignore_permissions=True)
+            self._validate_generated_invoice(sales_invoice)
+    
+            purchase_invoice = self._build_purchase_invoice(
+                supplier,
+                requesting_defaults,
+                sales_invoice.name,
+            )
+            purchase_invoice.insert(ignore_permissions=True)
+            self._validate_generated_invoice(purchase_invoice)
+    
+            sales_invoice.inter_company_invoice_reference = purchase_invoice.name
+            sales_invoice.save(ignore_permissions=True)
+    
+            now = now_datetime()
+            self.approved_by = frappe.session.user
+            self.approved_on = now
+            self.sales_invoice = sales_invoice.name
+            self.purchase_invoice = purchase_invoice.name
+            self.status = "Approved"
+            self._save_authorized_workflow_transition(
+                "Under Review",
+                "Approved",
+            )
+        except Exception:
+            frappe.db.rollback(save_point=approval_savepoint)
+            # A failed approval must not leave an in-memory 'Approved' document
+            # containing references to invoices that were rolled back.
+            self.status = "Under Review"
+            self.sales_invoice = None
+            self.purchase_invoice = None
+            self.approved_by = None
+            self.approved_on = None
+            raise
 
         return {
             "name": self.name,
