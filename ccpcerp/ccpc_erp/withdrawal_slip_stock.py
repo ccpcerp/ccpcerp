@@ -515,6 +515,11 @@ def validate_submitted_issue_equipment_snapshot(doc, method=None):
 		frappe.throw(_("Original submitted issue provenance cannot be changed without a prior source document."))
 	if {row.name for row in (before.get("items") or [])} != {row.name for row in (doc.get("items") or [])}:
 		frappe.throw(_("Original submitted issue rows cannot be added, removed or replaced."))
+	# Preserve the original financial context underlying the posted expense GL;
+	# a report must never silently reinterpret a historical issue.
+	for fieldname in ("company", "department", "posting_date", "posting_time"):
+		if (before.get(fieldname) or None) != (doc.get(fieldname) or None):
+			frappe.throw(_("Submitted Withdrawal Material Issue financial context cannot be changed."))
 	_validate_provenance_immutable(doc)
 
 
