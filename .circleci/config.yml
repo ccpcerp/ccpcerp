@@ -1,0 +1,23 @@
+# Starter verification only. Frappe/ERPNext/MariaDB integration tests are NOT run here.
+# Run through CircleCI's explicitly configured "run-ci" PR-label trigger only.
+# No deployment, secrets, self-hosted runners, or access to CCPC environments.
+version: 2.1
+
+jobs:
+  python-syntax:
+    docker:
+      - image: cimg/python:3.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Verify Python runtime and compile custom application
+          command: |
+            set -eu
+            python --version
+            python -m compileall -q ccpcerp
+
+workflows:
+  starter-validation:
+    jobs:
+      - python-syntax
