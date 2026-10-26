@@ -17,23 +17,12 @@ def _ci_concurrent_issue_worker(slot, site, sites_path, slip_name, issuer, resul
     It neither bypasses the lock nor mocks Stock Entry / stock / GL posting.
     """
     try:
-        if not (
-            os.environ.get("GITHUB_ACTIONS") == "true"
-            and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
-            and os.environ.get("GITHUB_HEAD_REF")
-            in {
-                "review/withdrawal-cancellation-ledger-ci-2026-10-16",
-                "review/withdrawal-issue-accounting-ci-2026-10-17",
-                "review/withdrawal-beneficiary-equipment-integration-2026-10-18",
-            }
-            and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
-            and os.environ.get("CCPC_ALLOW_CONCURRENCY_PROBE") == "isolated-only"
-            and site == "ci-withdrawal.localhost"
-        ):
-            raise RuntimeError("Concurrent worker may only run on the allowed disposable Withdrawal CI site")
-
+        from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_withdrawal_disposable_site
+        if not (is_reviewed_withdrawal_disposable_site(site)
+                and os.environ.get("CCPC_ALLOW_CONCURRENCY_PROBE") == "isolated-only"):
+            raise RuntimeError("Concurrent worker restricted to approved disposable CI site")
         frappe.init(site=site, sites_path=sites_path, force=True)
-        if getattr(frappe.local, "site", None) != "ci-withdrawal.localhost":
+        if getattr(frappe.local, "site", None) != site:
             raise RuntimeError("Unexpected initialized Frappe site")
         frappe.connect()
         frappe.set_user(issuer)
