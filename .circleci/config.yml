@@ -22,6 +22,7 @@ jobs:
             set -eu
             python --version
             python -m compileall -q ccpcerp
+            python -m unittest discover -s .circleci -p 'test_ci_disposable_site_guard.py' -v
 
   isolated-erpnext-integration:
     # Disposable CircleCI-only MariaDB/Redis/Frappe site. NOT persistent DEVELOPMENT.
