@@ -69,7 +69,12 @@ class TestIntercompanyAtomicPairDatabase(ERPNextTestSuite):
         doc.purchase_invoice = None
         doc.approved_by = None
         doc.approved_on = None
-        doc._get_company_invoice_defaults.side_effect = [{}, {}]
+        # This SQL-rollback fixture mocks invoice defaults, so supply explicit
+        # identical synthetic currencies. Cross-currency denial is verified by
+        # the separate approval-failure tests; never bypass the runtime guard.
+        doc._get_company_invoice_defaults.side_effect = [
+            {"currency": "INR"}, {"currency": "INR"}
+        ]
         doc._get_internal_party.side_effect = ["CI Buyer", "CI Seller"]
         sales = self._fake_invoice()
         purchase = self._fake_invoice()
