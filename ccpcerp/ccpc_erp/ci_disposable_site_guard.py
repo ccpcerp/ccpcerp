@@ -22,7 +22,7 @@ def is_reviewed_circleci_disposable_site(site):
     return (
         site == "ci-circleci.localhost"
         and env.get("CIRCLECI") == "true"
-        and env.get("CIRCLE_PROJECT_USERNAME") == "ccpcerp"
+        and env.get("CIRCLE_PROJECT_USERNAME") == "CCPCerp_2026"
         and env.get("CIRCLE_PROJECT_REPONAME") == "ccpcerp"
         and env.get("CIRCLE_BRANCH") == _CIRCLECI_BRANCH
         and env.get("CIRCLE_JOB") == "isolated-erpnext-integration"
