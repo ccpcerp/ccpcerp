@@ -71,7 +71,7 @@ jobs:
           command: |
             set -euo pipefail
             sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+            sudo apt-get install -y --no-install-recommends cron mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
             sudo npm install -g yarn
             python -m pip install --user frappe-bench
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
