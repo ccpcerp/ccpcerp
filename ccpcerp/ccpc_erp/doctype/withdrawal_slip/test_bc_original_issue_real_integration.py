@@ -41,16 +41,26 @@ CI_REF = "review/bc-original-issue-allocation-2026-10-20"
 
 class TestBCOriginalIssueRealIntegration(ERPNextTestSuite):
     _bin_qty = _base_real.TestWithdrawalRealLedgerIntegration._bin_qty
+    # The base ledger setup can construct synthetic Approved mappings for its
+    # own tests. This suite verifies the REAL maker/checker workflow instead.
+    _verify_genuine_finance_workflow = True
 
     def setUp(self):
-        if not (
+        from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_circleci_disposable_site
+
+        site = getattr(frappe.local, "site", None)
+        original_github_gate = (
             os.getenv("GITHUB_ACTIONS") == "true"
             and os.getenv("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
             and os.getenv("GITHUB_HEAD_REF") == CI_REF
-            and os.getenv("CCPC_ALLOW_BC_POSTING_PROBE") == "isolated-only"
-            and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
+            and site == "ci-withdrawal.localhost"
+        )
+        reviewed_circleci_gate = is_reviewed_circleci_disposable_site(site)
+        if not (
+            os.getenv("CCPC_ALLOW_BC_POSTING_PROBE") == "isolated-only"
+            and (original_github_gate or reviewed_circleci_gate)
         ):
-            raise RuntimeError("B/C posting probe restricted to single disposable GitHub Actions site")
+            raise RuntimeError("Genuine Finance B/C SQL/GL probe restricted to approved disposable CI site")
         _base_real.TestWithdrawalRealLedgerIntegration.setUp(self)
         self.assertTrue(frappe.get_meta("Stock Entry Detail").has_field("ccpc_expense_mapping_revision"))
         self.assertTrue(frappe.get_meta("Stock Entry Detail").has_field("ccpc_center_mapping_revision"))
