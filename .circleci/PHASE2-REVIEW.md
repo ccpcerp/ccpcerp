@@ -30,3 +30,11 @@
 2. Validate `.circleci/config.yml` with the official CircleCI CLI or a safe CircleCI config validation facility.
 3. If acceptable, request explicit approval for **one** manual pipeline using matching config/checkout source branch and parameter `run_integration=true`.
 4. Inspect actual logs, document false failures or environment prerequisites, correct on review branch, and rerun only with approval.
+
+## First CircleCI full run — 2026-10-26
+
+- Operator confirmed starter-validation passed (7 seconds); opt-in-isolated-erpnext failed after around 1 minute 20 seconds.
+- Uploaded job log showed Frappe source clone and dependency installation completed, but `bench init` failed in `bench.setup.backups()` with `FileNotFoundError: /usr/bin/crontab`.
+- Cause: disposable CircleCI Python image lacked the `crontab` executable. This occurred **before** ERPNext and app installation and before any application test modules ran. It is not evidence of a failing business test.
+- Fixed in review config by adding Ubuntu `cron` package to the existing ephemeral job prerequisites. This supplies `/usr/bin/crontab`; it does not modify any shared CCPC server.
+- Fix **not yet run or validated in CircleCI**. Do not automatically rerun; request operator approval for another credit-consuming run after official CLI config validation.
