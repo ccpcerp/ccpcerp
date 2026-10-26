@@ -10,6 +10,7 @@ import os
 from unittest.mock import MagicMock
 
 import frappe
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_intercompany_disposable_site
 from erpnext.tests.utils import ERPNextTestSuite
 from frappe.utils import flt, nowdate
 from erpnext.stock.doctype.item.test_item import make_item
@@ -23,13 +24,10 @@ BRANCH = "review/intercompany-invoice-transaction-2026-10-20"
 class TestIntercompanyRealDraftInvoicePair(ERPNextTestSuite):
     def setUp(self):
         if not (
-            os.getenv("GITHUB_ACTIONS") == "true"
-            and os.getenv("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
-            and os.getenv("GITHUB_HEAD_REF") == BRANCH
-            and os.getenv("CCPC_ALLOW_IC_REAL_INVOICES") == "isolated-only"
-            and getattr(frappe.local, "site", None) == "ci-intercompany.localhost"
+            is_reviewed_intercompany_disposable_site(getattr(frappe.local, "site", None))
+            and os.environ.get("CCPC_ALLOW_IC_REAL_INVOICES") == "isolated-only"
         ):
-            raise RuntimeError("Real invoice tests require isolated GitHub-hosted ERPNext site.")
+            raise RuntimeError("Intercompany SQL tests require approved disposable CI site")
         super().setUp()
         frappe.set_user("Administrator")
         self.load_test_records("Company")
