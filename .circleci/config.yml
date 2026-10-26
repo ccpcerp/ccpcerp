@@ -49,6 +49,7 @@ jobs:
       CCPC_ALLOW_ACCOUNTING_PROBE: isolated-only
       CCPC_ALLOW_IC_SQL_PROBE: isolated-only
       CCPC_ALLOW_IC_REAL_INVOICES: isolated-only
+      CCPC_ALLOW_BC_POSTING_PROBE: isolated-only
     steps:
       - checkout
       - run:
@@ -118,7 +119,7 @@ jobs:
             bench --site "$TEST_SITE" set-config allow_tests true
             echo "Verified isolated custom app HEAD: $(git -C apps/ccpcerp rev-parse HEAD)"
       - run:
-          name: Withdrawal Slip unit, safety and peer-issuance tests
+          name: Withdrawal Slip and genuine Finance mapping SQL/GL integration tests
           no_output_timeout: 20m
           command: |
             set -euo pipefail
@@ -127,6 +128,7 @@ jobs:
               ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_slip \
               ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_issue_safety \
               ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_peer_issuance \
+              ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_bc_original_issue_real_integration \
               ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration
             do
               bench --site "$TEST_SITE" run-tests --module "$module"
