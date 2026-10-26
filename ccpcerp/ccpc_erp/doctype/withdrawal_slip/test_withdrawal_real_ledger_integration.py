@@ -85,6 +85,14 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             ).insert(ignore_permissions=True).name
         self.assertEqual(frappe.db.get_value("Department", self.department, "company"), COMPANY)
         self.assertTrue(frappe.db.exists("Role", "Stockroom Personnel"))
+        # CircleCI-only synthetic signed fixtures. Finance approval is not active.
+        from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_circleci_disposable_site
+        if is_reviewed_circleci_disposable_site(getattr(frappe.local, "site", None)):
+            from ccpcerp.ccpc_erp.ci_synthetic_finance_fixture import seed_circleci_test_only_mapping
+            self.synthetic_finance = seed_circleci_test_only_mapping(
+                COMPANY, "_Test Item Group", self.department
+            )
+
 
         stock_hooks = frappe.get_hooks("doc_events").get("Stock Entry", {})
         for method in ("validate", "before_submit", "on_submit"):
