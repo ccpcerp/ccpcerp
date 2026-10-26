@@ -74,13 +74,23 @@ class TestIntercompanyRealDraftInvoicePair(ERPNextTestSuite):
             values.update(supplier_type="Company")
         return frappe.get_doc(values).insert(ignore_permissions=True).name
 
-    def _account(self, company, root_type, account_type=None):
+    def _account(self, company, root_type, account_type=None, currency=None):
         filters = {"company": company, "is_group": 0, "disabled": 0,
                    "root_type": root_type}
         if account_type:
             filters["account_type"] = account_type
+        if currency:
+            # ERPNext's test company has both INR and USD party accounts.
+            # Do not choose an arbitrary Receivable/Payable account that
+            # conflicts with the real invoice currency validator.
+            filters["account_currency"] = currency
         account = frappe.db.get_value("Account", filters, "name")
-        self.assertTrue(account, "Missing disposable account " + str(filters))
+        self.assertTrue(account, "Missing eligible disposable account " + str(filters))
+        if currency:
+            self.assertEqual(
+                frappe.db.get_value("Account", account, "account_currency"), currency,
+                "Test party account must use the synthetic invoice currency",
+            )
         return account
 
     def _defaults(self, company):
@@ -91,8 +101,8 @@ class TestIntercompanyRealDraftInvoicePair(ERPNextTestSuite):
         self.assertTrue(cost_center and currency)
         return frappe._dict(
             currency=currency, cost_center=cost_center,
-            receivable_account=self._account(company, "Asset", "Receivable"),
-            payable_account=self._account(company, "Liability", "Payable"),
+            receivable_account=self._account(company, "Asset", "Receivable", currency=currency),
+            payable_account=self._account(company, "Liability", "Payable", currency=currency),
             income_account=self._account(company, "Income"),
             expense_account=self._account(company, "Expense"),
         )
