@@ -55,15 +55,15 @@ jobs:
           name: Fail closed on unapproved CI source before installing Frappe
           command: |
             set -euo pipefail
-            test "${CIRCLECI:-}" = "true"
-            test "${CIRCLE_PROJECT_USERNAME:-}" = "ccpcerp"
-            test "${CIRCLE_PROJECT_REPONAME:-}" = "ccpcerp"
-            test "${CIRCLE_BRANCH:-}" = "review/circleci-isolated-erpnext-phase2-2026-10-26"
-            test "${CIRCLE_JOB:-}" = "isolated-erpnext-integration"
-            test -n "${CIRCLE_PIPELINE_ID:-}"
-            test -n "${CIRCLE_WORKFLOW_ID:-}"
-            test -n "${CIRCLE_BUILD_NUM:-}"
-            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:-}"
+            test "${CIRCLECI:-}" = "true" || { echo "CI identity check failed: CircleCI runner required"; exit 1; }
+            test "${CIRCLE_PROJECT_USERNAME:-}" = "CCPCerp_2026" || { echo "CI identity check failed: CircleCI organization mismatch"; exit 1; }
+            test "${CIRCLE_PROJECT_REPONAME:-}" = "ccpcerp" || { echo "CI identity check failed: CircleCI project mismatch"; exit 1; }
+            test "${CIRCLE_BRANCH:-}" = "review/circleci-isolated-erpnext-phase2-2026-10-26" || { echo "CI identity check failed: review branch mismatch"; exit 1; }
+            test "${CIRCLE_JOB:-}" = "isolated-erpnext-integration" || { echo "CI identity check failed: integration job mismatch"; exit 1; }
+            test -n "${CIRCLE_PIPELINE_ID:-}" || { echo "CI identity check failed: missing pipeline ID"; exit 1; }
+            test -n "${CIRCLE_WORKFLOW_ID:-}" || { echo "CI identity check failed: missing workflow ID"; exit 1; }
+            test -n "${CIRCLE_BUILD_NUM:-}" || { echo "CI identity check failed: missing job number"; exit 1; }
+            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:-}" || { echo "CI identity check failed: checkout SHA mismatch"; exit 1; }
             echo "Approved disposable CI identity and exact checked-out commit verified"
       - run:
           name: Verify tools and required services
