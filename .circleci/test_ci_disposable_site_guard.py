@@ -15,7 +15,7 @@ class TestDisposableCiBoundary(TestCase):
     def setUp(self):
         self.env = {
             "CIRCLECI": "true",
-            "CIRCLE_PROJECT_USERNAME": "ccpcerp",
+            "CIRCLE_PROJECT_USERNAME": "CCPCerp_2026",
             "CIRCLE_PROJECT_REPONAME": "ccpcerp",
             "CIRCLE_BRANCH": "review/circleci-isolated-erpnext-phase2-2026-10-26",
             "CIRCLE_JOB": "isolated-erpnext-integration",
@@ -45,7 +45,8 @@ class TestDisposableCiBoundary(TestCase):
         for field, value in (("CIRCLE_PROJECT_REPONAME", "another"),
                              ("CIRCLE_BRANCH", "version-16"),
                              ("CIRCLE_JOB", "python-syntax"),
-                             ("CIRCLE_PROJECT_USERNAME", "another")):
+                             ("CIRCLE_PROJECT_USERNAME", "another"),
+                             ("CIRCLE_PROJECT_USERNAME", "ccpcerp")):
             with self.subTest(field=field, value=value):
                 changed = dict(self.env, **{field: value})
                 with patch.dict(os.environ, changed, clear=True):
