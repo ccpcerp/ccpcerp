@@ -85,9 +85,13 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             ).insert(ignore_permissions=True).name
         self.assertEqual(frappe.db.get_value("Department", self.department, "company"), COMPANY)
         self.assertTrue(frappe.db.exists("Role", "Stockroom Personnel"))
-        # CircleCI-only synthetic signed fixtures. Finance approval is not active.
+        # The standalone Withdrawal real-ledger suite uses simulated approved
+        # mappings on the disposable CircleCI site. The separate genuine Finance
+        # workflow suite inherits this setup but must start WITHOUT synthetic
+        # approvals, so it can test authentic maker/checker decisions and denials.
         from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_circleci_disposable_site
-        if is_reviewed_circleci_disposable_site(getattr(frappe.local, "site", None)):
+        if (is_reviewed_circleci_disposable_site(getattr(frappe.local, "site", None))
+                and not getattr(self, "_verify_genuine_finance_workflow", False)):
             from ccpcerp.ccpc_erp.ci_synthetic_finance_fixture import seed_circleci_test_only_mapping
             self.synthetic_finance = seed_circleci_test_only_mapping(
                 COMPANY, "_Test Item Group", self.department
