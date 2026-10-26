@@ -297,6 +297,7 @@ class TestWithdrawalSlip(TestCase):
 			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.validate_department_company"),
 			# Server timestamp is tested separately; keep this unit test scoped to Department.
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.stamp_original_issue_posting"),
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.assign_original_issue_b_c"),
 		):
 			result = make_material_issue(slip.name)
 
