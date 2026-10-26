@@ -513,8 +513,14 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         )
 
     def test_x_forged_direct_voucher_department_rejected_before_ledger(self):
-        """Normal Stock Entry.submit also rejects a forged source Department."""
+        """Both beneficiary validation and saved-row immutability reject forged Department.
+
+        On a saved Stock Entry the immutable provenance guard runs first during
+        submit, so its error is expected instead of the later beneficiary error.
+        Assert beneficiary validation directly too: these are distinct defenses.
+        """
         from ccpcerp.ccpc_erp.withdrawal_slip_stock import _build_material_issue
+        from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import validate_issue_beneficiary
 
         frappe.set_user(ISSUER)
         slip = frappe.get_doc("Withdrawal Slip", self.slip_name)
@@ -524,7 +530,17 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         doc.insert(ignore_permissions=True)
         doc.items[0].department = None
         doc.flags.ignore_permissions = True
+
+        # Independent beneficiary attribution guard remains active for a
+        # forged detail Department, even before Stock Entry.submit is called.
         with self.assertRaisesRegex(frappe.ValidationError, "[Dd]epartment"):
+            validate_issue_beneficiary(doc, slip)
+
+        # Real submit rejects the saved-row tamper at an earlier guard.
+        # Do not bypass or disable provenance checks to reach later validation.
+        with self.assertRaisesRegex(
+            frappe.ValidationError, "original issue-time Equipment or financial mapping provenance cannot be modified"
+        ):
             doc.submit()
         self.assertEqual(
             frappe.db.count("Stock Ledger Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}), 0
