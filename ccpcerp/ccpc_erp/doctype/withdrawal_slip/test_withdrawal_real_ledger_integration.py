@@ -23,6 +23,7 @@ from ccpcerp.ccpc_erp.doctype.withdrawal_slip.ci_concurrent_issue_worker import 
     _ci_concurrent_issue_worker,
 )
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import issue_withdrawal_slip
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_withdrawal_disposable_site
 
 
 COMPANY = "_Test Company"
@@ -44,34 +45,18 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
         if self._testMethodName.startswith(("test_w_", "test_x_", "test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
+            site = getattr(frappe.local, "site", None)
             if not (
-                os.environ.get("GITHUB_ACTIONS") == "true"
-                and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
-                and os.environ.get("GITHUB_HEAD_REF")
-                in {
-                    "review/withdrawal-cancellation-ledger-ci-2026-10-16",
-                    "review/withdrawal-issue-accounting-ci-2026-10-17",
-                    "review/withdrawal-beneficiary-equipment-integration-2026-10-18",
-                }
+                is_reviewed_withdrawal_disposable_site(site)
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
-                and (
-                    not self._testMethodName.startswith(("test_w_", "test_x_"))
-                    or os.environ.get("CCPC_ALLOW_ACCOUNTING_PROBE") == "isolated-only"
-                )
-                and (
-                    not self._testMethodName.startswith("test_zzz_")
-                    or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only"
-                )
-                and (
-                    not self._testMethodName.startswith("test_zzzz_")
-                    or os.environ.get("CCPC_ALLOW_CANCELLATION_PROBE") == "isolated-only"
-                )
-                and getattr(frappe.local, "site", None) == "ci-withdrawal.localhost"
+                and (not self._testMethodName.startswith(("test_w_", "test_x_"))
+                     or os.environ.get("CCPC_ALLOW_ACCOUNTING_PROBE") == "isolated-only")
+                and (not self._testMethodName.startswith("test_zzz_")
+                     or os.environ.get("CCPC_ALLOW_HTTP_PROBE") == "isolated-only")
+                and (not self._testMethodName.startswith("test_zzzz_")
+                     or os.environ.get("CCPC_ALLOW_CANCELLATION_PROBE") == "isolated-only")
             ):
-                raise RuntimeError(
-                    "Transaction boundary probes require the explicitly approved "
-                    "GitHub-hosted disposable ci-withdrawal.localhost only"
-                )
+                raise RuntimeError("Transaction probes require an approved isolated CI runner and test site")
         # ERPNext's own test bootstrap records, not CCPC production business data.
         frappe.set_user("Administrator")
         self.load_test_records("Stock Entry")
