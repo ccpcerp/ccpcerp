@@ -857,10 +857,10 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
 
         site = frappe.local.site
         sites_path = os.path.abspath(frappe.local.sites_path)
-        self.assertEqual(site, "ci-withdrawal.localhost")
+        self.assertTrue(is_reviewed_withdrawal_disposable_site(site))
         self.assertFalse(frappe.conf.get("ignore_csrf"))
         path = "/api/method/ccpcerp.ccpc_erp.withdrawal_slip_stock.issue_withdrawal_slip"
-        base_url = "http://ci-withdrawal.localhost"
+        base_url = "http://" + site
         headers = {"X-Frappe-Site-Name": site}
         slip_name = self.slip_name
         item_name = self.item.name
