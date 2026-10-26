@@ -58,3 +58,16 @@ Corrected the **CircleCI organization name check only**, while preserving exact 
 **Verification boundary:** committed to the same GitHub review branch; CircleCI's actual runtime environment variables were **not recorded** in the uploaded log, so the diagnosis is highly plausible but **not empirically confirmed**. The fix has not been revalidated via CircleCI CLI or executed in a new pipeline. No paid/automatic testing, app release, DEVELOPMENT or PRODUCTION actions.
 
 Next: operator should re-download the latest review-branch config and run `circleci config validate` (no build credits). Check remaining Free credits and authorize at most one new manually triggered pipeline; if its early guard still fails, the new labelled error gives the precise failing variable to investigate without relaxing any guard.
+
+## CircleCI build #11: 72 mocked passes; 12/13 real-ledger passes; one assertion aligned (2026-10-26)
+
+Owner-uploaded `build_11_step_106_container_0.txt` documents:
+- `test_withdrawal_slip`: 37/37 passed.
+- `test_withdrawal_issue_safety`: 17/17 passed.
+- `test_withdrawal_peer_issuance`: 18/18 passed.
+- `test_withdrawal_real_ledger_integration`: 12/13 passed; one assertion failure, not an unexpected successful posting. The suite exercised real stock+GL, Department dimension, equipment beneficiary/conflict, prevention of duplicate issues, cross-session rollback/commit, actual two-issuer concurrency, WSGI HTTP/session/CSRF, and stock/GL cancellation.
+- The failed check `test_x_forged_direct_voucher_department_rejected_before_ledger` tampered with a saved Stock Entry detail Department, and actual `doc.submit()` correctly threw `ValidationError: Row 1: original issue-time Equipment or financial mapping provenance cannot be modified.` Existing test had expected a string matching `[Dd]epartment`. Source code confirms `_validate_provenance_immutable` precedes `validate_issue_beneficiary` in the submit hook.
+- Latest review-only test fix now checks the beneficiary helper separately raises a Department-specific validation error against the same forged detail, then checks the real `doc.submit()` raises the earlier immutable-provenance error, with no SLE or GL creation. **No runtime guard weakened or bypassed.** Fix commit `63fa1e52e74ed86c1144718dfd40060df25aed24`.
+- The integration job exited with status 1 before its intercompany billing modules, which remain **unexecuted in build #11**. This does not prove full ERPNext integration or genuine Finance mapping approval workflow (synthetic CircleCI approval fixture remains test-only).
+
+**Next:** After reviewing remaining Free-plan credits, owner can authorize one *new* pipeline using latest app review branch for config/checkout and `run_integration=true`. Prefer analyzing any fresh test errors, especially real intercompany draft invoice behavior. No automatic rerun, DEV or PROD changes.
