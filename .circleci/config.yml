@@ -82,6 +82,7 @@ jobs:
             set -euo pipefail
             export PATH="$HOME/.local/bin:$PATH"
             BENCH_DIR="$HOME/ccpc-circleci-bench"
+            APP_CHECKOUT="$PWD"
             MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
               -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
             bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
@@ -91,7 +92,7 @@ jobs:
             bench set-config -g redis_queue redis://127.0.0.1:11000
             bench set-config -g redis_socketio redis://127.0.0.1:11000
             bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
-            bench get-app ccpcerp "$CIRCLE_WORKING_DIRECTORY"
+            bench get-app ccpcerp "$APP_CHECKOUT"
             bench setup requirements --dev
             bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
               --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
