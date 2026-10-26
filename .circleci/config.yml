@@ -1,7 +1,13 @@
-# Starter verification only. Frappe/ERPNext/MariaDB integration tests are NOT run here.
-# Run through CircleCI's explicitly configured "run-ci" PR-label trigger only.
-# No deployment, secrets, self-hosted runners, or access to CCPC environments.
+# Phase 2 REVIEW ONLY: expensive isolated Frappe/ERPNext SQL tests are opt-in.
+# GitHub PR "run-ci" label triggers only starter-validation (parameter defaults false).
+# Run full tests only by a separately approved manual pipeline with run_integration=true.
+# Do not add CCPC DEV/PROD credentials, runners, deployment steps or schedules.
 version: 2.1
+
+parameters:
+  run_integration:
+    type: boolean
+    default: false
 
 jobs:
   python-syntax:
@@ -11,13 +17,124 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Verify Python runtime and compile custom application
+          name: Compile CCPC application Python
           command: |
             set -eu
             python --version
             python -m compileall -q ccpcerp
 
+  isolated-erpnext-integration:
+    # Disposable CircleCI-only MariaDB/Redis/Frappe site. NOT persistent DEVELOPMENT.
+    # Untested draft: first full run must be deliberately authorized and reviewed.
+    docker:
+      - image: cimg/python:3.14-node
+      - image: mariadb:11.8
+        environment:
+          MARIADB_ROOT_PASSWORD: ccpc-ci-only-ephemeral-db
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "13000"]
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "11000"]
+    resource_class: large
+    environment:
+      CI: "Yes"
+      TEST_SITE: ci-circleci.localhost
+      CI_DB_ROOT_PASSWORD: ccpc-ci-only-ephemeral-db
+      CI_ADMIN_PASSWORD: ccpc-ci-only-ephemeral-admin
+      CCPC_ALLOW_COMMIT_PROBE: isolated-only
+      CCPC_ALLOW_CONCURRENCY_PROBE: isolated-only
+      CCPC_ALLOW_HTTP_PROBE: isolated-only
+      CCPC_ALLOW_CANCELLATION_PROBE: isolated-only
+      CCPC_ALLOW_ACCOUNTING_PROBE: isolated-only
+      CCPC_ALLOW_IC_SQL_PROBE: isolated-only
+      CCPC_ALLOW_IC_REAL_INVOICES: isolated-only
+    steps:
+      - checkout
+      - run:
+          name: Verify tools and required services
+          command: |
+            set -euo pipefail
+            python --version
+            node --version
+            npm --version
+            for port in 3306 13000 11000; do
+              ready=0
+              for i in $(seq 1 60); do
+                if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then ready=1; break; fi
+                sleep 2
+              done
+              test "$ready" = 1 || { echo "CI service unavailable on port $port"; exit 1; }
+            done
+      - run:
+          name: Install disposable bench prerequisites
+          no_output_timeout: 15m
+          command: |
+            set -euo pipefail
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+            sudo npm install -g yarn
+            python -m pip install --user frappe-bench
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Create isolated Frappe v16 and ERPNext v16 bench
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            export PATH="$HOME/.local/bin:$PATH"
+            BENCH_DIR="$HOME/ccpc-circleci-bench"
+            MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
+              -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+            bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+              --python "$(command -v python)" "$BENCH_DIR"
+            cd "$BENCH_DIR"
+            bench set-config -g redis_cache redis://127.0.0.1:13000
+            bench set-config -g redis_queue redis://127.0.0.1:11000
+            bench set-config -g redis_socketio redis://127.0.0.1:11000
+            bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+            bench get-app ccpcerp "$CIRCLE_WORKING_DIRECTORY"
+            bench setup requirements --dev
+            bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
+              --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+              --admin-password "$CI_ADMIN_PASSWORD"
+            bench --site "$TEST_SITE" install-app erpnext
+            bench --site "$TEST_SITE" install-app ccpcerp
+            bench --site "$TEST_SITE" migrate
+            bench --site "$TEST_SITE" set-config allow_tests true
+            echo "Verified isolated custom app HEAD: $(git -C apps/ccpcerp rev-parse HEAD)"
+      - run:
+          name: Withdrawal Slip unit, safety and peer-issuance tests
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            cd "$HOME/ccpc-circleci-bench"
+            for module in \
+              ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_slip \
+              ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_issue_safety \
+              ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_peer_issuance \
+              ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration
+            do
+              bench --site "$TEST_SITE" run-tests --module "$module"
+            done
+      - run:
+          name: Intercompany billing draft-invoice and rollback tests
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            cd "$HOME/ccpc-circleci-bench"
+            for module in \
+              ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_material_billing_batch \
+              ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_billing_approval_failures \
+              ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_atomic_pair_database \
+              ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.test_intercompany_real_draft_invoice_database
+            do
+              bench --site "$TEST_SITE" run-tests --module "$module"
+            done
+
 workflows:
   starter-validation:
     jobs:
       - python-syntax
+  opt-in-isolated-erpnext:
+    when: << pipeline.parameters.run_integration >>
+    jobs:
+      - isolated-erpnext-integration
