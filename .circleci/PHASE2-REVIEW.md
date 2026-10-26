@@ -1,5 +1,18 @@
 # CircleCI Phase 2 — review checkpoint (2026-10-26)
 
+## 2026-10-26 — Pipeline #10: newly added genuine Finance suite passes in isolated CircleCI
+
+**Owner-provided CircleCI screenshot:** pipeline **#10** green for **review-branch code source `c32f3f20bc3f0b5fa88f651d6dddee774b6cb2cb`**, titled `docs: track exact genuine Finance workflow CI coverage and DEV preflight gates`. Workflow `opt-in-isolated-erpnext` showed green in **5m 6s**; `starter-validation` showed green in **6s**. This source SHA matches independently verified branch HEAD *before this documentation-only update*.
+
+The verified checked-in `.circleci/config.yml` at the tested source SHA runs **five Withdrawal modules**, including `test_bc_original_issue_real_integration` before `test_withdrawal_real_ledger_integration`, followed by **four intercompany modules**. Every module is invoked via `bench --site "$TEST_SITE" run-tests --module "$module"` in `set -euo pipefail` script steps. Thus the green job supports successful completion of the configured disposable Frappe v16/MariaDB integration suite, including genuine synthetic Finance maker/checker approval, mapping lifecycle, real Stock Entry/GL and draft invoice/rollback modules. The screenshot does **not** provide per-test counts, test output, mapping values or detailed SQL evidence. Preserve historic GitHub Actions Finance 6/6 evidence separately; do not claim live CCPC Finance approvals.
+
+**Release distinction:** CircleCI synthetic Companies, Accounts, users and mapping revisions are *not* real approved CCPC master-data mappings. This pipeline does NOT establish persisted `development.localhost` acceptance, true material-to-billing source lifecycle/returns, four owner-approved day-one reports, a successful restore drill, or any PRODUCTION deployment. Keep posting/release NO-GO until gates are addressed.
+
+**No repeat run needed for unchanged source.** Next engineer on GitHub: review/report and true end-to-end source-to-invoice/return gaps, then safely synchronize tested code to persistent DEVELOPMENT only after preserving `AGENTS.md`, verifying branch/status/site, and checking migration/rollback boundaries. Parallel dedicated PRODUCTION infrastructure review continues on its own approved branch; no host/NAS changes from this CI result.
+
+---
+
+
 ## Source and scope
 
 - Source: `ccpcerp/ccpcerp`, review branch `review/circleci-isolated-erpnext-phase2-2026-10-26`.
