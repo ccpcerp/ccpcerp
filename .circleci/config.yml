@@ -51,6 +51,20 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Fail closed on unapproved CI source before installing Frappe
+          command: |
+            set -euo pipefail
+            test "${CIRCLECI:-}" = "true"
+            test "${CIRCLE_PROJECT_USERNAME:-}" = "ccpcerp"
+            test "${CIRCLE_PROJECT_REPONAME:-}" = "ccpcerp"
+            test "${CIRCLE_BRANCH:-}" = "review/circleci-isolated-erpnext-phase2-2026-10-26"
+            test "${CIRCLE_JOB:-}" = "isolated-erpnext-integration"
+            test -n "${CIRCLE_PIPELINE_ID:-}"
+            test -n "${CIRCLE_WORKFLOW_ID:-}"
+            test -n "${CIRCLE_BUILD_NUM:-}"
+            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:-}"
+            echo "Approved disposable CI identity and exact checked-out commit verified"
+      - run:
           name: Verify tools and required services
           command: |
             set -euo pipefail
