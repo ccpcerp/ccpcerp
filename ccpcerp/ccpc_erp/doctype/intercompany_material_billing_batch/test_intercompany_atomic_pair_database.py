@@ -13,6 +13,7 @@ import os
 from unittest.mock import MagicMock
 
 import frappe
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_intercompany_disposable_site
 from erpnext.tests.utils import ERPNextTestSuite
 
 from ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.intercompany_material_billing_batch import (
@@ -26,13 +27,10 @@ BRANCH = "review/intercompany-invoice-transaction-2026-10-20"
 class TestIntercompanyAtomicPairDatabase(ERPNextTestSuite):
     def setUp(self):
         if not (
-            os.environ.get("GITHUB_ACTIONS") == "true"
-            and os.environ.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
-            and os.environ.get("GITHUB_HEAD_REF") == BRANCH
+            is_reviewed_intercompany_disposable_site(getattr(frappe.local, "site", None))
             and os.environ.get("CCPC_ALLOW_IC_SQL_PROBE") == "isolated-only"
-            and getattr(frappe.local, "site", None) == "ci-intercompany.localhost"
         ):
-            raise RuntimeError("Paired invoice SQL probe restricted to disposable hosted ERPNext site.")
+            raise RuntimeError("Intercompany SQL tests require approved disposable CI site")
         super().setUp()
         frappe.set_user("Administrator")
         self.marker_names = []
