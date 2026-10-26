@@ -38,3 +38,13 @@
 - Cause: disposable CircleCI Python image lacked the `crontab` executable. This occurred **before** ERPNext and app installation and before any application test modules ran. It is not evidence of a failing business test.
 - Fixed in review config by adding Ubuntu `cron` package to the existing ephemeral job prerequisites. This supplies `/usr/bin/crontab`; it does not modify any shared CCPC server.
 - Fix **not yet run or validated in CircleCI**. Do not automatically rerun; request operator approval for another credit-consuming run after official CLI config validation.
+
+## CircleCI build #7 engineering continuation (2026-10-26)
+
+Reported results: 72/72 mocked Withdrawal Slip tests passed; real-ledger module had one success and 12 errors. Eleven errors were due to the original GitHub Actions-only isolation guard. The remaining error was missing synthetic approved B/C accounting mapping in the disposable test site. No intercompany modules ran in that build.
+
+On this review branch, the CircleCI runner must now satisfy exact repository, review branch, job, commit, site and probe authorization checks before the costly Frappe installation. The existing GitHub Actions isolation restrictions are preserved. The spawned concurrency worker, WSGI probe, and intercompany SQL tests use the same site identity rules. Negative guard tests run without MariaDB in the inexpensive syntax job.
+
+The new synthetic Finance fixture is **CircleCI disposable-site only**: two different test users, explicit Company scopes, valid leaf Account and Cost Center, and test-only approval evidence. Important: **the real Finance mapping approval controllers remain disabled.** The fixture uses a controlled test database update to simulate already approved revision rows for downstream ledger validation. It must not be treated as proof that genuine Accounting approval has been implemented or passed, and must never be used on DEVELOPMENT or PRODUCTION.
+
+All changes remain unexecuted after build #7. Revalidate the latest config with CircleCI CLI. A new full pipeline requires explicit manual authorization and free-credit review; no automatic rerun or deployment.
