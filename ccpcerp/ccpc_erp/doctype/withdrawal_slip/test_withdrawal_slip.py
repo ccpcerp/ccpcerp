@@ -295,6 +295,8 @@ class TestWithdrawalSlip(TestCase):
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_existing_draft_names", return_value=[]),
 			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.require_department_gl_dimension"),
 			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.validate_department_company"),
+			# Server timestamp is tested separately; keep this unit test scoped to Department.
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.stamp_original_issue_posting"),
 		):
 			result = make_material_issue(slip.name)
 
@@ -757,6 +759,8 @@ class TestWithdrawalSlip(TestCase):
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
 			# Dedicated beneficiary GL tests cover this separate assertion.
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_issue_beneficiary"),
+			# B/C accounting mapping is covered by dedicated real-ledger tests.
+			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.validate_original_issue_b_c"),
 		):
 			validate_withdrawal_slip_stock_entry(doc, method="before_submit")
 		self.assertEqual(doc.withdrawal_slip_issued_by, "stockroom@personnel1.com")
