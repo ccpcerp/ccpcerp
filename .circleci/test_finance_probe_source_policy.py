@@ -10,12 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 HTTP = ROOT / ".circleci" / "finance_http_session_probe.py"
 LOCK = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_company_lock_probe.py"
 RACE = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_business_race_probe.py"
+FIXTURE = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_race_fixture.py"
 CI = ROOT / ".circleci" / "config.yml"
 
 
 class FinanceBoundaryProbeSourceTests(unittest.TestCase):
     def test_both_probes_parse_without_importing_frappe(self):
-        for source in (HTTP, LOCK, RACE):
+        for source in (HTTP, LOCK, RACE, FIXTURE):
             with self.subTest(source=str(source.name)):
                 tree = ast.parse(source.read_text(encoding="utf-8"))
                 self.assertIsInstance(tree, ast.Module)
@@ -37,6 +38,9 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
             "status != 403",
             "status != 400",
             'call(opener, "/app")',
+            'error_type != "PermissionError"',
+            'error_type != "CSRFTokenError"',
+            'failure.get("exc_type")',
         ):
             with self.subTest(value=value):
                 self.assertIn(value, text)
@@ -93,11 +97,42 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
         self.assertNotIn("GL Entry", text)
         self.assertNotIn('frappe.set_user("Administrator")', text)
 
+    def test_real_fixture_builder_requires_independent_signed_and_committed_inputs(self):
+        text = FIXTURE.read_text(encoding="utf-8")
+        for value in (
+            "assert_finance_disposable_site(",
+            "CCPC_ALLOW_FINANCE_FIXTURE_PREP",
+            "CCPC_ALLOW_FINANCE_FIXTURE_COMMIT",
+            "CCPC_FINANCE_APPROVED_SHA",
+            "frappe.conf.db_type",
+            'COMPANY = "_Test Company"',
+            'MAKER = "ccpc-finance-ci-maker@invalid.test"',
+            'CHECKER = "ccpc-finance-ci-checker@invalid.test"',
+            "frappe.db.exists(\"Item Group\", GROUPS[action])",
+            "propose_mapping(",
+            "get_mapping_review(",
+            "sign_mapping_decision(",
+            "approve_mapping(",
+            "request_mapping_retirement(",
+            "get_retirement_request_review(",
+            "frappe.db.commit()",
+            "frappe.db.rollback()",
+            'if action == "Approve":',
+            'if action == "Retire"',
+        ):
+            with self.subTest(value=value):
+                self.assertIn(value, text)
+        self.assertNotIn("frappe.db.set_value(REV", text)
+        self.assertNotIn("approval_state\": \"Approved\"", text)
+        self.assertNotIn("set-password", text)
+        self.assertNotIn("stock_entry", text.lower())
+
     def test_neither_probe_is_wired_to_active_circleci_jobs(self):
         config = CI.read_text(encoding="utf-8")
         self.assertNotIn("finance_http_session_probe.py", config)
         self.assertNotIn("ci_finance_company_lock_probe", config)
         self.assertNotIn("ci_finance_business_race_probe", config)
+        self.assertNotIn("ci_finance_race_fixture", config)
         self.assertIn("run_finance_lifecycle:\n    type: boolean\n    default: false", config)
 
 
