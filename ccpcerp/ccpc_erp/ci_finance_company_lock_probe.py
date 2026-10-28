@@ -29,6 +29,7 @@ def verify_finance_company_lock_contention():
         ["git", "rev-parse", "HEAD"],
         cwd=Path(__file__).resolve().parents[2],
         text=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
     ).strip()
     if sha != os.environ.get("CCPC_FINANCE_APPROVED_SHA"):
         raise RuntimeError("Finance lock probe checkout SHA is not approved.")
