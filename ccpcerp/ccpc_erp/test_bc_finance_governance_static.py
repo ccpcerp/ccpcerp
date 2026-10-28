@@ -78,6 +78,8 @@ class FinanceLifecycleStaticTests(unittest.TestCase):
         self.assertIn("def get_retirement_request_review(", events)
         self.assertIn("Retirement request does not match its original Approved mapping.", events)
         self.assertIn('"modified": str(req.modified)', events)
+        self.assertIn("rejection_event=%s,modified=%s,modified_by=%s", events)
+        self.assertIn("modified=%s,modified_by=%s WHERE name=%s", events)
         self.assertIn("_effective_mapping_end(", runtime)
         self.assertIn("computed_end", runtime)
         self.assertIn("cutoff >= _utc(e.approved_at)", runtime)
