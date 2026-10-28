@@ -60,6 +60,11 @@ class FinanceLifecycleStaticTests(unittest.TestCase):
         ).read_text())
         field = {x["fieldname"]: x for x in use_schema["fields"]}
         self.assertEqual(field["decision"]["unique"], 1)
+        decision_schema = json.loads((
+            HERE / "doctype/ccpc_accounting_mapping_decision/ccpc_accounting_mapping_decision.json"
+        ).read_text())
+        self.assertIn("status", decision_schema["field_order"])
+        self.assertIn('doc.status == "Signed"', evidence)
 
     def test_terminal_rejection_and_event_cutoff(self):
         events = (HERE / "bc_finance_lifecycle_events.py").read_text()

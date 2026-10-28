@@ -61,7 +61,7 @@ def decision_row(name):
     rows = frappe.db.sql(
         "SELECT name,kind,action,revision,company,mapping_scope,source_value,"
         "financial_value,maker,reviewed_modified,snapshot_hash,signed_by,"
-        "signed_at,request_name FROM " + table + " WHERE name=%s FOR UPDATE",
+        "signed_at,request_name,status,decision_key FROM " + table + " WHERE name=%s FOR UPDATE",
         (name,), as_dict=True,
     )
     _require(len(rows) == 1, "Unknown internal signed Accounting decision.")
@@ -72,7 +72,9 @@ def verify_decision(name, kind, action, company, scope, row, checker,
                     field, request_name=""):
     doc = decision_row(name)
     data = facts_for(kind, company, scope, row, field)
-    _require(doc.kind == kind and doc.action == action
+    _require(doc.status == "Signed"
+             and doc.decision_key == digest(kind, action, row.name, checker, doc.snapshot_hash)
+             and doc.kind == kind and doc.action == action
              and doc.revision == row.name and doc.company == company
              and doc.mapping_scope == scope.name and doc.source_value == data[3]
              and doc.financial_value == row[field] and doc.maker == row.owner
@@ -151,7 +153,7 @@ def sign_mapping_decision(kind, revision, expected_modified, action, request_nam
         "source_value": data[3], "financial_value": row[field],
         "maker": row.owner, "reviewed_modified": str(row.modified),
         "snapshot_hash": snap, "signed_by": checker, "signed_at": now_datetime(),
-        "request_name": request_name or None, "decision_key": key,
+        "request_name": request_name or None, "decision_key": key, "status": "Signed",
     })
     audit(DECISION, saved.name, "signed_internal_accounting_decision",
           {"kind": kind, "action": action, "revision": row.name,

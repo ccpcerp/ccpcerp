@@ -117,7 +117,7 @@ def _assert_approval_provenance(revision, company):
         return
     rows = frappe.db.sql(
         "SELECT d.name, d.kind, d.action, d.revision, d.company, d.mapping_scope, "
-        "d.financial_value, d.maker, d.signed_by, d.signed_at, "
+        "d.financial_value, d.maker, d.signed_by, d.signed_at, d.status, "
         "u.revision AS used_revision, u.action AS used_action "
         "FROM " + chr(96) + "tabCCPC Accounting Mapping Decision" + chr(96) + " d "
         "INNER JOIN " + chr(96) + "tabCCPC Mapping Decision Use" + chr(96) + " u "
@@ -127,7 +127,7 @@ def _assert_approval_provenance(revision, company):
     _require(len(rows) == 1, "Missing or duplicate signed Accounting decision evidence.")
     d = rows[0]
     value_field = "expense_account" if kind == "Expense" else "cost_center"
-    _require(d.kind == kind and d.action == "Approve"
+    _require(d.status == "Signed" and d.kind == kind and d.action == "Approve"
              and d.revision == revision.name and d.used_revision == revision.name
              and d.used_action == "Approve"
              and d.company == company and d.mapping_scope == revision.mapping_scope

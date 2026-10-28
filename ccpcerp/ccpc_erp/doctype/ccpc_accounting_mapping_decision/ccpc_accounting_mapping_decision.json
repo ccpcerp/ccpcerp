@@ -18,7 +18,8 @@
     "signed_at",
     "request_name",
     "reason",
-    "decision_key"
+    "decision_key",
+    "status"
   ],
   "fields": [
     {
@@ -115,6 +116,14 @@
       "label": "Decision Key",
       "reqd": 1,
       "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "status",
+      "fieldtype": "Select",
+      "label": "Decision Status",
+      "options": "Signed",
+      "reqd": 1,
       "read_only": 1
     }
   ],
