@@ -20,6 +20,8 @@ from ccpcerp.ccpc_erp.bc_mapping_workflow import (
     approve_mapping, get_mapping_review, propose_mapping,
 )
 from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import assert_finance_disposable_site
+from ccpcerp.ccpc_erp.ci_finance_setup_connection import isolated_finance_setup_connection
+from ccpcerp.ccpc_erp.ci_finance_master_bootstrap import verify_finance_master_records
 
 COMPANY = "_Test Company"
 ACCOUNT = "Stock Adjustment - _TC"
@@ -52,8 +54,9 @@ def _preflight(action):
         raise RuntimeError("Fixture builder checkout differs from approved Finance SHA.")
     if frappe.conf.db_type != "mariadb":
         raise RuntimeError("Synthetic Finance fixtures require disposable MariaDB.")
-    if not frappe.db.exists("Company", COMPANY):
-        raise RuntimeError("Missing canonical disposable ERPNext Company.")
+    if not frappe.conf.get("allow_tests"):
+        raise RuntimeError("Fixture builder requires test-only site configuration.")
+    verify_finance_master_records()
     account = frappe.db.get_value(
         "Account", ACCOUNT, ["company", "root_type", "is_group", "disabled"],
         as_dict=True,
@@ -108,86 +111,90 @@ def prepare_finance_race_fixture(action):
     with verify_finance_business_race() after a second authorization gate.
     No passwords or real-user credentials are provisioned by this helper.
     """
-    _preflight(action)
-    original_actor = frappe.session.user
-    committed = False
-    try:
-        # The fixture builder owns a fresh disposable transaction. Never call
-        # it with existing uncommitted business operations.
-        if original_actor != "Administrator":
-            raise RuntimeError("Fixture setup requires the isolated bench Administrator.")
-        group = frappe.get_doc({
-            "doctype": "Item Group", "item_group_name": GROUPS[action],
-            "parent_item_group": "All Item Groups", "is_group": 0,
-        }).insert(ignore_permissions=True)
-        _actor(MAKER, "CCPC Mapping Preparer")
-        _actor(CHECKER, "CCPC Accounting Mapping Approver")
+    # Establish a private DB session before any fixture reads or writes.
+    # A caller with a pending transaction cannot have those rows committed.
+    assert_finance_disposable_site(getattr(frappe.local, "site", None))
+    with isolated_finance_setup_connection():
+        _preflight(action)
+        original_actor = frappe.session.user
+        committed = False
+        try:
+            # The fixture builder owns a fresh disposable transaction. Never call
+            # it with existing uncommitted business operations.
+            if original_actor != "Administrator":
+                raise RuntimeError("Fixture setup requires the isolated bench Administrator.")
+            group = frappe.get_doc({
+                "doctype": "Item Group", "item_group_name": GROUPS[action],
+                "parent_item_group": "All Item Groups", "is_group": 0,
+            }).insert(ignore_permissions=True)
+            _actor(MAKER, "CCPC Mapping Preparer")
+            _actor(CHECKER, "CCPC Accounting Mapping Approver")
 
-        frappe.set_user(MAKER)
-        draft = propose_mapping("Expense", COMPANY, group.name, ACCOUNT)
-        if draft["state"] != "Draft":
-            raise RuntimeError("Real Finance proposal did not produce Draft.")
-        revision = draft["name"]
-        frappe.set_user(CHECKER)
-        reviewed = get_mapping_review("Expense", revision)
-        if reviewed["owner"] != MAKER or reviewed["state"] != "Draft":
-            raise RuntimeError("Independent synthetic review was not validated.")
-
-        if action == "Approve":
-            signed = sign_mapping_decision(
-                "Expense", revision, reviewed["modified"], "Approve",
-            )
-            target = revision
-            expected_modified = reviewed["modified"]
-        else:
-            approval = sign_mapping_decision(
-                "Expense", revision, reviewed["modified"], "Approve",
-            )
-            approved = approve_mapping(
-                "Expense", revision, reviewed["modified"], approval["name"],
-            )
-            if approved["state"] != "Approved":
-                raise RuntimeError("Real Finance approval did not succeed.")
             frappe.set_user(MAKER)
-            request = request_mapping_retirement(
-                "Expense", revision, "Synthetic Finance CI retirement race",
-            )
-            if request["state"] != "Pending":
-                raise RuntimeError("Synthetic retirement was not Pending.")
-            target = request["name"]
+            draft = propose_mapping("Expense", COMPANY, group.name, ACCOUNT)
+            if draft["state"] != "Draft":
+                raise RuntimeError("Real Finance proposal did not produce Draft.")
+            revision = draft["name"]
             frappe.set_user(CHECKER)
-            review = get_retirement_request_review("Expense", target)
-            if review["state"] != "Pending" or review["prepared_by"] != MAKER:
-                raise RuntimeError("Retirement review is not independently authorized.")
-            signed = sign_mapping_decision(
-                "Expense", revision,
-                str(frappe.db.get_value(REV, revision, "modified")),
-                "Retire", request_name=target,
-            )
-            expected_modified = review["modified"]
+            reviewed = get_mapping_review("Expense", revision)
+            if reviewed["owner"] != MAKER or reviewed["state"] != "Draft":
+                raise RuntimeError("Independent synthetic review was not validated.")
 
-        if signed["state"] != "Signed":
-            raise RuntimeError("Synthetic Accounting decision was not Signed.")
-        decision_id = signed["name"]
-        if frappe.db.exists(DECISION_USE, {"decision": decision_id}):
-            raise RuntimeError("Race decision was consumed before competitor start.")
-        if action == "Approve" and frappe.db.get_value(
-            REV, revision, "approval_state"
-        ) != "Draft":
-            raise RuntimeError("Approval race fixture changed out of Draft.")
-        if action == "Retire" and frappe.db.get_value(
-            REV, revision, "approval_state"
-        ) != "Approved":
-            raise RuntimeError("Retirement race lost its Approved history.")
-        frappe.db.commit()
-        committed = True
-        return {
-            "action": action, "target": target,
-            "expected_modified": expected_modified, "decision_id": decision_id,
-        }
-    except Exception:
-        if not committed:
-            frappe.db.rollback()
-        raise
-    finally:
-        frappe.set_user(original_actor)
+            if action == "Approve":
+                signed = sign_mapping_decision(
+                    "Expense", revision, reviewed["modified"], "Approve",
+                )
+                target = revision
+                expected_modified = reviewed["modified"]
+            else:
+                approval = sign_mapping_decision(
+                    "Expense", revision, reviewed["modified"], "Approve",
+                )
+                approved = approve_mapping(
+                    "Expense", revision, reviewed["modified"], approval["name"],
+                )
+                if approved["state"] != "Approved":
+                    raise RuntimeError("Real Finance approval did not succeed.")
+                frappe.set_user(MAKER)
+                request = request_mapping_retirement(
+                    "Expense", revision, "Synthetic Finance CI retirement race",
+                )
+                if request["state"] != "Pending":
+                    raise RuntimeError("Synthetic retirement was not Pending.")
+                target = request["name"]
+                frappe.set_user(CHECKER)
+                review = get_retirement_request_review("Expense", target)
+                if review["state"] != "Pending" or review["prepared_by"] != MAKER:
+                    raise RuntimeError("Retirement review is not independently authorized.")
+                signed = sign_mapping_decision(
+                    "Expense", revision,
+                    str(frappe.db.get_value(REV, revision, "modified")),
+                    "Retire", request_name=target,
+                )
+                expected_modified = review["modified"]
+
+            if signed["state"] != "Signed":
+                raise RuntimeError("Synthetic Accounting decision was not Signed.")
+            decision_id = signed["name"]
+            if frappe.db.exists(DECISION_USE, {"decision": decision_id}):
+                raise RuntimeError("Race decision was consumed before competitor start.")
+            if action == "Approve" and frappe.db.get_value(
+                REV, revision, "approval_state"
+            ) != "Draft":
+                raise RuntimeError("Approval race fixture changed out of Draft.")
+            if action == "Retire" and frappe.db.get_value(
+                REV, revision, "approval_state"
+            ) != "Approved":
+                raise RuntimeError("Retirement race lost its Approved history.")
+            frappe.db.commit()
+            committed = True
+            return {
+                "action": action, "target": target,
+                "expected_modified": expected_modified, "decision_id": decision_id,
+            }
+        except Exception:
+            if not committed:
+                frappe.db.rollback()
+            raise
+        finally:
+            frappe.set_user(original_actor)
