@@ -22,6 +22,8 @@ def isolated_finance_setup_connection():
     original_site = frappe.local.site
     original_user = frappe.session.user
     original_flags = frappe.local.flags
+    if original_flags.get("read_only"):
+        raise RuntimeError("Finance fixture setup refuses a read-only caller.")
     isolated_db = None
     try:
         # A DB connection alone does not isolate Frappe's thread-local flags.
