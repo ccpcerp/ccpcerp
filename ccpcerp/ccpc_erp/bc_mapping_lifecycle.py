@@ -166,18 +166,21 @@ def _propose_change(kind, old_revision, proposed_value, cutoff, reason):
 
 @frappe.whitelist(methods=["POST"])
 def propose_mapping_replacement(kind, current_revision, new_value, effective_from):
+    _require(False, "Legacy replacement endpoint disabled pending signed event-based replacement.")
     """Finance preparer creates an immutable future-effective replacement Draft."""
     return _propose_change(kind, current_revision, new_value, effective_from, None)
 
 
 @frappe.whitelist(methods=["POST"])
 def propose_mapping_retirement(kind, current_revision, reason, effective_from=None):
+    _require(False, "Legacy retirement endpoint disabled; use controlled retirement requests.")
     """Finance preparer proposes retirement; empty cutoff means approval-time."""
     return _propose_change(kind, current_revision, None, effective_from, reason)
 
 
 @frappe.whitelist(methods=["POST"])
 def approve_mapping_change(kind, revision, expected_modified, approval_reference):
+    _require(False, "Legacy mutable cutoff approval disabled; signed append-only governance required.")
     """Independent checker atomically closes predecessor and signs its successor.
 
     No implicit commit. Any exception after the first write rolls back this

@@ -1,0 +1,72 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "decision",
+    "kind",
+    "action",
+    "revision",
+    "event_ref",
+    "used_by",
+    "used_at"
+  ],
+  "fields": [
+    {
+      "fieldname": "decision",
+      "fieldtype": "Link",
+      "label": "Decision",
+      "options": "CCPC Accounting Mapping Decision",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "kind",
+      "fieldtype": "Select",
+      "label": "Kind",
+      "options": "Expense\nCenter",
+      "reqd": 1
+    },
+    {
+      "fieldname": "action",
+      "fieldtype": "Select",
+      "label": "Action",
+      "options": "Approve\nRetire",
+      "reqd": 1
+    },
+    {
+      "fieldname": "revision",
+      "fieldtype": "Data",
+      "label": "Revision",
+      "reqd": 1
+    },
+    {
+      "fieldname": "event_ref",
+      "fieldtype": "Data",
+      "label": "Event Ref",
+      "reqd": 1
+    },
+    {
+      "fieldname": "used_by",
+      "fieldtype": "Link",
+      "label": "Used By",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "used_at",
+      "fieldtype": "Datetime",
+      "label": "Used At",
+      "reqd": 1
+    }
+  ],
+  "istable": 0,
+  "module": "CCPC ERP",
+  "name": "CCPC Mapping Decision Use",
+  "permissions": [],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}

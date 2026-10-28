@@ -1,0 +1,119 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "kind",
+    "revision",
+    "mapping_scope",
+    "company",
+    "financial_value",
+    "maker",
+    "reason",
+    "requested_at",
+    "target_hash",
+    "request_state",
+    "decided_by",
+    "decided_at",
+    "decision_reason",
+    "request_key"
+  ],
+  "fields": [
+    {
+      "fieldname": "kind",
+      "fieldtype": "Select",
+      "label": "Kind",
+      "options": "Expense\nCenter",
+      "reqd": 1
+    },
+    {
+      "fieldname": "revision",
+      "fieldtype": "Data",
+      "label": "Revision",
+      "reqd": 1
+    },
+    {
+      "fieldname": "mapping_scope",
+      "fieldtype": "Data",
+      "label": "Mapping Scope",
+      "reqd": 1
+    },
+    {
+      "fieldname": "company",
+      "fieldtype": "Link",
+      "label": "Company",
+      "options": "Company",
+      "reqd": 1
+    },
+    {
+      "fieldname": "financial_value",
+      "fieldtype": "Data",
+      "label": "Financial Value",
+      "reqd": 1
+    },
+    {
+      "fieldname": "maker",
+      "fieldtype": "Link",
+      "label": "Maker",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reason",
+      "fieldtype": "Small Text",
+      "label": "Reason",
+      "reqd": 1
+    },
+    {
+      "fieldname": "requested_at",
+      "fieldtype": "Datetime",
+      "label": "Requested At",
+      "reqd": 1
+    },
+    {
+      "fieldname": "target_hash",
+      "fieldtype": "Data",
+      "label": "Target Hash",
+      "reqd": 1
+    },
+    {
+      "fieldname": "request_state",
+      "fieldtype": "Select",
+      "label": "Request State",
+      "options": "Pending\nAccepted\nDeclined",
+      "reqd": 1
+    },
+    {
+      "fieldname": "decided_by",
+      "fieldtype": "Link",
+      "label": "Decided By",
+      "options": "User"
+    },
+    {
+      "fieldname": "decided_at",
+      "fieldtype": "Datetime",
+      "label": "Decided At"
+    },
+    {
+      "fieldname": "decision_reason",
+      "fieldtype": "Small Text",
+      "label": "Decision Reason"
+    },
+    {
+      "fieldname": "request_key",
+      "fieldtype": "Data",
+      "label": "Request Key",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1
+    }
+  ],
+  "istable": 0,
+  "module": "CCPC ERP",
+  "name": "CCPC Mapping Retirement Request",
+  "permissions": [],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}
