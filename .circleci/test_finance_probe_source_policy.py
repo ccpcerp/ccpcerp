@@ -36,6 +36,7 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
             "not any(cookie.name == \"sid\"",
             "status != 403",
             "status != 400",
+            'call(opener, "/app")',
         ):
             with self.subTest(value=value):
                 self.assertIn(value, text)
