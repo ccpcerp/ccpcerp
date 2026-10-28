@@ -137,6 +137,7 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
             "assert_finance_disposable_site(",
             "original_db = frappe.db",
             "original_flags = frappe.local.flags",
+            'original_flags.get("read_only")',
             "frappe.local.flags = frappe._dict({",
             '"currently_saving": []',
             '"in_test": frappe.in_test',
