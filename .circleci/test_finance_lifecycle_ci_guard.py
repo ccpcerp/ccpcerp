@@ -17,6 +17,9 @@ old_guard = importlib.util.module_from_spec(old_spec)
 old_spec.loader.exec_module(old_guard)
 
 
+_UNSET = object()
+
+
 class TestFinanceCiIsolation(TestCase):
     def setUp(self):
         self.sha = "9" * 40
@@ -34,11 +37,11 @@ class TestFinanceCiIsolation(TestCase):
             "CCPC_ALLOW_FINANCE_LIFECYCLE_TESTS": "isolated-only",
         }
 
-    def allowed(self, site=None, changed=None):
+    def allowed(self, site=_UNSET, changed=None):
         env = dict(self.env, **(changed or {}))
         with patch.dict(os.environ, env, clear=True):
             return guard.is_reviewed_finance_lifecycle_disposable_site(
-                guard.FINANCE_SITE if site is None else site
+                guard.FINANCE_SITE if site is _UNSET else site
             )
 
     def test_requires_exact_disposable_identity_and_authorized_sha(self):
@@ -82,7 +85,7 @@ class TestFinanceCiIsolation(TestCase):
             "ccpc-integration2.localhost", "ccpcerp.local",
             "production.localhost", "ci-withdrawal.localhost",
             "ci-intercompany.localhost", "CI-FINANCE-LIFECYCLE.LOCALHOST",
-            "", False, 42,
+            "", None, False, 42,
         ):
             with self.subTest(site=site):
                 self.assertFalse(self.allowed(site=site))
