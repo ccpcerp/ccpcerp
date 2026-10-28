@@ -136,6 +136,10 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
         for required in (
             "assert_finance_disposable_site(",
             "original_db = frappe.db",
+            "original_flags = frappe.local.flags",
+            "frappe.local.flags = frappe._dict({",
+            '"currently_saving": []',
+            '"in_test": frappe.in_test',
             "frappe.connect(set_admin_as_user=False)",
             "if isolated_db is original_db:",
             'isolated_db.sql("SELECT DATABASE()")',
@@ -143,6 +147,7 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
             "isolated_db.close()",
             "frappe.local.db = original_db",
             "frappe.set_user(original_user)",
+            "frappe.local.flags = original_flags",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, text)
