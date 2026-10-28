@@ -101,6 +101,17 @@ class FinanceLifecycleStaticTests(unittest.TestCase):
         self.assertIn("Legacy mutable cutoff approval disabled", legacy)
         self.assertIn("Legacy retirement endpoint disabled", legacy)
 
+    def test_request_replay_and_atomic_audit_guards(self):
+        evidence = (HERE / "bc_finance_evidence.py").read_text()
+        lifecycle = (HERE / "bc_finance_lifecycle_events.py").read_text()
+        self.assertIn("ccpc_signed_finance_decision", evidence)
+        self.assertIn("frappe.db.rollback(save_point=marker)", evidence)
+        self.assertIn("ccpc_finance_retirement_request", lifecycle)
+        self.assertIn('"reused": True', lifecycle)
+        self.assertIn("previous.request_key == request_key", lifecycle)
+        self.assertIn("Different retirement request already pending", lifecycle)
+        self.assertGreaterEqual(lifecycle.count("frappe.db.rollback(save_point=marker)"), 3)
+
     def test_no_automatic_admin_or_transaction_write(self):
         for name in ("bc_finance_evidence.py", "bc_finance_lifecycle_events.py"):
             with self.subTest(name=name):
