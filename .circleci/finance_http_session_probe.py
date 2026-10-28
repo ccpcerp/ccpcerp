@@ -90,6 +90,13 @@ def main():
     if status != 200 or json.loads(body).get("message") != CHECKER:
         raise RuntimeError("Session did not authenticate as exact checker identity.")
 
+    # Frappe Session.start() does not necessarily populate csrf_token.
+    # Visiting the synthetic Desk boot page first should initialize it;
+    # a missing/inaccessible Desk boot makes the negative check fail closed.
+    status, _ = call(opener, "/app")
+    if status != 200:
+        raise RuntimeError("Disposable Desk session was not initialized for CSRF.")
+
     # All Finance RPCs are POST-only, including the read-only review method.
     status, _ = call(opener, REVIEW + "?kind=Expense&revision=nonexistent")
     # Frappe v16 handler raises PermissionError (HTTP 403), not HTTP 405.
