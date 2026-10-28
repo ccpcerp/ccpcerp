@@ -92,8 +92,9 @@ def main():
 
     # All Finance RPCs are POST-only, including the read-only review method.
     status, _ = call(opener, REVIEW + "?kind=Expense&revision=nonexistent")
-    if status != 405:
-        raise RuntimeError("Finance review accepted an unauthorized GET method.")
+    # Frappe v16 handler raises PermissionError (HTTP 403), not HTTP 405.
+    if status != 403:
+        raise RuntimeError("Finance review GET was not denied by the method guard.")
 
     # Do not include a CSRF header. The endpoint is read-only even if CSRF
     # configuration is defective, so no business transaction can be posted.
@@ -101,7 +102,8 @@ def main():
         opener, REVIEW, method="POST",
         fields={"kind": "Expense", "revision": "nonexistent"},
     )
-    if status != 403:
+    # In pinned Frappe v16, CSRFTokenError.http_status_code is 400.
+    if status != 400:
         raise RuntimeError("Authenticated cookie POST without CSRF was not rejected.")
 
     print("Finance disposable authenticated HTTP identity/GET/CSRF: PASS")
