@@ -16,6 +16,7 @@ from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import (
     assert_finance_disposable_site,
 )
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
+from ccpcerp.ccpc_erp.bc_issue_runtime import _effective_mapping_end, _utc
 from ccpcerp.ccpc_erp.bc_mapping_workflow import (
     approve_mapping, get_mapping_review, propose_mapping,
 )
@@ -247,6 +248,14 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
                 "Accept", decision_id=signed["name"],
             )
         self.assertIsNone(original.effective_until)
+        scope_id = frappe.db.get_value(REV, revision, "mapping_scope")
+        locked_row = frappe.db.get_value(REV, revision,
+            ["name", "effective_from", "effective_until"], as_dict=True)
+        effective_end = _effective_mapping_end(
+            "Expense", COMPANY, scope_id, locked_row
+        )
+        self.assertEqual(effective_end, _utc(accepted["cutoff_at"]))
+
 
     def test_f_unauthorized_guest_and_administrator_fail_closed(self):
         revision = self._draft()
@@ -262,3 +271,47 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         with self.assertRaises(MappingPolicyError):
             reject_mapping("Expense", revision, "forged", "self approval")
         self.assertEqual(frappe.db.get_value(REV, revision, "approval_state"), "Draft")
+
+    def test_g_center_approval_uses_exact_company_department(self):
+        name = "CCPC CI Finance Center " + self._testMethodName.split("test_g_")[1]
+        self.assertFalse(frappe.db.exists("Department", {
+            "department_name": name, "company": COMPANY,
+        }))
+        dept = frappe.get_doc({
+            "doctype": "Department", "department_name": name,
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True).name
+        center = frappe.db.get_value("Cost Center", {
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+        }, "name")
+        self.assertTrue(center, "Expected disposable fixture's leaf Cost Center")
+        frappe.set_user(MAKER)
+        draft = propose_mapping("Center", COMPANY, dept, center)
+        self.assertEqual(draft["state"], "Draft")
+        frappe.set_user(CHECKER)
+        reviewed = get_mapping_review("Center", draft["name"])
+        self.assertEqual(reviewed["source"], dept)
+        self.assertEqual(reviewed["value"], center)
+        signed = sign_mapping_decision(
+            "Center", draft["name"], reviewed["modified"], "Approve"
+        )
+        approved = approve_mapping(
+            "Center", draft["name"], reviewed["modified"], signed["name"]
+        )
+        self.assertEqual(approved["state"], "Approved")
+        self.assertEqual(frappe.db.count(USE, {"decision": signed["name"]}), 1)
+
+    def test_h_rejection_audit_failure_rolls_back_event_and_state(self):
+        revision = self._draft()
+        frappe.set_user(CHECKER)
+        reviewed = get_mapping_review("Expense", revision)
+        with patch(
+            "ccpcerp.ccpc_erp.bc_finance_lifecycle_events.audit",
+            side_effect=RuntimeError("synthetic rejection audit failure"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic rejection audit failure"):
+                reject_mapping("Expense", revision, reviewed["modified"],
+                               "Test-only invalid mapping")
+        self.assertEqual(frappe.db.get_value(REV, revision, "approval_state"), "Draft")
+        self.assertFalse(frappe.db.get_value(REV, revision, "rejected_by"))
+        self.assertEqual(frappe.db.count(REJECT, {"revision": revision}), 0)
