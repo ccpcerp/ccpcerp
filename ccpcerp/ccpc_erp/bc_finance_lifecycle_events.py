@@ -95,24 +95,43 @@ def request_mapping_retirement(kind, revision, reason):
     _require(not frappe.db.exists(RETIRE, {"target_key": key}),
              "Mapping already has an accepted retirement cutoff.")
     # The Company row and Scope are locked by _locate, serializing requests.
+    ref = approved_hash(kind, company, scope, row, field)
+    request_key = digest(kind, row.name, maker, ref, reason)
     existing = frappe.db.sql(
-        "SELECT name FROM " + chr(96) + "tab" + REQUEST + chr(96) +
+        "SELECT name, company, mapping_scope, financial_value, maker, reason,"
+        "target_hash, request_key FROM " + chr(96) + "tab" + REQUEST + chr(96) +
         " WHERE kind=%s AND revision=%s AND request_state='Pending' "
         "ORDER BY name FOR UPDATE", (kind, row.name), as_dict=True,
     )
-    _require(not existing, "An unresolved retirement request already exists.")
-    ref = approved_hash(kind, company, scope, row, field)
-    request_key = digest(kind, row.name, maker, ref, reason)
-    created = event_insert(REQUEST, {
-        "kind": kind, "revision": row.name, "mapping_scope": scope.name,
-        "company": company, "financial_value": row[field],
-        "maker": maker, "reason": reason, "requested_at": now_datetime(),
-        "target_hash": ref, "request_state": "Pending", "request_key": request_key,
-    })
-    version = audit(REQUEST, created.name, "retirement_requested",
-                    {"kind": kind, "revision": row.name, "company": company,
-                     "maker": maker, "target_hash": ref})
-    return {"name": created.name, "state": "Pending", "version": version}
+    _require(len(existing) <= 1, "Conflicting pending retirement requests.")
+    if existing:
+        previous = existing[0]
+        _require(previous.company == company
+                 and previous.mapping_scope == scope.name
+                 and previous.financial_value == row[field]
+                 and previous.maker == maker
+                 and previous.reason == reason
+                 and previous.target_hash == ref
+                 and previous.request_key == request_key,
+                 "Different retirement request already pending; inspect it before retry.")
+        return {"name": previous.name, "state": "Pending", "reused": True}
+    marker = "ccpc_finance_retirement_request"
+    frappe.db.savepoint(marker)
+    try:
+        created = event_insert(REQUEST, {
+            "kind": kind, "revision": row.name, "mapping_scope": scope.name,
+            "company": company, "financial_value": row[field],
+            "maker": maker, "reason": reason, "requested_at": now_datetime(),
+            "target_hash": ref, "request_state": "Pending", "request_key": request_key,
+        })
+        version = audit(REQUEST, created.name, "retirement_requested",
+                        {"kind": kind, "revision": row.name, "company": company,
+                         "maker": maker, "target_hash": ref})
+        return {"name": created.name, "state": "Pending",
+                "version": version, "reused": False}
+    except Exception:
+        frappe.db.rollback(save_point=marker)
+        raise
 
 
 @frappe.whitelist(methods=["POST"])
