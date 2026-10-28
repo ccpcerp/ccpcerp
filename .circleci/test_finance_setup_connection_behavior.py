@@ -39,6 +39,8 @@ class AttrDict(dict):
     def __getattr__(self, key):
         return self.get(key)
 
+    __setattr__ = dict.__setitem__
+
 
 class FrappeStub(types.ModuleType):
     def __getattribute__(self, name):
@@ -276,6 +278,39 @@ class SetupConnectionBehaviorTests(unittest.TestCase):
         with isolated():
             self.assertTrue(frappe.flags.in_test)
         self.assertIs(frappe.flags, caller_flags)
+
+    def test_failed_same_connection_does_not_leak_flags(self):
+        frappe, original, _, _, modules = self.fake_environment(reuse=True)
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+        with self.assertRaisesRegex(RuntimeError, "independent DB connection"):
+            with isolated():
+                self.fail("Same connection must be refused")
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertEqual(caller_flags.currently_saving, ["caller-in-progress"])
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+        self.assertEqual(original.closes, 0)
+
+    def test_child_rollback_failure_still_closes_and_restores(self):
+        frappe, original, child, _, modules = self.fake_environment()
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+
+        def broken_rollback():
+            child.rollbacks += 1
+            raise RuntimeError("synthetic rollback failure")
+
+        child.rollback = broken_rollback
+        with self.assertRaisesRegex(RuntimeError, "synthetic rollback failure"):
+            with isolated():
+                frappe.flags.ignore_root_company_validation = True
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+        self.assertEqual(original.closes, 0)
+        self.assertEqual(child.rollbacks, 1)
+        self.assertEqual(child.closes, 1)
 
 if __name__ == "__main__":
     unittest.main()
