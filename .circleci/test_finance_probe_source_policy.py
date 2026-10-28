@@ -11,12 +11,14 @@ HTTP = ROOT / ".circleci" / "finance_http_session_probe.py"
 LOCK = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_company_lock_probe.py"
 RACE = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_business_race_probe.py"
 FIXTURE = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_race_fixture.py"
+SETUP = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_setup_connection.py"
+MASTER = ROOT / "ccpcerp" / "ccpc_erp" / "ci_finance_master_bootstrap.py"
 CI = ROOT / ".circleci" / "config.yml"
 
 
 class FinanceBoundaryProbeSourceTests(unittest.TestCase):
     def test_both_probes_parse_without_importing_frappe(self):
-        for source in (HTTP, LOCK, RACE, FIXTURE):
+        for source in (HTTP, LOCK, RACE, FIXTURE, SETUP, MASTER):
             with self.subTest(source=str(source.name)):
                 tree = ast.parse(source.read_text(encoding="utf-8"))
                 self.assertIsInstance(tree, ast.Module)
@@ -105,6 +107,8 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
             "CCPC_ALLOW_FINANCE_FIXTURE_COMMIT",
             "CCPC_FINANCE_APPROVED_SHA",
             "frappe.conf.db_type",
+            "with isolated_finance_setup_connection():",
+            "verify_finance_master_records()",
             'COMPANY = "_Test Company"',
             'MAKER = "ccpc-finance-ci-maker@invalid.test"',
             'CHECKER = "ccpc-finance-ci-checker@invalid.test"',
@@ -127,12 +131,54 @@ class FinanceBoundaryProbeSourceTests(unittest.TestCase):
         self.assertNotIn("set-password", text)
         self.assertNotIn("stock_entry", text.lower())
 
+    def test_isolated_connection_restores_parent_and_rolls_back(self):
+        text = SETUP.read_text(encoding="utf-8")
+        for required in (
+            "assert_finance_disposable_site(",
+            "original_db = frappe.db",
+            "frappe.connect(set_admin_as_user=False)",
+            "if isolated_db is original_db:",
+            'isolated_db.sql("SELECT DATABASE()")',
+            "isolated_db.rollback()",
+            "isolated_db.close()",
+            "frappe.local.db = original_db",
+            "frappe.set_user(original_user)",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        # The setup context never commits the caller's transaction itself.
+        self.assertNotIn(".commit(", text)
+
+    def test_disposable_master_bootstrap_requires_commit_gate(self):
+        text = MASTER.read_text(encoding="utf-8")
+        for required in (
+            "assert_finance_disposable_site(",
+            "CCPC_ALLOW_FINANCE_MASTER_BOOTSTRAP",
+            "CCPC_ALLOW_FINANCE_MASTER_COMMIT",
+            "CCPC_FINANCE_APPROVED_SHA",
+            "allow_tests",
+            "isolated_finance_setup_connection()",
+            'if frappe.db.exists("Company", COMPANY):',
+            'if frappe.db.exists("Account", ACCOUNT):',
+            '"company_name": COMPANY',
+            '"chart_of_accounts": "Standard"',
+            "verify_finance_master_records()",
+            "frappe.db.commit()",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, text)
+        self.assertNotIn("Stock Entry", text.split("def bootstrap_finance_test_masters():")[1])
+        self.assertNotIn("load_test_records_for", text)
+        self.assertNotIn("ignore_permissions=True", text.split("def verify_finance_master_records():")[1].split("def bootstrap_finance_test_masters():")[0])
+
     def test_neither_probe_is_wired_to_active_circleci_jobs(self):
         config = CI.read_text(encoding="utf-8")
         self.assertNotIn("finance_http_session_probe.py", config)
         self.assertNotIn("ci_finance_company_lock_probe", config)
         self.assertNotIn("ci_finance_business_race_probe", config)
         self.assertNotIn("ci_finance_race_fixture", config)
+        self.assertNotIn("ci_finance_master_bootstrap", config)
+        self.assertNotIn("ci_finance_setup_connection", config)
         self.assertIn("run_finance_lifecycle:\n    type: boolean\n    default: false", config)
 
 
