@@ -191,7 +191,7 @@ jobs:
             # owner has authorized the exact post-harness commit; not in YAML or params.
             test -n "${CCPC_FINANCE_APPROVED_SHA:-}"
             test "${CIRCLE_SHA1}" = "${CCPC_FINANCE_APPROVED_SHA}"
-            python - <<'PY'
+            python - \<<'PY'
             from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import assert_finance_disposable_site
             assert_finance_disposable_site("ci-finance-lifecycle.localhost")
             print("Exact approved ephemeral Finance CI identity: PASS")
