@@ -62,7 +62,7 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         self._actor(MAKER, "CCPC Mapping Preparer")
         self._actor(CHECKER, "CCPC Accounting Mapping Approver")
         for name in (DECISION, USE, REJECT, RETIRE_REQ, RETIRE_EVENT):
-            self.assertTrue(frappe.db.table_exists("tab" + name), name)
+            self.assertTrue(frappe.db.table_exists(name), name)
             self.assertEqual(frappe.get_meta(name).permissions, [])
 
     def tearDown(self):
