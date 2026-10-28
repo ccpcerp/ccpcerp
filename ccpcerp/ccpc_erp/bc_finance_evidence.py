@@ -147,15 +147,21 @@ def sign_mapping_decision(kind, revision, expected_modified, action, request_nam
                  "Prior decision already consumed.")
         return {"name": existing, "state": "Signed", "reused": True}
     data = facts_for(kind, company, scope, row, field)
-    saved = event_insert(DECISION, {
-        "kind": kind, "action": action, "revision": row.name,
-        "company": company, "mapping_scope": scope.name,
-        "source_value": data[3], "financial_value": row[field],
-        "maker": row.owner, "reviewed_modified": str(row.modified),
-        "snapshot_hash": snap, "signed_by": checker, "signed_at": now_datetime(),
-        "request_name": request_name or None, "decision_key": key, "status": "Signed",
-    })
-    audit(DECISION, saved.name, "signed_internal_accounting_decision",
-          {"kind": kind, "action": action, "revision": row.name,
-           "company": company, "checker": checker, "fingerprint": snap})
-    return {"name": saved.name, "state": "Signed", "reused": False}
+    marker = "ccpc_signed_finance_decision"
+    frappe.db.savepoint(marker)
+    try:
+        saved = event_insert(DECISION, {
+            "kind": kind, "action": action, "revision": row.name,
+            "company": company, "mapping_scope": scope.name,
+            "source_value": data[3], "financial_value": row[field],
+            "maker": row.owner, "reviewed_modified": str(row.modified),
+            "snapshot_hash": snap, "signed_by": checker, "signed_at": now_datetime(),
+            "request_name": request_name or None, "decision_key": key, "status": "Signed",
+        })
+        audit(DECISION, saved.name, "signed_internal_accounting_decision",
+              {"kind": kind, "action": action, "revision": row.name,
+               "company": company, "checker": checker, "fingerprint": snap})
+        return {"name": saved.name, "state": "Signed", "reused": False}
+    except Exception:
+        frappe.db.rollback(save_point=marker)
+        raise
