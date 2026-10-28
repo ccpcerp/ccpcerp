@@ -45,6 +45,7 @@ def preflight():
         ["git", "rev-parse", "HEAD"],
         cwd=Path(__file__).resolve().parents[1],
         text=True,
+        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
     ).strip()
     if sha != os.environ.get("CCPC_FINANCE_APPROVED_SHA"):
         raise RuntimeError("HTTP probe repository checkout differs from approved SHA.")
