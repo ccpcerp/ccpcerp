@@ -86,6 +86,22 @@ class TestFinanceCiConfigStatic(TestCase):
         ):
             self.assertNotIn(forbidden, stage)
 
+    def test_finance_has_no_unwrapped_duplicate_sidecar_wait(self):
+        finance = text.split(
+            "  finance-lifecycle-isolated-integration:", 1
+        )[1].split("\nworkflows:", 1)[0]
+        self.assertEqual(
+            finance.count("name: Confirm disposable database and Redis sidecars"), 1
+        )
+        self.assertNotIn("for port in 3306 13000 11000; do", finance)
+        self.assertEqual(
+            finance.count(
+                "python .circleci/finance_baseline_deadline.py run bash "
+                ".circleci/finance_baseline_stage.sh services"
+            ), 1
+        )
+        self.assertIn("for port in 3306 13000 11000; do", stage)
+
     def test_baseline_suite_has_exactly_eight_reviewed_methods(self):
         expected = {
             "test_a_schema_has_required_lifecycle_fields_and_no_general_permissions",
