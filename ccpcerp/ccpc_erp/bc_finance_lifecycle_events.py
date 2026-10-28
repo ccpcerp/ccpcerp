@@ -135,6 +135,32 @@ def request_mapping_retirement(kind, revision, reason):
 
 
 @frappe.whitelist(methods=["POST"])
+def get_retirement_request_review(kind, request_name):
+    """Checker reads the exact current request version under Finance scope locks."""
+    request_name = _canonical(request_name, "Retirement request")
+    locator = frappe.db.get_value(REQUEST, request_name, ["kind", "revision"], as_dict=True)
+    _require(locator and locator.kind == kind, "Unknown retirement request.")
+    _, field, _, company, scope, row, checker = _locate(
+        kind, locator.revision, "CCPC Accounting Mapping Approver",
+    )
+    req = request_row(request_name)
+    _require(req.kind == kind and req.revision == row.name
+             and req.company == company and req.mapping_scope == scope.name
+             and req.financial_value == row[field]
+             and req.target_hash == approved_hash(kind, company, scope, row, field),
+             "Retirement request does not match its original Approved mapping.")
+    assert_independent_review(req.maker, checker)
+    return {
+        "name": req.name, "kind": kind, "revision": row.name,
+        "company": company, "scope": scope.name,
+        "value": row[field], "prepared_by": req.maker, "reason": req.reason,
+        "requested_at": str(req.requested_at),
+        "state": req.request_state, "modified": str(req.modified),
+        "checker": checker,
+    }
+
+
+@frappe.whitelist(methods=["POST"])
 def decide_mapping_retirement(kind, request_name, expected_modified, action,
                               decision_id=None, decline_reason=None):
     """Checker declines or accepts one reviewed request; accepted event cuts off future use."""
