@@ -62,7 +62,7 @@ class SetupConnectionBehaviorTests(unittest.TestCase):
             flags=AttrDict({
                 "currently_saving": ["caller-in-progress"],
                 "ignore_root_company_validation": True,
-                "read_only": True,
+                "read_only": False,
             }),
         )
         frappe._dict = AttrDict
@@ -215,7 +215,7 @@ class SetupConnectionBehaviorTests(unittest.TestCase):
             with isolated():
                 self.fail("Wrong database must fail before body")
         self.assertIs(frappe.flags, caller_flags)
-        self.assertTrue(caller_flags.read_only)
+        self.assertFalse(caller_flags.read_only)
         self.assertIs(frappe.db, original)
         self.assertEqual(child.closes, 1)
 
@@ -311,6 +311,23 @@ class SetupConnectionBehaviorTests(unittest.TestCase):
         self.assertEqual(original.closes, 0)
         self.assertEqual(child.rollbacks, 1)
         self.assertEqual(child.closes, 1)
+
+    def test_read_only_caller_refused_without_touching_db_or_flags(self):
+        frappe, original, child, calls, modules = self.fake_environment()
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+        caller_flags.read_only = True
+        with self.assertRaisesRegex(RuntimeError, "read-only caller"):
+            with isolated():
+                self.fail("Read-only caller must not enter fixture body")
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertTrue(caller_flags.read_only)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+        self.assertEqual(original.closes, 0)
+        self.assertEqual(child.rollbacks, 0)
+        self.assertEqual(child.closes, 0)
+        self.assertNotIn("connect", calls)
 
 if __name__ == "__main__":
     unittest.main()
