@@ -68,9 +68,16 @@ def call(opener, path, *, method="GET", fields=None):
         with opener.open(request, timeout=8) as response:
             return response.status, response.read(8192)
     except HTTPError as error:
-        # Never print response body: server errors may include user/session data.
-        error.read(8192)
-        return error.code, b""
+        # Frappe v16 API v1 JSON errors carry exc_type. Extract only that
+        # bounded string; never log or return response bodies, cookies, or tokens.
+        try:
+            failure = json.loads(error.read(8192))
+            exc_type = failure.get("exc_type") if type(failure) is dict else None
+            if type(exc_type) is not str or len(exc_type) > 80:
+                exc_type = None
+        except (ValueError, UnicodeDecodeError):
+            exc_type = None
+        return error.code, exc_type
 
 
 def main():
@@ -98,20 +105,21 @@ def main():
         raise RuntimeError("Disposable Desk session was not initialized for CSRF.")
 
     # All Finance RPCs are POST-only, including the read-only review method.
-    status, _ = call(opener, REVIEW + "?kind=Expense&revision=nonexistent")
-    # Frappe v16 handler raises PermissionError (HTTP 403), not HTTP 405.
-    if status != 403:
-        raise RuntimeError("Finance review GET was not denied by the method guard.")
+    status, error_type = call(opener, REVIEW + "?kind=Expense&revision=nonexistent")
+    # Status 403 alone is not proof the POST-only method guard was invoked.
+    if status != 403 or error_type != "PermissionError":
+        raise RuntimeError("POST-only Finance review did not reject GET correctly.")
 
     # Do not include a CSRF header. The endpoint is read-only even if CSRF
     # configuration is defective, so no business transaction can be posted.
-    status, _ = call(
+    status, error_type = call(
         opener, REVIEW, method="POST",
         fields={"kind": "Expense", "revision": "nonexistent"},
     )
-    # In pinned Frappe v16, CSRFTokenError.http_status_code is 400.
-    if status != 400:
-        raise RuntimeError("Authenticated cookie POST without CSRF was not rejected.")
+    # A 400 alone could be validation failure; require Frappe's exact CSRF
+    # exception type. This is API-v1-specific and must fail closed otherwise.
+    if status != 400 or error_type != "CSRFTokenError":
+        raise RuntimeError("Missing-CSRF request did not fail as CSRFTokenError.")
 
     print("Finance disposable authenticated HTTP identity/GET/CSRF: PASS")
     print("No mapping approval, invoice, stock or GL endpoint was invoked.")
