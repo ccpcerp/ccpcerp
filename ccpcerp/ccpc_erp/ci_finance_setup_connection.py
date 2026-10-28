@@ -26,6 +26,9 @@ def isolated_finance_setup_connection():
         frappe.connect(set_admin_as_user=False)
         isolated_db = frappe.db
         if isolated_db is original_db:
+            # Never rollback/close the caller if a mocked or broken connect()
+            # unexpectedly returns the very same connection.
+            isolated_db = None
             raise RuntimeError("Fixture setup did not obtain an independent DB connection.")
         if frappe.local.site != original_site:
             raise RuntimeError("Fixture setup switched to an unexpected site.")
