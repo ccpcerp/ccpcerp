@@ -63,9 +63,9 @@ def reject_mapping(kind, revision, expected_modified, reason):
         frappe.db.sql(
             "UPDATE " + table + " SET approval_state='Rejected',"
             "rejected_by=%s,rejected_at=%s,rejection_reason=%s,"
-            "rejection_event=%s,modified=%s WHERE name=%s AND "
+            "rejection_event=%s,modified=%s,modified_by=%s WHERE name=%s AND "
             "approval_state='Draft' AND modified=%s",
-            (checker, now, reason, event.name, now, row.name, row.modified),
+            (checker, now, reason, event.name, now, checker, row.name, row.modified),
         )
         _require(frappe.db.sql("SELECT ROW_COUNT()")[0][0] == 1,
                  "Concurrent Draft rejection conflict.")
@@ -196,9 +196,10 @@ def decide_mapping_retirement(kind, request_name, expected_modified, action,
             msg = reason_text(decline_reason)
             frappe.db.sql(
                 "UPDATE " + table + " SET request_state='Declined',"
-                "decided_by=%s,decided_at=%s,decision_reason=%s,modified=%s "
+                "decided_by=%s,decided_at=%s,decision_reason=%s,modified=%s,"
+                "modified_by=%s "
                 "WHERE name=%s AND request_state='Pending' AND modified=%s",
-                (checker, now, msg, now, req.name, req.modified),
+                (checker, now, msg, now, checker, req.name, req.modified),
             )
             _require(frappe.db.sql("SELECT ROW_COUNT()")[0][0] == 1,
                      "Retirement request already decided.")
@@ -223,9 +224,9 @@ def decide_mapping_retirement(kind, request_name, expected_modified, action,
         })
         frappe.db.sql(
             "UPDATE " + table + " SET request_state='Accepted',"
-            "decided_by=%s,decided_at=%s,modified=%s WHERE name=%s "
+            "decided_by=%s,decided_at=%s,modified=%s,modified_by=%s WHERE name=%s "
             "AND request_state='Pending' AND modified=%s",
-            (checker, now, now, req.name, req.modified),
+            (checker, now, now, checker, req.name, req.modified),
         )
         _require(frappe.db.sql("SELECT ROW_COUNT()")[0][0] == 1,
                  "Concurrent retirement acceptance conflict.")
