@@ -21,8 +21,27 @@ def isolated_finance_setup_connection():
     original_db = frappe.db
     original_site = frappe.local.site
     original_user = frappe.session.user
+    original_flags = frappe.local.flags
     isolated_db = None
     try:
+        # A DB connection alone does not isolate Frappe's thread-local flags.
+        # Use a fresh Frappe-init-shaped flag bag rather than copying the
+        # caller's possibly permissive ignore_* flags into fixture creation.
+        # This also isolates nested values such as currently_saving.
+        frappe.local.flags = frappe._dict({
+            "currently_saving": [],
+            "redirect_location": "",
+            "in_install_db": False,
+            "in_install_app": False,
+            "in_import": False,
+            "in_test": frappe.in_test,
+            "mute_messages": False,
+            "ignore_links": False,
+            "mute_emails": False,
+            "has_dataurl": False,
+            "new_site": False,
+            "read_only": False,
+        })
         frappe.connect(set_admin_as_user=False)
         isolated_db = frappe.db
         if isolated_db is original_db:
@@ -36,16 +55,18 @@ def isolated_finance_setup_connection():
             raise RuntimeError("Fixture connection is not using the expected database.")
         yield isolated_db
     finally:
-        if isolated_db is not None:
-            frappe.local.db = isolated_db
-            try:
-                isolated_db.rollback()
-            finally:
+        try:
+            if isolated_db is not None:
+                frappe.local.db = isolated_db
                 try:
-                    isolated_db.close()
+                    isolated_db.rollback()
                 finally:
-                    frappe.local.db = original_db
-        else:
+                    isolated_db.close()
+        finally:
+            # Restore caller context even if rollback/close or set_user fails.
             frappe.local.db = original_db
-        # Set user while original DB is active and clear any cached role state.
-        frappe.set_user(original_user)
+            try:
+                # Set user while original DB is active; clear cached role state.
+                frappe.set_user(original_user)
+            finally:
+                frappe.local.flags = original_flags
