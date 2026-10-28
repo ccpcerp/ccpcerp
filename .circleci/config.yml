@@ -205,21 +205,6 @@ jobs:
             python .circleci/finance_baseline_deadline.py run python -m compileall -q ccpcerp
       - run:
           name: Confirm disposable database and Redis sidecars
-          command: |
-            set -euo pipefail
-            for port in 3306 13000 11000; do
-              ready=0
-              for i in $(seq 1 60); do
-                if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
-                  ready=1
-                  break
-                fi
-                sleep 2
-              done
-              test "$ready" = 1 || { echo "Required ephemeral CI sidecar unavailable"; exit 1; }
-            done
-      - run:
-          name: Confirm disposable database and Redis sidecars
           no_output_timeout: 20m
           command: |
             set -euo pipefail
