@@ -32,8 +32,8 @@ def _locate(kind, revision, role):
     company = frappe.db.get_value(scope_dt, scope_id, "company")
     _require(bool(company), "Unknown mapping Company.")
     actor = _canonical(frappe.session.user, "Finance actor")
-    _real_authority(actor, role, company)
     _company_lock(company)
+    _real_authority(actor, role, company)
     scope_rows = frappe.db.sql(
         "SELECT name, company, " + source_field + " FROM " +
         chr(96) + "tab" + scope_dt + chr(96) + " WHERE name=%s FOR UPDATE",

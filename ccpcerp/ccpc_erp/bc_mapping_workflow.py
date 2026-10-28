@@ -115,8 +115,8 @@ def propose_mapping(kind, company, source, value, effective_from=None, effective
     source = _canonical(source, "Mapping source")
     value = _canonical(value, "Proposed finance account or center")
     preparer = _canonical(frappe.session.user, "Preparer")
-    _real_authority(preparer, "CCPC Mapping Preparer", company)
     _company_lock(company)
+    _real_authority(preparer, "CCPC Mapping Preparer", company)
     _scope_values(kind, company, source)
     _master_validated(master_dt, value, company)
     start = _utc(effective_from)
@@ -192,8 +192,8 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
     company = frappe.db.get_value(scope_dt, scope_id, "company")
     _require(bool(company), "Missing mapping Company.")
     checker = _canonical(frappe.session.user, "Mapping approver")
-    _real_authority(checker, "CCPC Accounting Mapping Approver", company)
     _company_lock(company)
+    _real_authority(checker, "CCPC Accounting Mapping Approver", company)
     scopes = frappe.db.sql(
         "SELECT name, company, " + source_field +
         " FROM `tab" + scope_dt + "` WHERE name=%s FOR UPDATE",
