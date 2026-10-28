@@ -35,10 +35,17 @@ class FakeDB:
         self.closes += 1
 
 
+class AttrDict(dict):
+    def __getattr__(self, key):
+        return self.get(key)
+
+
 class FrappeStub(types.ModuleType):
     def __getattribute__(self, name):
         if name == "db":
             return self.local.db
+        if name == "flags":
+            return self.local.flags
         return super().__getattribute__(name)
 
 
@@ -50,7 +57,14 @@ class SetupConnectionBehaviorTests(unittest.TestCase):
         frappe = FrappeStub("frappe")
         frappe.local = types.SimpleNamespace(
             db=original, site="ci-finance-lifecycle.localhost",
+            flags=AttrDict({
+                "currently_saving": ["caller-in-progress"],
+                "ignore_root_company_validation": True,
+                "read_only": True,
+            }),
         )
+        frappe._dict = AttrDict
+        frappe.in_test = False
         frappe.conf = types.SimpleNamespace(db_name="ci_finance_disposable")
         frappe.session = types.SimpleNamespace(user="Administrator")
         calls = []
@@ -153,6 +167,115 @@ class SetupConnectionBehaviorTests(unittest.TestCase):
         self.assertEqual(original.rollbacks, 0)
         self.assertEqual(original.closes, 0)
 
+
+    def test_worker_flags_are_fresh_and_company_flags_do_not_leak(self):
+        frappe, original, child, _, modules = self.fake_environment()
+        isolated = self.load_context(modules)
+        caller_flags = frappe.local.flags
+        with isolated():
+            self.assertIsNot(frappe.flags, caller_flags)
+            self.assertEqual(frappe.flags.currently_saving, [])
+            self.assertFalse(frappe.flags.read_only)
+            self.assertNotIn("ignore_root_company_validation", frappe.flags)
+            frappe.flags.ignore_root_company_validation = True
+            frappe.flags.country_change = True
+            frappe.flags.currently_saving.append("child-in-progress")
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertEqual(caller_flags.currently_saving, ["caller-in-progress"])
+        self.assertTrue(caller_flags.ignore_root_company_validation)
+        self.assertNotIn("country_change", caller_flags)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(child.closes, 1)
+
+    def test_worker_exception_restores_original_flags_object(self):
+        frappe, original, child, _, modules = self.fake_environment()
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+        with self.assertRaisesRegex(RuntimeError, "synthetic Company failure"):
+            with isolated():
+                frappe.flags.country_change = True
+                frappe.flags.currently_saving.append("child")
+                raise RuntimeError("synthetic Company failure")
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertEqual(caller_flags.currently_saving, ["caller-in-progress"])
+        self.assertNotIn("country_change", caller_flags)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+        self.assertEqual(child.rollbacks, 1)
+
+    def test_wrong_database_does_not_leak_fresh_flags(self):
+        frappe, original, child, _, modules = self.fake_environment(
+            db_name="WRONG_DATABASE",
+        )
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+        with self.assertRaisesRegex(RuntimeError, "expected database"):
+            with isolated():
+                self.fail("Wrong database must fail before body")
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertTrue(caller_flags.read_only)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(child.closes, 1)
+
+    def test_failed_connect_restores_caller_flags(self):
+        frappe, original, _, _, modules = self.fake_environment(
+            connect_failure=True,
+        )
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+        with self.assertRaisesRegex(RuntimeError, "Synthetic connection failure"):
+            with isolated():
+                self.fail("Failed connect must fail before body")
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+
+    def test_child_close_failure_still_restores_flags_and_parent(self):
+        frappe, original, child, _, modules = self.fake_environment()
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+
+        def broken_close():
+            child.closes += 1
+            raise RuntimeError("synthetic close failure")
+
+        child.close = broken_close
+        with self.assertRaisesRegex(RuntimeError, "synthetic close failure"):
+            with isolated():
+                frappe.flags.country_change = True
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+        self.assertEqual(original.closes, 0)
+        self.assertEqual(child.rollbacks, 1)
+        self.assertEqual(child.closes, 1)
+
+    def test_set_user_restore_failure_still_restores_flags(self):
+        frappe, original, child, _, modules = self.fake_environment()
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+
+        def broken_set_user(_user):
+            raise RuntimeError("synthetic user restoration failure")
+
+        frappe.set_user = broken_set_user
+        with self.assertRaisesRegex(RuntimeError, "synthetic user restoration failure"):
+            with isolated():
+                frappe.flags.country_change = True
+        self.assertIs(frappe.flags, caller_flags)
+        self.assertIs(frappe.db, original)
+        self.assertEqual(original.rollbacks, 0)
+        self.assertEqual(child.rollbacks, 1)
+        self.assertEqual(child.closes, 1)
+
+    def test_isolated_in_test_flag_uses_frappes_runtime_value(self):
+        frappe, _, _, _, modules = self.fake_environment()
+        frappe.in_test = True
+        isolated = self.load_context(modules)
+        caller_flags = frappe.flags
+        with isolated():
+            self.assertTrue(frappe.flags.in_test)
+        self.assertIs(frappe.flags, caller_flags)
 
 if __name__ == "__main__":
     unittest.main()
