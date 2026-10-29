@@ -58,16 +58,39 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
             frappe.db.get_value("Company", BUYER, "default_currency"),
             "Disposable intercompany sample requires equal currencies.",
         )
-        # Fixture setup initially makes a same-company slip. Change only this
-        # synthetic, unsubmitted test record to exercise intercompany selection.
-        # No real user/master/transaction record is modified.
+        # The requestor Department must belong to the BUYER, not the issuing
+        # Company. The real beneficiary work_for_department remains in the
+        # issuing Company so the signed Expense/Center GL allocation is source-
+        # scoped. All modifications are synthetic CI test fixtures only.
+        buyer_department_name = "CI Bridge Request " + frappe.generate_hash(length=10)
+        buyer_department = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": buyer_department_name,
+            "company": BUYER,
+            "is_group": 0,
+        }).insert(ignore_permissions=True)
+        self.assertEqual(
+            frappe.db.get_value("Department", buyer_department.name, "company"), BUYER
+        )
         frappe.db.set_value(
-            "Withdrawal Slip", self.slip_name, "requesting_company", BUYER,
+            "Withdrawal Slip", self.slip_name,
+            {"requesting_company": BUYER, "department": buyer_department.name},
             update_modified=False,
         )
         self.assertEqual(
-            frappe.db.get_value("Withdrawal Slip", self.slip_name, "requesting_company"),
-            BUYER,
+            frappe.db.get_value(
+                "Withdrawal Slip", self.slip_name,
+                ["requesting_company", "department"], as_dict=True,
+            ).get("requesting_company"), BUYER,
+        )
+        self.assertEqual(
+            frappe.db.get_value("Withdrawal Slip", self.slip_name, "department"),
+            buyer_department.name,
+        )
+        self.assertEqual(
+            frappe.db.get_value(
+                "Withdrawal Slip", self.slip_name, "work_for_department"
+            ), self.department,
         )
         self.account = "Stock Adjustment - _TC"
         self.center = frappe.db.get_value(
