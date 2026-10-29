@@ -238,3 +238,47 @@ class TestDepartmentReport29Disposable(ERPNextTestSuite):
             with self.assertRaises(frappe.ValidationError):
                 report.execute(self._filters(**invalid))
         self.assertEqual(self._row(detail)["source_quality"], "OK")
+
+    def test_f_multiple_real_sle_fragments_count_once_at_original_issue_grain(self):
+        """Two outbound ledger fragments must not double-count issue or valuation."""
+        stock, detail = self._issue_signed_original()
+        baseline = self._row(detail)
+        entries = frappe.get_all(
+            "Stock Ledger Entry",
+            filters={
+                "voucher_type": "Stock Entry", "voucher_no": stock.name,
+                "voucher_detail_no": detail.name, "is_cancelled": 0,
+            },
+            fields=["name", "actual_qty", "stock_value_difference"],
+        )
+        self.assertTrue(entries)
+        first = entries[0]
+        self.assertLess(flt(first.actual_qty), 0)
+        # Deliberate synthetic raw SQL split only inside disposable CI rollback.
+        # Together, the original and new fragment retain exactly the old total.
+        frappe.db.set_value(
+            "Stock Ledger Entry", first.name,
+            {
+                "actual_qty": flt(first.actual_qty) / 2,
+                "stock_value_difference": flt(first.stock_value_difference) / 2,
+            }, update_modified=False,
+        )
+        fragment = frappe.copy_doc(frappe.get_doc("Stock Ledger Entry", first.name))
+        fragment.name = None
+        fragment.voucher_type = "Stock Entry"
+        fragment.voucher_no = stock.name
+        fragment.voucher_detail_no = detail.name
+        fragment.company = bridge.COMPANY
+        fragment.db_insert()
+        self.assertNotEqual(fragment.name, first.name)
+        after = self._row(detail)
+        self.assertEqual(after["source_quality"], "OK")
+        self.assertEqual(after["beneficiary_department_at_issue"], self.department)
+        self.assertEqual(after["issued_qty"], baseline["issued_qty"])
+        self.assertAlmostEqual(after["sle_issued_qty"], baseline["sle_issued_qty"])
+        self.assertAlmostEqual(
+            after["gross_sle_issue_value"], baseline["gross_sle_issue_value"], places=2,
+        )
+        self.assertEqual(
+            len([r for r in self._rows() if r["stock_entry_detail"] == detail.name]), 1,
+        )
