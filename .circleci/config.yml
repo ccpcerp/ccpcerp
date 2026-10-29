@@ -16,6 +16,10 @@ parameters:
   run_finance_bridge:
     type: boolean
     default: false
+  # PR30 isolated report acceptance is held and disabled by default.
+  run_equipment_report30:
+    type: boolean
+    default: false
 
 jobs:
   python-syntax:
@@ -240,6 +244,51 @@ jobs:
                   set -euo pipefail
                   python .circleci/finance_baseline_deadline.py run bash .circleci/finance_baseline_stage.sh bridge
 
+  equipment-report30-isolated-integration:
+    # Same pinned disposable Frappe/ERPNext sources as green Finance #34.
+    # Independent exact-SHA, branch, site and CI identity gate in every stage.
+    docker:
+      - image: cimg/python:3.14-node
+      - image: mariadb:11.8
+        environment:
+          MARIADB_ROOT_PASSWORD: ccpc-equip30-ephemeral-only
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "13000"]
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "11000"]
+    resource_class: large
+    environment:
+      CI: "Yes"
+      TEST_SITE: ci-equipment-report30.localhost
+      CI_DB_ROOT_PASSWORD: ccpc-equip30-ephemeral-only
+      CI_ADMIN_PASSWORD: ccpc-equip30-ephemeral-admin-only
+      CCPC_ALLOW_EQUIP30_TESTS: isolated-only
+    steps:
+      - checkout
+      - run:
+          name: PR30 exact-SHA and disposable site guard before any installation
+          command: |
+            set -euo pipefail
+            bash .circleci/equipment30_stage.sh identity
+      - run:
+          name: Verify disposable MariaDB and Redis
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/equipment30_stage.sh services
+      - run:
+          name: Install pinned Frappe and ERPNext on disposable report site
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/equipment30_stage.sh install
+      - run:
+          name: PR30 native report policy and real MariaDB source/ledger report tests
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/equipment30_stage.sh tests
+
 workflows:
   starter-validation:
     jobs:
@@ -262,6 +311,20 @@ workflows:
           filters:
             branches:
               only: feature/finance-mapping-lifecycle-2026-10-28
+  opt-in-equipment30-acceptance:
+    when: << pipeline.parameters.run_equipment_report30 >>
+    jobs:
+      - equipment30-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/equipment-job-source-cost-report-2026-10-29
+      - equipment-report30-isolated-integration:
+          requires:
+            - equipment30-manual-approval
+          filters:
+            branches:
+              only: review/equipment-job-source-cost-report-2026-10-29
   opt-in-finance-bridge:
     when: << pipeline.parameters.run_finance_bridge >>
     jobs:
