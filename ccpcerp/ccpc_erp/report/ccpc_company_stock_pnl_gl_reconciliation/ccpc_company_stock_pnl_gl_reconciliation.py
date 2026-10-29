@@ -124,6 +124,7 @@ def _pnl_sql():
           ON acc.name = gl.account AND acc.company = gl.company
         INNER JOIN `tabCompany` co ON co.name = gl.company
         WHERE gl.company = %(company)s
+          AND gl.docstatus = 1
           AND gl.is_cancelled = 0
           AND gl.posting_date BETWEEN %(from_date)s AND %(to_date)s
           AND acc.report_type = 'Profit and Loss'
