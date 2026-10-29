@@ -1,13 +1,15 @@
 # Copyright (c) 2026, CCPC and contributors
 """Exact-source Finance -> Withdrawal -> SLE/GL -> billing-source SQL bridge.
 
-DISPOSABLE-CI-ONLY candidate. Real Frappe/ERPNext tables, auth-backed signed
-mapping decisions and submitted stock/ledger records; no mocked accounting,
-no invoice approval, no generated invoice, and no production data.
+DISPOSABLE-CI-ONLY suite. Real Frappe/ERPNext tables, authenticated
+signed Finance mapping decisions, submitted stock/ledger records, true billing
+preview and REAL paired Sales/Purchase *draft* invoice inserts. No invoice is
+submitted; no production data or live site is accessed.
 
-Not wired to an automatic or manually triggered CircleCI workflow. This test
-requires a future separately approved Finance-feature SHA, with the
-finance-lifecycle-isolated-integration job/site and project-level SHA gate.
+The new month-end invoice tests simulate only the billing Controller clock,
+and inject a second-invoice failure to probe actual MariaDB savepoint rollback.
+Runs only via the default-off, manually held exact-SHA Finance bridge workflow;
+every test requires its established disposable CI identity/site guard.
 """
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -554,7 +556,7 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         return sales, purchase
 
     def test_c_real_source_finalizes_to_actual_paired_invoice_drafts(self):
-        """Entire REAL source→month-end→two invoice-draft chain, no mocks."""
+        """Real source→month-end→draft pair; only billing time is simulated."""
         batch, stock, detail = self._issue_signed_source_for_real_pair()
         self._prepare_disposable_invoice_masters()
         module, after_month_end, next_day = self._finalize_real_month_end(
