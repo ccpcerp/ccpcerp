@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import frappe
+from erpnext.accounts.doctype.account.account import get_root_company
 from erpnext.tests.utils import ERPNextTestSuite
 from frappe.utils import flt, get_last_day, getdate, nowdate
 
@@ -345,43 +346,108 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
     def _ensure_disposable_account(
         self, company, number, label, root_type, account_type=None
     ):
-        """Create the exact named business-required account in CI only.
+        """Create exact synthetic Accounts with ERPNext parent-company rules.
 
-        Do not fall back to another arbitrary real Account or call a live
-        Company provisioning patch. The review site guard ran before setUp.
+        '_Test Company 5' is nested below '_Test Company 3'. ERPNext v16
+        requires the account name on the root Company first; its native
+        Account validation may copy it to matching descendant COAs. Keep
+        that validation enabled: no ignore flags and no Company policy toggle.
+        This function executes ONLY after the disposable-site guard in setUp.
         """
         abbr = frappe.db.get_value("Company", company, "abbr")
         self.assertTrue(abbr)
         expected = f"{number} - {label} - {abbr}"
-        self.assertFalse(
-            frappe.db.exists("Account", {
-                "company": company, "account_number": number,
-            }),
-            "Expected isolated synthetic Account number to be unused",
-        )
-        self.assertFalse(frappe.db.exists("Account", expected))
+
+        def check_or_create(target_company, parent_account):
+            target_abbr = frappe.db.get_value("Company", target_company, "abbr")
+            self.assertTrue(target_abbr)
+            target_name = f"{number} - {label} - {target_abbr}"
+            by_number = frappe.db.get_value(
+                "Account",
+                {"company": target_company, "account_number": number},
+                "name",
+            )
+            by_name = frappe.db.exists("Account", target_name)
+            self.assertFalse(
+                by_number and by_number != target_name,
+                "Synthetic Account number already belongs to a different Account",
+            )
+            self.assertFalse(
+                by_name and by_name != by_number,
+                "Synthetic Account name has unexpected numbering",
+            )
+            if not by_name:
+                doc = frappe.get_doc({
+                    "doctype": "Account",
+                    "account_number": number,
+                    "account_name": label,
+                    "company": target_company,
+                    "parent_account": parent_account,
+                    "account_type": account_type or "",
+                    "is_group": 0,
+                }).insert(ignore_permissions=True)
+                self.assertEqual(doc.name, target_name)
+
+            state = frappe.db.get_value(
+                "Account", target_name,
+                ["company", "account_name", "account_number",
+                 "root_type", "account_type", "is_group", "disabled"],
+                as_dict=True,
+            )
+            self.assertTrue(state, "ERPNext did not persist required Account")
+            self.assertEqual(state.company, target_company)
+            self.assertEqual(state.account_name, label)
+            self.assertEqual(str(state.account_number), str(number))
+            self.assertEqual(state.root_type, root_type)
+            self.assertEqual(state.account_type or "", account_type or "")
+            self.assertFalse(state.is_group or state.disabled)
+            return target_name
+
+        # All parent-child COAs must share the same parent Account identity,
+        # including the account number when present. Do not guess a cross-
+        # company Chart or create a child Account against a missing root name.
         parent = frappe.db.get_value(
-            "Account", {
-                "company": company, "root_type": root_type,
-                "is_group": 1, "disabled": 0,
-            }, "name",
+            "Account",
+            {"company": company, "root_type": root_type,
+             "is_group": 1, "disabled": 0},
+            ["name", "account_name", "account_number"],
+            as_dict=True,
         )
         self.assertTrue(parent, "Missing synthetic Account parent " + root_type)
-        account = frappe.get_doc({
-            "doctype": "Account",
-            "account_number": number,
-            "account_name": label,
-            "company": company,
-            "parent_account": parent,
-            "account_type": account_type or "",
-            "is_group": 0,
-        }).insert(ignore_permissions=True)
-        self.assertEqual(account.name, expected)
-        self.assertEqual(
-            frappe.db.get_value("Account", account.name, "root_type"),
-            root_type,
-        )
-        return expected
+
+        roots = get_root_company(company)
+        if roots:
+            self.assertEqual(len(roots), 1)
+            root_company = roots[0]
+            self.assertNotEqual(root_company, company)
+            # Require same existing parent group in the root chart. This is
+            # deliberately fail-closed rather than bypassing ERPNext v16
+            # root-first Account validation or changing Company settings.
+            root_parent_filter = {
+                "company": root_company,
+                "account_name": parent.account_name,
+                "root_type": root_type,
+                "is_group": 1,
+                "disabled": 0,
+            }
+            if parent.account_number:
+                root_parent_filter["account_number"] = parent.account_number
+            root_parent = frappe.db.get_value(
+                "Account", root_parent_filter, "name",
+            )
+            self.assertTrue(
+                root_parent,
+                "Synthetic root Company lacks corresponding group Account "
+                + str(parent.account_name),
+            )
+            check_or_create(root_company, root_parent)
+            # ERPNext may already have created the descendant Account via
+            # real Controller synchronization. If not, the root prerequisite
+            # now exists and the child insert must validate normally.
+
+        result = check_or_create(company, parent.name)
+        self.assertEqual(result, expected)
+        return result
 
     def _prepare_disposable_invoice_masters(self):
         """Set up exact internal parties and Chart paths in disposable DB.

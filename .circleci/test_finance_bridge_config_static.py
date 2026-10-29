@@ -124,3 +124,23 @@ class TestBridgeCiStatic(TestCase):
         self.assertIn('patch.object(Billing, "_build_purchase_invoice"', BRIDGE)
         self.assertIn("Failed purchase must not leave an orphan real Sales Invoice", BRIDGE)
         self.assertIn("preview = batch.refresh_preview()", BRIDGE)
+
+    def test_invoice_fixture_respects_native_root_company_account_hierarchy(self):
+        # ERPNext v16 rejects child-Company Account creation before the same
+        # account_name exists on the root Company. The CI fixture must create
+        # the root prerequisite without weakening actual accounting policy.
+        self.assertIn(
+            "from erpnext.accounts.doctype.account.account import get_root_company",
+            BRIDGE,
+        )
+        self.assertIn("roots = get_root_company(company)", BRIDGE)
+        self.assertIn("check_or_create(root_company, root_parent)", BRIDGE)
+        self.assertIn("result = check_or_create(company, parent.name)", BRIDGE)
+        self.assertLess(
+            BRIDGE.index("check_or_create(root_company, root_parent)"),
+            BRIDGE.index("result = check_or_create(company, parent.name)"),
+        )
+        self.assertNotIn("ignore_root_company_validation", BRIDGE)
+        self.assertNotIn("allow_account_creation_against_child_company", BRIDGE)
+        self.assertNotIn("ignore_mandatory=True", BRIDGE)
+        self.assertNotIn("frappe.db.commit()", BRIDGE)
