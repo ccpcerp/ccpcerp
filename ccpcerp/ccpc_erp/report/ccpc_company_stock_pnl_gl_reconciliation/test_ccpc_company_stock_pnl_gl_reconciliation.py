@@ -153,7 +153,7 @@ class TestCCPCCompanyStockPnlGLReconciliation(TestCase):
         for required in (
             "FROM `tabGL Entry` gl", "INNER JOIN `tabAccount` acc",
             "acc.company = gl.company", "gl.company = %(company)s",
-            "gl.is_cancelled = 0",
+            "gl.docstatus = 1", "gl.is_cancelled = 0",
             "gl.posting_date BETWEEN %(from_date)s AND %(to_date)s",
             "acc.report_type = 'Profit and Loss'",
             "acc.root_type IN ('Expense', 'Income')",
