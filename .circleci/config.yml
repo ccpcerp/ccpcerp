@@ -12,6 +12,10 @@ parameters:
   run_finance_lifecycle:
     type: boolean
     default: false
+  # Separate strictly opt-in bridge workflow; never triggered by PR labels.
+  run_finance_bridge:
+    type: boolean
+    default: false
 
 jobs:
   python-syntax:
@@ -155,6 +159,10 @@ jobs:
   finance-lifecycle-isolated-integration:
     # Standalone disposable Finance CI job; original legacy job remains unchanged.
     # Not scheduled, never a PR label trigger: manual approval plus SHA pin.
+    parameters:
+      run_bridge:
+        type: boolean
+        default: false
     docker:
       - image: cimg/python:3.14-node
       - image: mariadb:11.8
@@ -201,6 +209,7 @@ jobs:
             python .circleci/finance_baseline_deadline.py start
             python .circleci/finance_baseline_deadline.py run python -m unittest discover -s .circleci -p 'test_finance_lifecycle_ci_guard.py' -v
             python .circleci/finance_baseline_deadline.py run python -m unittest discover -s .circleci -p 'test_finance_ci_config_static.py' -v
+            python .circleci/finance_baseline_deadline.py run python -m unittest discover -s .circleci -p 'test_finance_bridge_config_static.py' -v
             python .circleci/finance_baseline_deadline.py run python -m unittest discover -s .circleci -p 'test_finance_baseline_deadline.py' -v
             python .circleci/finance_baseline_deadline.py run python -m compileall -q ccpcerp
       - run:
@@ -221,6 +230,15 @@ jobs:
           command: |
             set -euo pipefail
             python .circleci/finance_baseline_deadline.py run bash .circleci/finance_baseline_stage.sh tests
+      - when:
+          condition: << parameters.run_bridge >>
+          steps:
+            - run:
+                name: Signed Withdrawal to real ledger and intercompany source bridge
+                no_output_timeout: 20m
+                command: |
+                  set -euo pipefail
+                  python .circleci/finance_baseline_deadline.py run bash .circleci/finance_baseline_stage.sh bridge
 
 workflows:
   starter-validation:
@@ -241,6 +259,21 @@ workflows:
       - finance-lifecycle-isolated-integration:
           requires:
             - finance-lifecycle-manual-approval
+          filters:
+            branches:
+              only: feature/finance-mapping-lifecycle-2026-10-28
+  opt-in-finance-bridge:
+    when: << pipeline.parameters.run_finance_bridge >>
+    jobs:
+      - finance-bridge-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: feature/finance-mapping-lifecycle-2026-10-28
+      - finance-lifecycle-isolated-integration:
+          run_bridge: true
+          requires:
+            - finance-bridge-manual-approval
           filters:
             branches:
               only: feature/finance-mapping-lifecycle-2026-10-28
