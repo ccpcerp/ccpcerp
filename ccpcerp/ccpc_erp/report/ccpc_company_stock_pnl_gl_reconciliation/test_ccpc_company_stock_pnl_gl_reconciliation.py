@@ -139,7 +139,7 @@ class TestCCPCCompanyStockPnlGLReconciliation(TestCase):
             "sle.is_cancelled = 0", "sle.actual_qty < 0",
             "GROUP BY sle.company, sle.voucher_no, sle.voucher_detail_no",
             "ledger.voucher_detail_no = sed.name",
-            "AND ledger.company = se.company",
+            "ON ledger.company = se.company",
             "COUNT(DISTINCT sed.name)",
             "LIMIT %(stock_limit)s",
         ):
