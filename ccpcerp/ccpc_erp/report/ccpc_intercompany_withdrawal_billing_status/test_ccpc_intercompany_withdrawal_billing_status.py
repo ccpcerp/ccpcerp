@@ -57,7 +57,7 @@ class TestCCPCIntercompanyWithdrawalBillingStatus(TestCase):
         self.assertIn("GROUP BY sle.voucher_no, sle.voucher_detail_no, sle.company", sql)
         self.assertIn("sle.voucher_detail_no = sed.name", sql.replace("source_sle.voucher_detail_no", "sle.voucher_detail_no"))
         self.assertIn("source_sle.company = se.company", sql)
-        self.assertIn("AND se.docstatus = 1", sql)
+        self.assertIn("WHERE se.docstatus = 1", sql)
         self.assertIn("AND sle.is_cancelled = 0", sql)
         self.assertIn("AND sle.actual_qty < 0", sql)
         self.assertIn("AND batch.status != 'Cancelled'", sql)
