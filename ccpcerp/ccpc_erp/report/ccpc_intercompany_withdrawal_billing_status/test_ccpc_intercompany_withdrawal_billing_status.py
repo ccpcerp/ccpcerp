@@ -121,3 +121,16 @@ class TestCCPCIntercompanyWithdrawalBillingStatus(TestCase):
         self.assertEqual(report._invoice_status("SI-1", 0), "Draft")
         self.assertEqual(report._invoice_status("SI-1", 1), "Submitted")
         self.assertEqual(report._invoice_status("SI-1", 2), "Cancelled")
+
+    def test_money_columns_use_explicit_issuing_company_currency(self):
+        columns = {
+            col["fieldname"]: col
+            for col in report.get_columns()
+        }
+        for field in ("gross_sle_issue_value", "frozen_billing_amount"):
+            self.assertEqual(columns[field]["fieldtype"], "Currency")
+            self.assertEqual(columns[field]["options"], "issuing_currency")
+        self.assertFalse(any(
+            col["fieldname"] in ("grand_total", "combined_cost")
+            for col in columns.values()
+        ))
