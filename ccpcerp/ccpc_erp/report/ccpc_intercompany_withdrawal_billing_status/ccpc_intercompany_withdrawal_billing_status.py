@@ -166,8 +166,10 @@ def _source_sql():
             ON claim.stock_entry_detail = sed.name
         LEFT JOIN `tabSales Invoice` si
             ON si.name = claim.sales_invoice
+           AND si.company = se.company
         LEFT JOIN `tabPurchase Invoice` pi
             ON pi.name = claim.purchase_invoice
+           AND pi.company = ws.requesting_company
         WHERE se.docstatus = 1
           AND se.purpose = 'Material Issue'
           AND se.company = %(issuing_company)s
