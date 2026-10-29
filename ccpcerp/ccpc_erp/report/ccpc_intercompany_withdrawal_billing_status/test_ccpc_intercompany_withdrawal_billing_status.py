@@ -184,3 +184,10 @@ class TestCCPCIntercompanyWithdrawalBillingStatus(TestCase):
         self.assertIn("INVOICE_RECIPROCAL_LINK_MISMATCH",
                       item["source_quality"])
         self.assertNotEqual(item["source_quality"], "OK")
+
+    def test_foreign_invoice_references_are_not_joined_or_disclosed(self):
+        sql = report._source_sql()
+        self.assertIn("si.name = claim.sales_invoice", sql)
+        self.assertIn("AND si.company = se.company", sql)
+        self.assertIn("pi.name = claim.purchase_invoice", sql)
+        self.assertIn("AND pi.company = ws.requesting_company", sql)
