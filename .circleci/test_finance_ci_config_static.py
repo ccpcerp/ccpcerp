@@ -102,6 +102,24 @@ class TestFinanceCiConfigStatic(TestCase):
         )
         self.assertIn("for port in 3306 13000 11000; do", stage)
 
+    def test_bench_upstream_remotes_fetch_both_pinned_commits(self):
+        # bench init and bench get-app name their cloned Git remotes 'upstream'.
+        # CircleCI #11 failed with exit 128 when Frappe was fetched from 'origin'.
+        for app, sha in (
+            ("frappe", "FRAPPE_SHA"),
+            ("erpnext", "ERPNEXT_SHA"),
+        ):
+            with self.subTest(app=app):
+                self.assertIn(
+                    f'git -C apps/{app} fetch --depth 1 upstream "${sha}"',
+                    stage,
+                )
+                self.assertIn(
+                    f'test "$(git -C apps/{app} rev-parse HEAD)" = "${sha}"',
+                    stage,
+                )
+        self.assertNotIn("fetch --depth 1 origin", stage)
+
     def test_baseline_suite_has_exactly_eight_reviewed_methods(self):
         expected = {
             "test_a_schema_has_required_lifecycle_fields_and_no_general_permissions",

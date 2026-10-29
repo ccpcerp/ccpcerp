@@ -45,13 +45,13 @@ case "${1:-}" in
     bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
       --python "$(command -v python)" "$BENCH_DIR"
     cd "$BENCH_DIR"
-    git -C apps/frappe fetch --depth 1 origin "$FRAPPE_SHA"
+    git -C apps/frappe fetch --depth 1 upstream "$FRAPPE_SHA"
     git -C apps/frappe checkout --detach "$FRAPPE_SHA"
     bench set-config -g redis_cache redis://127.0.0.1:13000
     bench set-config -g redis_queue redis://127.0.0.1:11000
     bench set-config -g redis_socketio redis://127.0.0.1:11000
     bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
-    git -C apps/erpnext fetch --depth 1 origin "$ERPNEXT_SHA"
+    git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
     git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
     bench get-app ccpcerp "$APP_CHECKOUT"
     test "$(git -C apps/frappe rev-parse HEAD)" = "$FRAPPE_SHA"
