@@ -58,40 +58,55 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
             frappe.db.get_value("Company", BUYER, "default_currency"),
             "Disposable intercompany sample requires equal currencies.",
         )
-        # The requestor Department must belong to the BUYER, not the issuing
-        # Company. The real beneficiary work_for_department remains in the
-        # issuing Company so the signed Expense/Center GL allocation is source-
-        # scoped. All modifications are synthetic CI test fixtures only.
-        buyer_department_name = "CI Bridge Request " + frappe.generate_hash(length=10)
+        # Build the cross-company Withdrawal request with CORRECT fields at
+        # original insert, before the base fixture's test-only workflow shortcut.
+        # Never change immutable request intent on a Stockroom Review slip.
         buyer_department = frappe.get_doc({
             "doctype": "Department",
-            "department_name": buyer_department_name,
+            "department_name": "CI Bridge Request " + frappe.generate_hash(length=10),
             "company": BUYER,
             "is_group": 0,
         }).insert(ignore_permissions=True)
         self.assertEqual(
-            frappe.db.get_value("Department", buyer_department.name, "company"), BUYER
+            frappe.db.get_value("Department", buyer_department.name, "company"),
+            BUYER,
         )
+        frappe.set_user(base_ledger.PREPARER)
+        intercompany_slip = frappe.get_doc({
+            "doctype": "Withdrawal Slip",
+            "requestor": "CI Cross-Company Synthetic Requestor",
+            "approving_supervisor": base_ledger.PREPARER,
+            "required_by": nowdate(),
+            "source_warehouse": base_ledger.WAREHOUSE,
+            "company": COMPANY,
+            "requesting_company": BUYER,
+            "department": buyer_department.name,
+            "work_for_department": self.department,
+            "physical_location": "Disposable intercompany CI bay",
+            "purpose": "Disposable signed-ledger-to-billing integration test",
+            "received_by": "CI Synthetic Receiver",
+            "items": [{
+                "item_code": self.item.name,
+                "requested_qty": QTY_ISSUED,
+                "issue_qty": QTY_ISSUED,
+                "uom": "_Test UOM",
+            }],
+        }).insert(ignore_permissions=True)
+        self.assertEqual(intercompany_slip.status, "Draft")
+        self.assertEqual(intercompany_slip.company, COMPANY)
+        self.assertEqual(intercompany_slip.requesting_company, BUYER)
+        self.assertEqual(intercompany_slip.department, buyer_department.name)
+        self.assertEqual(intercompany_slip.work_for_department, self.department)
+        self.assertEqual(intercompany_slip.owner, base_ledger.PREPARER)
+        # Reuse the preexisting real-stock fixture's explicitly test-only
+        # Stockroom Review shortcut; we are NOT proving the workflow transition.
         frappe.db.set_value(
-            "Withdrawal Slip", self.slip_name,
-            {"requesting_company": BUYER, "department": buyer_department.name},
-            update_modified=False,
+            "Withdrawal Slip", intercompany_slip.name,
+            "status", "Stockroom Review",
         )
-        self.assertEqual(
-            frappe.db.get_value(
-                "Withdrawal Slip", self.slip_name,
-                ["requesting_company", "department"], as_dict=True,
-            ).get("requesting_company"), BUYER,
-        )
-        self.assertEqual(
-            frappe.db.get_value("Withdrawal Slip", self.slip_name, "department"),
-            buyer_department.name,
-        )
-        self.assertEqual(
-            frappe.db.get_value(
-                "Withdrawal Slip", self.slip_name, "work_for_department"
-            ), self.department,
-        )
+        self.slip_name = intercompany_slip.name
+        self.slip_item_name = intercompany_slip.items[0].name
+        frappe.set_user("Administrator")
         self.account = "Stock Adjustment - _TC"
         self.center = frappe.db.get_value(
             "Cost Center", {"company": COMPANY, "is_group": 0, "disabled": 0},
