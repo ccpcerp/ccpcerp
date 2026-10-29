@@ -99,6 +99,8 @@ def _source_sql():
             claim.billing_month,
             claim.billed_issuer,
             claim.billed_requester,
+            claim.bill_stock_entry,
+            claim.bill_withdrawal_slip,
             claim.bill_item_code,
             claim.bill_quantity,
             claim.bill_uom,
@@ -107,8 +109,10 @@ def _source_sql():
             claim.purchase_invoice,
             si.docstatus AS sales_docstatus,
             si.company AS sales_company,
+            si.inter_company_invoice_reference AS sales_pair_reference,
             pi.docstatus AS purchase_docstatus,
-            pi.company AS purchase_company
+            pi.company AS purchase_company,
+            pi.inter_company_invoice_reference AS purchase_pair_reference
         FROM `tabStock Entry` se
         INNER JOIN `tabStock Entry Detail` sed
             ON sed.parent = se.name
@@ -144,6 +148,8 @@ def _source_sql():
                 batch.billing_month,
                 batch.issuing_company AS billed_issuer,
                 batch.requesting_company AS billed_requester,
+                bi.stock_entry AS bill_stock_entry,
+                bi.withdrawal_slip AS bill_withdrawal_slip,
                 bi.item_code AS bill_item_code,
                 bi.quantity AS bill_quantity,
                 bi.stock_uom AS bill_uom,
@@ -210,6 +216,11 @@ def _present(rows):
 
         if source.batch_name:
             if (
+                source.bill_stock_entry != source.stock_entry
+                or source.bill_withdrawal_slip != source.withdrawal_slip
+            ):
+                reasons.append("BILLING_ORIGINAL_VOUCHER_MISMATCH")
+            if (
                 source.billed_issuer != source.issuing_company
                 or source.billed_requester != source.requesting_company
             ):
@@ -231,6 +242,12 @@ def _present(rows):
             reasons.append("SALES_COMPANY_OR_LINK_INVALID")
         if source.purchase_invoice and source.purchase_company != source.requesting_company:
             reasons.append("PURCHASE_COMPANY_OR_LINK_INVALID")
+        if source.sales_invoice and source.purchase_invoice:
+            if (
+                source.sales_pair_reference != source.purchase_invoice
+                or source.purchase_pair_reference != source.sales_invoice
+            ):
+                reasons.append("INVOICE_RECIPROCAL_LINK_MISMATCH")
         if source.batch_status in ("Approved", "Invoiced") and (
             sales_status in ("Not Created", "Missing Reference", "Cancelled")
             or purchase_status in ("Not Created", "Missing Reference", "Cancelled")
