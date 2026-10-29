@@ -93,7 +93,7 @@ class TestDepartment29CIConfigStatic(TestCase):
             if isinstance(node, ast.FunctionDef)
             and node.name.startswith("test_")
         ]
-        self.assertEqual(len(methods), 5)
+        self.assertEqual(len(methods), 6)
         self.assertTrue(all(m.startswith("test_") for m in methods))
         self.assertLess(
             TESTS.index("assert_department29_disposable_site("),
