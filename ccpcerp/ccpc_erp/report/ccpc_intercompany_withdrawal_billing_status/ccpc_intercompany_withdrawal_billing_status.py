@@ -128,6 +128,8 @@ def _source_sql():
                    COUNT(*) AS sle_row_count
             FROM `tabStock Ledger Entry` sle
             WHERE sle.voucher_type = 'Stock Entry'
+              AND sle.company = %(issuing_company)s
+              AND sle.posting_date BETWEEN %(from_date)s AND %(to_date)s
               AND sle.is_cancelled = 0
               AND sle.actual_qty < 0
             GROUP BY sle.voucher_no, sle.voucher_detail_no, sle.company
