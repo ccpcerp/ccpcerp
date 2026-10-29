@@ -480,6 +480,14 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         This simulates elapsed wall-clock month-end for the CI fixture only.
         """
         period_end = getdate(get_last_day(nowdate()))
+        # First prove the real Controller rejects premature finalization.
+        # If CI runs on a boundary day when the period already ended, this
+        # same-day request still correctly fails (<= period_end).
+        with self.assertRaises(Exception):
+            batch.finalize_month()
+        batch.reload()
+        self.assertEqual(batch.status, "Draft")
+        self.assertFalse(batch.finalized_on or batch.finalized_by)
         simulated_next_day = period_end + timedelta(days=1)
         after_month_end = datetime.combine(
             simulated_next_day, datetime.min.time()
