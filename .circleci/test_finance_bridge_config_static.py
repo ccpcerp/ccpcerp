@@ -4,6 +4,7 @@ The bridge is an explicitly selected second workflow, with its own manual
 hold but reuses the established fail-closed Finance G2 job, exact SHA,
 disposable site and 90-minute cumulative wall-clock runner.
 """
+import ast
 from pathlib import Path
 from unittest import TestCase
 
@@ -91,9 +92,35 @@ class TestBridgeCiStatic(TestCase):
         self.assertNotIn("context:", bridge_workflow)
         self.assertNotIn("ssh-add", bridge_workflow)
         self.assertNotIn("docker.sock", bridge_workflow)
-        self.assertNotIn("approve_and_create_invoices", BRIDGE)
-        self.assertNotIn(".submit()", BRIDGE)
+        # The new real invoice-pair probe must use the production Approval
+        # service, but never submit the resulting draft invoices.
+        self.assertIn("batch.approve_and_create_invoices()", BRIDGE)
+        self.assertNotIn("sales.submit(", BRIDGE)
+        self.assertNotIn("purchase.submit(", BRIDGE)
+        self.assertIn(
+            "self.assertEqual((sales.docstatus, purchase.docstatus), (0, 0))",
+            BRIDGE,
+        )
+        self.assertIn(
+            "Unsubmitted draft invoice must not post GL", BRIDGE
+        )
         self.assertIn("assert_finance_disposable_site(", BRIDGE)
         self.assertIn("sign_mapping_decision(", BRIDGE)
-        self.assertIn("test_a_signed_issue_reaches_real_ledger_and_billing_source", BRIDGE)
-        self.assertIn("test_b_unsigned_issue_cannot_enter_billing_preview", BRIDGE)
+
+    def test_exact_four_disposable_source_and_invoice_methods(self):
+        module = ast.parse(BRIDGE)
+        methods = {
+            node.name for cls in module.body if isinstance(cls, ast.ClassDef)
+            for node in cls.body if isinstance(node, ast.FunctionDef)
+            and node.name.startswith("test_")
+        }
+        self.assertEqual(methods, {
+            "test_a_signed_issue_reaches_real_ledger_and_billing_source",
+            "test_b_unsigned_issue_cannot_enter_billing_preview",
+            "test_c_real_source_finalizes_to_actual_paired_invoice_drafts",
+            "test_d_second_draft_insert_failure_rolls_back_real_first_invoice",
+        })
+        self.assertIn("batch.finalize_month()", BRIDGE)
+        self.assertIn('patch.object(Billing, "_build_purchase_invoice"', BRIDGE)
+        self.assertIn("Failed purchase must not leave an orphan real Sales Invoice", BRIDGE)
+        self.assertIn("preview = batch.refresh_preview()", BRIDGE)

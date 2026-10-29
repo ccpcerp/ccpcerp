@@ -1,17 +1,26 @@
 # Copyright (c) 2026, CCPC and contributors
 """Exact-source Finance -> Withdrawal -> SLE/GL -> billing-source SQL bridge.
 
-DISPOSABLE-CI-ONLY candidate. Real Frappe/ERPNext tables, auth-backed signed
-mapping decisions and submitted stock/ledger records; no mocked accounting,
-no invoice approval, no generated invoice, and no production data.
+DISPOSABLE-CI-ONLY suite. Real Frappe/ERPNext tables, authenticated
+signed Finance mapping decisions, submitted stock/ledger records, true billing
+preview and REAL paired Sales/Purchase *draft* invoice inserts. No invoice is
+submitted; no production data or live site is accessed.
 
-Not wired to an automatic or manually triggered CircleCI workflow. This test
-requires a future separately approved Finance-feature SHA, with the
-finance-lifecycle-isolated-integration job/site and project-level SHA gate.
+The new month-end invoice tests simulate only the billing Controller clock,
+and inject a second-invoice failure to probe actual MariaDB savepoint rollback.
+Runs only via the default-off, manually held exact-SHA Finance bridge workflow;
+every test requires its established disposable CI identity/site guard.
 """
+from datetime import datetime, timedelta
+from unittest.mock import patch
+
 import frappe
 from erpnext.tests.utils import ERPNextTestSuite
-from frappe.utils import flt, nowdate
+from frappe.utils import flt, get_last_day, getdate, nowdate
+
+from ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.intercompany_material_billing_batch import (
+    IntercompanyMaterialBillingBatch as Billing,
+)
 
 from ccpcerp.ccpc_erp.bc_finance_evidence import sign_mapping_decision
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
@@ -292,3 +301,336 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertFalse(frappe.get_doc(
             "Intercompany Material Billing Batch", batch.name
         ).items)
+
+    # These source-to-invoice tests intentionally reuse the already passing
+    # synthetic original-issue fixture and FINANCE site/SHA guard above. The
+    # only mocks are a controlled month-end clock and a deliberate failure
+    # injection; real Frappe Documents and MariaDB writes are not mocked.
+
+    def _create_internal_party(self, kind, represents_company, allowed_company):
+        self.assertIn(kind, ("Customer", "Supplier"))
+        internal_field = (
+            "is_internal_customer" if kind == "Customer"
+            else "is_internal_supplier"
+        )
+        self.assertFalse(frappe.get_all(
+            kind,
+            filters={internal_field: 1, "represents_company": represents_company,
+                     "disabled": 0},
+            pluck="name",
+        ), "Disposable test fixture must not reuse an unknown internal party")
+        grouping = "Customer Group" if kind == "Customer" else "Supplier Group"
+        group = frappe.db.get_value(grouping, {"is_group": 0}, "name")
+        self.assertTrue(group, "Missing ERPNext synthetic " + grouping)
+        name = "CI-SOURCE-PAIR-" + frappe.generate_hash(length=12)
+        values = {
+            "doctype": kind,
+            "customer_name" if kind == "Customer" else "supplier_name": name,
+            "customer_group" if kind == "Customer" else "supplier_group": group,
+            internal_field: 1,
+            "represents_company": represents_company,
+            "companies": [{"company": allowed_company}],
+        }
+        if kind == "Customer":
+            values.update(
+                customer_type="Company",
+                territory=frappe.db.get_value(
+                    "Territory", {"is_group": 0}, "name"
+                ),
+            )
+        else:
+            values["supplier_type"] = "Company"
+        return frappe.get_doc(values).insert(ignore_permissions=True).name
+
+    def _ensure_disposable_account(
+        self, company, number, label, root_type, account_type=None
+    ):
+        """Create the exact named business-required account in CI only.
+
+        Do not fall back to another arbitrary real Account or call a live
+        Company provisioning patch. The review site guard ran before setUp.
+        """
+        abbr = frappe.db.get_value("Company", company, "abbr")
+        self.assertTrue(abbr)
+        expected = f"{number} - {label} - {abbr}"
+        self.assertFalse(
+            frappe.db.exists("Account", {
+                "company": company, "account_number": number,
+            }),
+            "Expected isolated synthetic Account number to be unused",
+        )
+        self.assertFalse(frappe.db.exists("Account", expected))
+        parent = frappe.db.get_value(
+            "Account", {
+                "company": company, "root_type": root_type,
+                "is_group": 1, "disabled": 0,
+            }, "name",
+        )
+        self.assertTrue(parent, "Missing synthetic Account parent " + root_type)
+        account = frappe.get_doc({
+            "doctype": "Account",
+            "account_number": number,
+            "account_name": label,
+            "company": company,
+            "parent_account": parent,
+            "account_type": account_type or "",
+            "is_group": 0,
+        }).insert(ignore_permissions=True)
+        self.assertEqual(account.name, expected)
+        self.assertEqual(
+            frappe.db.get_value("Account", account.name, "root_type"),
+            root_type,
+        )
+        return expected
+
+    def _prepare_disposable_invoice_masters(self):
+        """Set up exact internal parties and Chart paths in disposable DB.
+
+        Real Controller account and Company validation is intentionally not
+        patched or relaxed. Never run against actual CCPC master data.
+        """
+        frappe.set_user("Administrator")
+        self.load_test_records("Sales Invoice")
+        self.customer = self._create_internal_party("Customer", BUYER, COMPANY)
+        self.supplier = self._create_internal_party("Supplier", COMPANY, BUYER)
+        specs = (
+            ("1312", "Intercompany Receivable", "Asset", "Receivable"),
+            ("2121", "Intercompany Payable", "Liability", "Payable"),
+            ("5150", "Intercompany Materials Expense", "Expense", ""),
+            ("6050", "Intercompany Material Charges", "Income", ""),
+        )
+        for company in (COMPANY, BUYER):
+            center = frappe.db.get_value(
+                "Cost Center", {
+                    "company": company, "is_group": 0, "disabled": 0,
+                }, "name",
+            )
+            self.assertTrue(center, "Missing buyer/issuer synthetic leaf Cost Center")
+            # Synthetic site Company test fixtures are not CCPC master charts.
+            # Supply only the explicit default required by existing billing.
+            frappe.db.set_value(
+                "Company", company, "cost_center", center,
+                update_modified=False,
+            )
+            for number, label, root_type, account_type in specs:
+                self._ensure_disposable_account(
+                    company, number, label, root_type, account_type
+                )
+
+    def _issue_signed_source_for_real_pair(self):
+        self._actor(MAKER, "CCPC Mapping Preparer")
+        self._actor(CHECKER, "CCPC Accounting Mapping Approver")
+        self._approve_signed("Expense", "_Test Item Group", self.account)
+        self._approve_signed("Center", self.department, self.center)
+        frappe.set_user(ISSUER)
+        issued = issue_withdrawal_slip(self.slip_name)
+        stock = frappe.get_doc("Stock Entry", issued["name"])
+        self.assertEqual(stock.docstatus, 1)
+        self.assertEqual(len(stock.items), 1)
+        item = stock.items[0]
+        sle = frappe.get_all(
+            "Stock Ledger Entry", filters={
+                "voucher_type": "Stock Entry", "voucher_no": stock.name,
+                "is_cancelled": 0,
+            },
+            fields=["stock_value_difference", "actual_qty"],
+        )
+        self.assertTrue(sle)
+        self.assertAlmostEqual(
+            -sum(flt(row.actual_qty) for row in sle), QTY_ISSUED
+        )
+        expense = frappe.get_all(
+            "GL Entry", filters={
+                "voucher_type": "Stock Entry", "voucher_no": stock.name,
+                "account": self.account, "is_cancelled": 0,
+            },
+            fields=["debit", "credit", "cost_center", "department"],
+        )
+        self.assertTrue(expense)
+        self.assertAlmostEqual(
+            sum(flt(row.debit - row.credit) for row in expense),
+            -sum(flt(row.stock_value_difference) for row in sle),
+            places=2,
+        )
+        self.assertTrue(all(
+            row.department == self.department and row.cost_center == self.center
+            for row in expense
+        ))
+        frappe.set_user("Administrator")
+        batch = self._billing_candidate()
+        preview = batch.refresh_preview()
+        self.assertEqual(preview["line_count"], 1)
+        batch.reload()
+        self.assertEqual(len(batch.items), 1)
+        self.assertEqual(batch.items[0].stock_entry, stock.name)
+        self.assertEqual(batch.items[0].stock_entry_detail, item.name)
+        self.assertEqual(batch.items[0].withdrawal_slip, self.slip_name)
+        self.assertAlmostEqual(
+            flt(batch.items[0].frozen_basic_amount),
+            flt(item.basic_amount),
+            places=2,
+        )
+        return batch, stock, item
+
+    def _finalize_real_month_end(self, batch):
+        """Move only billing Controller's site clock to first day next month.
+
+        The actual submitted Stock Entry retains its real server-stamped
+        posting date. No backdating, global clock change, or period bypass.
+        This simulates elapsed wall-clock month-end for the CI fixture only.
+        """
+        period_end = getdate(get_last_day(nowdate()))
+        # First prove the real Controller rejects premature finalization.
+        # If CI runs on a boundary day when the period already ended, this
+        # same-day request still correctly fails (<= period_end).
+        with self.assertRaises(Exception):
+            batch.finalize_month()
+        batch.reload()
+        self.assertEqual(batch.status, "Draft")
+        self.assertFalse(batch.finalized_on or batch.finalized_by)
+        simulated_next_day = period_end + timedelta(days=1)
+        after_month_end = datetime.combine(
+            simulated_next_day, datetime.min.time()
+        ) + timedelta(hours=9)
+        module = (
+            "ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch."
+            "intercompany_material_billing_batch"
+        )
+        with (
+            patch(module + ".today", return_value=str(simulated_next_day)),
+            patch(module + ".now_datetime", return_value=after_month_end),
+        ):
+            completed = batch.finalize_month()
+        self.assertEqual(completed["status"], "Under Review")
+        self.assertEqual(completed["line_count"], 1)
+        batch.reload()
+        self.assertEqual(batch.status, "Under Review")
+        self.assertEqual(getdate(batch.finalized_on), simulated_next_day)
+        self.assertEqual(getdate(batch.period_end), period_end)
+        self.assertEqual(batch.finalized_by, "Administrator")
+        self.assertEqual(len(batch.items), 1)
+        return module, after_month_end, simulated_next_day
+
+    def _approve_real_pair_at_month_end(
+        self, batch, module, after_month_end, simulated_next_day
+    ):
+        with (
+            patch(module + ".today", return_value=str(simulated_next_day)),
+            patch(module + ".now_datetime", return_value=after_month_end),
+        ):
+            return batch.approve_and_create_invoices()
+
+    def _assert_drafts_are_real_and_unposted(self, result, stock, item, batch):
+        sales = frappe.get_doc("Sales Invoice", result["sales_invoice"])
+        purchase = frappe.get_doc("Purchase Invoice", result["purchase_invoice"])
+        self.assertEqual((sales.company, purchase.company), (COMPANY, BUYER))
+        self.assertEqual(sales.customer, self.customer)
+        self.assertEqual(purchase.supplier, self.supplier)
+        self.assertEqual(sales.inter_company_invoice_reference, purchase.name)
+        self.assertEqual(purchase.inter_company_invoice_reference, sales.name)
+        self.assertEqual((sales.docstatus, purchase.docstatus), (0, 0))
+        self.assertFalse(sales.update_stock or purchase.update_stock)
+        self.assertFalse(sales.taxes or purchase.taxes)
+        self.assertEqual(len(sales.items), 1)
+        self.assertEqual(len(purchase.items), 1)
+        self.assertEqual(sales.items[0].item_code, item.item_code)
+        self.assertEqual(purchase.items[0].item_code, item.item_code)
+        self.assertAlmostEqual(flt(sales.items[0].qty), flt(item.transfer_qty))
+        self.assertAlmostEqual(flt(purchase.items[0].qty), flt(item.transfer_qty))
+        self.assertAlmostEqual(
+            flt(sales.grand_total), flt(batch.total_amount), places=2
+        )
+        self.assertAlmostEqual(
+            flt(purchase.grand_total), flt(batch.total_amount), places=2
+        )
+        for doctype, invoice in (
+            ("Sales Invoice", sales), ("Purchase Invoice", purchase)
+        ):
+            self.assertEqual(frappe.db.count(
+                "GL Entry", {
+                    "voucher_type": doctype, "voucher_no": invoice.name,
+                }
+            ), 0, "Unsubmitted draft invoice must not post GL")
+        self.assertEqual(frappe.db.count(
+            "Stock Entry", {
+                "withdrawal_slip": self.slip_name, "docstatus": 1,
+            }
+        ), 1)
+        self.assertEqual(batch.sales_invoice, sales.name)
+        self.assertEqual(batch.purchase_invoice, purchase.name)
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual(batch.items[0].stock_entry, stock.name)
+        self.assertEqual(batch.items[0].stock_entry_detail, item.name)
+        return sales, purchase
+
+    def test_c_real_source_finalizes_to_actual_paired_invoice_drafts(self):
+        """Real source→month-end→draft pair; only billing time is simulated."""
+        batch, stock, detail = self._issue_signed_source_for_real_pair()
+        self._prepare_disposable_invoice_masters()
+        module, after_month_end, next_day = self._finalize_real_month_end(
+            batch
+        )
+        approved = self._approve_real_pair_at_month_end(
+            batch, module, after_month_end, next_day
+        )
+        batch.reload()
+        self._assert_drafts_are_real_and_unposted(
+            approved, stock, detail, batch
+        )
+        self.assertEqual(batch.approved_by, "Administrator")
+        self.assertTrue(batch.approved_on)
+        with self.assertRaises(Exception):
+            self._approve_real_pair_at_month_end(
+                batch, module, after_month_end, next_day
+            )
+        batch.reload()
+        self.assertEqual(batch.sales_invoice, approved["sales_invoice"])
+        self.assertEqual(batch.purchase_invoice, approved["purchase_invoice"])
+
+    def test_d_second_draft_insert_failure_rolls_back_real_first_invoice(self):
+        """Real SQL savepoint deletes first invoice, retry creates one pair."""
+        batch, stock, detail = self._issue_signed_source_for_real_pair()
+        self._prepare_disposable_invoice_masters()
+        module, after_month_end, next_day = self._finalize_real_month_end(
+            batch
+        )
+        # Real sales insert must occur before injecting the second invoice
+        # builder failure. The first invoice SQL write must roll back even
+        # though this test deliberately catches the exception.
+        with (
+            patch.object(Billing, "_build_purchase_invoice",
+                         side_effect=RuntimeError("CI second invoice failure")),
+            self.assertRaisesRegex(RuntimeError, "CI second invoice failure"),
+        ):
+            self._approve_real_pair_at_month_end(
+                batch, module, after_month_end, next_day
+            )
+        batch.reload()
+        self.assertEqual(batch.status, "Under Review")
+        self.assertFalse(batch.sales_invoice or batch.purchase_invoice)
+        self.assertFalse(batch.approved_by or batch.approved_on)
+        marker = "Intercompany material billing batch " + batch.name
+        self.assertEqual(frappe.db.count(
+            "Sales Invoice", {"remarks": marker}
+        ), 0, "Failed purchase must not leave an orphan real Sales Invoice")
+        self.assertEqual(frappe.db.count(
+            "Purchase Invoice", {"remarks": marker}
+        ), 0)
+        self.assertEqual(frappe.db.count(
+            "Stock Entry", {
+                "withdrawal_slip": self.slip_name, "docstatus": 1,
+            }
+        ), 1, "Failed invoice approval must not duplicate/reverse original stock")
+        approved = self._approve_real_pair_at_month_end(
+            batch, module, after_month_end, next_day
+        )
+        batch.reload()
+        self._assert_drafts_are_real_and_unposted(
+            approved, stock, detail, batch
+        )
+        self.assertEqual(frappe.db.count(
+            "Sales Invoice", {"remarks": marker}
+        ), 1)
+        self.assertEqual(frappe.db.count(
+            "Purchase Invoice", {"remarks": marker}
+        ), 1)
