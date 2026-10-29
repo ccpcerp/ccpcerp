@@ -229,6 +229,9 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         """Missing signed maps must leave zero stock, GL and billable source."""
         frappe.set_user(ISSUER)
         before_qty = self._bin_qty()
+        before_sle = frappe.db.count("Stock Ledger Entry", {
+            "voucher_type": "Stock Entry", "item_code": self.item.name,
+        })
         with self.assertRaises(MappingPolicyError):
             issue_withdrawal_slip(self.slip_name)
         self.assertAlmostEqual(self._bin_qty(), before_qty)
@@ -237,7 +240,7 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         }), 0)
         self.assertEqual(frappe.db.count("Stock Ledger Entry", {
             "voucher_type": "Stock Entry", "item_code": self.item.name,
-        }), 0)
+        }), before_sle, "Rejected issue must not add SLE beyond the fixture receipt")
         batch = self._billing_candidate()
         preview = batch.refresh_preview()
         self.assertEqual(preview["line_count"], 0)
