@@ -113,6 +113,7 @@ def _material_sql(filtered=False):
             FROM `tabStock Ledger Entry` sle
             WHERE sle.voucher_type = 'Stock Entry'
               AND sle.company = %(company)s
+              AND sle.posting_date BETWEEN %(from_date)s AND %(to_date)s
               AND sle.is_cancelled = 0
               AND sle.actual_qty < 0
             GROUP BY sle.company, sle.voucher_no, sle.voucher_detail_no
