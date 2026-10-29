@@ -14,6 +14,7 @@ frappe.query_reports["CCPC Intercompany Withdrawal Billing Status"] = {
       label: __("Requesting Company"),
       fieldtype: "Link",
       options: "Company",
+      reqd: 1,
     },
     {
       fieldname: "from_date",
