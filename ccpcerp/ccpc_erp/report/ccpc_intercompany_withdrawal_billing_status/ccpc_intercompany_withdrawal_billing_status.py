@@ -25,6 +25,7 @@ READ_SOURCES = (
 def execute(filters=None):
     _require_access()
     f = frappe._dict(filters or {})
+    f.setdefault("requesting_company", None)
     _validate_filters(f)
     rows = frappe.db.sql(_source_sql(), dict(f), as_dict=True)
     return get_columns(), _present(rows)
@@ -97,6 +98,8 @@ def _source_sql():
             claim.batch_name,
             claim.batch_status,
             claim.billing_month,
+            claim.billed_issuer,
+            claim.billed_requester,
             claim.bill_item_code,
             claim.bill_quantity,
             claim.bill_uom,
