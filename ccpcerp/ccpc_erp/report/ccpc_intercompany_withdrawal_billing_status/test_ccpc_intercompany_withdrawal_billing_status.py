@@ -34,6 +34,8 @@ class TestCCPCIntercompanyWithdrawalBillingStatus(TestCase):
             "billing_month": "2026-10-01",
             "billed_issuer": "_Test Company",
             "billed_requester": "_Test Company 5",
+            "bill_stock_entry": "MAT-STE-TEST",
+            "bill_withdrawal_slip": "WS-TEST",
             "bill_item_code": "_Test Item",
             "bill_quantity": 2,
             "bill_uom": "_Test UOM",
@@ -41,9 +43,11 @@ class TestCCPCIntercompanyWithdrawalBillingStatus(TestCase):
             "sales_invoice": "SI-TEST",
             "sales_docstatus": 0,
             "sales_company": "_Test Company",
+            "sales_pair_reference": "PI-TEST",
             "purchase_invoice": "PI-TEST",
             "purchase_docstatus": 0,
             "purchase_company": "_Test Company 5",
+            "purchase_pair_reference": "SI-TEST",
         }
         data.update(overrides)
         return frappe._dict(data)
@@ -134,3 +138,49 @@ class TestCCPCIntercompanyWithdrawalBillingStatus(TestCase):
             col["fieldname"] in ("grand_total", "combined_cost")
             for col in columns.values()
         ))
+
+    def test_requesting_company_is_mandatory_for_cross_company_visibility(self):
+        # Must reject before running any cross-company SQL. DocType read rights
+        # alone do not prove individual Requesting Company access.
+        with (
+            patch.object(report.frappe, "throw",
+                         side_effect=PermissionError("missing requester")),
+            self.assertRaisesRegex(PermissionError, "missing requester"),
+        ):
+            report._validate_filters(frappe._dict({
+                "issuing_company": "_Test Company",
+                "from_date": "2026-10-01",
+                "to_date": "2026-10-31",
+            }))
+        sql = report._source_sql()
+        self.assertIn("ws.requesting_company = %(requesting_company)s", sql)
+        self.assertNotIn("%(requesting_company)s IS NULL", sql)
+
+    def test_unauthorized_company_fails_before_query(self):
+        class BlockedCompany:
+            def check_permission(self, _mode):
+                raise PermissionError("Company denied")
+
+        with (
+            patch.object(report.frappe.db, "exists", return_value=True),
+            patch.object(report.frappe, "get_doc", return_value=BlockedCompany()),
+            self.assertRaisesRegex(PermissionError, "Company denied"),
+        ):
+            report._validate_filters(frappe._dict({
+                "issuing_company": "_Test Company",
+                "requesting_company": "_Test Company 5",
+                "from_date": "2026-10-01",
+                "to_date": "2026-10-31",
+            }))
+
+    def test_billing_origins_and_invoice_reciprocal_links_are_checked(self):
+        item = report._present([self.source(
+            bill_stock_entry="OTHER-STOCK",
+            bill_withdrawal_slip="OTHER-SLIP",
+            sales_pair_reference="UNRELATED-PI",
+        )])[0]
+        self.assertIn("BILLING_ORIGINAL_VOUCHER_MISMATCH",
+                      item["source_quality"])
+        self.assertIn("INVOICE_RECIPROCAL_LINK_MISMATCH",
+                      item["source_quality"])
+        self.assertNotEqual(item["source_quality"], "OK")
