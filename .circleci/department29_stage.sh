@@ -88,7 +88,7 @@ case "${1:-}" in
     cd "$HOME/ccpc-department29-bench"
     [[ "$(git -C apps/ccpcerp rev-parse HEAD)" == "$APPROVED" ]]
     # The 14 authored Department source policy tests run inside installed Frappe,
-    # followed by five genuine MariaDB signed-source/GL/Department tests.
+    # followed by six genuine MariaDB signed-source/GL/Department tests.
     bench --site "$TEST_SITE" run-tests --module \
       ccpcerp.ccpc_erp.report.ccpc_department_material_consumption.test_ccpc_department_material_consumption
     bench --site "$TEST_SITE" run-tests --module \
