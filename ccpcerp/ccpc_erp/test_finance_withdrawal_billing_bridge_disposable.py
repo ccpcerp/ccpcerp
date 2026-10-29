@@ -218,6 +218,10 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         )
         self.assertTrue(ledger, "Submitted source has no real Stock Ledger Entry")
         self.assertAlmostEqual(sum(flt(r.actual_qty) for r in ledger), -QTY_ISSUED)
+        inventory_outflow_value = -sum(
+            flt(r.stock_value_difference) for r in ledger
+        )
+        self.assertGreater(inventory_outflow_value, 0)
         gl = frappe.get_all(
             "GL Entry", filters={"voucher_type": "Stock Entry",
                                  "voucher_no": stock.name, "is_cancelled": 0},
@@ -225,10 +229,13 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         )
         expense = [g for g in gl if g.account == self.account and flt(g.debit) > 0]
         self.assertTrue(expense, "Signed mapping did not reach real expense GL")
+        expense_debit = sum(
+            flt(r.debit) - flt(r.credit) for r in expense
+        )
+        self.assertAlmostEqual(expense_debit, QTY_ISSUED * UNIT_RATE, places=2)
         self.assertAlmostEqual(
-            sum(flt(r.debit) - flt(r.credit) for r in expense),
-            QTY_ISSUED * UNIT_RATE,
-            places=2,
+            expense_debit, inventory_outflow_value, places=2,
+            msg="Finance GL expense must reconcile to real stock-value outflow",
         )
         self.assertTrue(all(
             g.cost_center == self.center and g.department == self.department
