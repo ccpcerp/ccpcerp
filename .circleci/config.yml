@@ -36,6 +36,10 @@ jobs:
             python --version
             python -m compileall -q ccpcerp
             python -m unittest discover -s .circleci -p 'test_ci_disposable_site_guard.py' -v
+            # Cheap source-only preflight on the combined review branch.
+            if [ "${CIRCLE_BRANCH:-}" = "review/four-day-one-reports-integration-2026-10-29" ]; then
+              python -m unittest discover -s .circleci -p 'test_four_reports_ci_config_static.py' -v
+            fi
 
   isolated-erpnext-integration:
     # Disposable CircleCI-only MariaDB/Redis/Frappe site. NOT persistent DEVELOPMENT.
