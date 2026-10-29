@@ -76,6 +76,16 @@ case "${1:-}" in
       --module ccpcerp.ccpc_erp.test_finance_lifecycle_disposable_integration
     echo "Finance disposable database tests finished; reconcile results before further stages"
     ;;
+  bridge)
+    # The new module is never reached without the same CircleCI, branch,
+    # exact SHA, disposable site and cumulative deadline checks as Finance G2.
+    export PATH="$HOME/.local/bin:$PATH"
+    cd "$HOME/ccpc-finance-lifecycle-bench"
+    test "$(git -C apps/ccpcerp rev-parse HEAD)" = "${CCPC_FINANCE_APPROVED_SHA:?}"
+    bench --site "$TEST_SITE" run-tests \
+      --module ccpcerp.ccpc_erp.test_finance_withdrawal_billing_bridge_disposable
+    echo "Finance-Withdrawal-billing bridge test completed; verify per-test SQL/GL log"
+    ;;
   *)
     echo "Unknown Finance baseline stage" >&2
     exit 2
