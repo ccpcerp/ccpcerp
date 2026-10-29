@@ -25,7 +25,6 @@ READ_SOURCES = (
 def execute(filters=None):
     _require_access()
     f = frappe._dict(filters or {})
-    f.setdefault("requesting_company", None)
     _validate_filters(f)
     rows = frappe.db.sql(_source_sql(), dict(f), as_dict=True)
     return get_columns(), _present(rows)
@@ -48,8 +47,8 @@ def _require_access():
 
 
 def _validate_filters(f):
-    if not f.get("issuing_company"):
-        frappe.throw(_("Issuing Company is required."), frappe.ValidationError)
+    if not f.get("issuing_company") or not f.get("requesting_company"):
+        frappe.throw(_("Both Issuing and Requesting Companies are required."), frappe.ValidationError)
     for field in ("issuing_company", "requesting_company"):
         if f.get(field):
             if not frappe.db.exists("Company", f[field]):
@@ -172,10 +171,7 @@ def _source_sql():
           AND sed.withdrawal_slip_item IS NOT NULL
           AND sed.withdrawal_slip_item != ''
           AND se.posting_date BETWEEN %(from_date)s AND %(to_date)s
-          AND (
-            %(requesting_company)s IS NULL
-            OR ws.requesting_company = %(requesting_company)s
-          )
+          AND ws.requesting_company = %(requesting_company)s
         ORDER BY se.posting_date, se.name, sed.idx, claim.batch_name
     """
 
