@@ -102,7 +102,6 @@ class TestFinanceCiConfigStatic(TestCase):
         )
         self.assertIn("for port in 3306 13000 11000; do", stage)
 
-
     def test_bench_upstream_remotes_fetch_both_pinned_commits(self):
         # bench init and bench get-app name their cloned Git remotes 'upstream'.
         # CircleCI #11 failed with exit 128 when Frappe was fetched from 'origin'.
