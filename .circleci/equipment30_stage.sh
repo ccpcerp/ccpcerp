@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, CCPC and contributors
+# Explicit, default-OFF CircleCI PR30 report workflow. Disposable site only.
+set -euo pipefail
+
+BRANCH='review/equipment-job-source-cost-report-2026-10-29'
+JOB='equipment-report30-isolated-integration'
+SITE='ci-equipment-report30.localhost'
+APPROVED="${CCPC_EQUIP30_APPROVED_SHA:-}"
+[[ "${CIRCLECI:-}" == true ]]
+[[ "${CIRCLE_PROJECT_USERNAME:-}" == CCPCerp_2026 ]]
+[[ "${CIRCLE_PROJECT_REPONAME:-}" == ccpcerp ]]
+[[ "${CIRCLE_BRANCH:-}" == "$BRANCH" ]]
+[[ "${CIRCLE_JOB:-}" == "$JOB" ]]
+[[ "${TEST_SITE:-}" == "$SITE" ]]
+[[ "${CCPC_ALLOW_EQUIP30_TESTS:-}" == isolated-only ]]
+[[ -n "${CIRCLE_PIPELINE_ID:-}" && -n "${CIRCLE_WORKFLOW_ID:-}" && -n "${CIRCLE_BUILD_NUM:-}" ]]
+[[ "$APPROVED" =~ ^[0-9a-f]{40}$ ]]
+[[ "${CIRCLE_SHA1:-}" == "$APPROVED" ]]
+[[ "$(git rev-parse HEAD)" == "$APPROVED" ]]
+# This validation executes before any package, database or bench operation.
+python - <<'PY'
+from ccpcerp.ccpc_erp.ci_equipment30_site_guard import assert_approved_site
+assert_approved_site("ci-equipment-report30.localhost")
+print("PR30 exact-SHA isolated CircleCI identity verified")
+PY
+
+case "${1:-}" in
+  identity)
+    # Cumulative subprocess budget is a safety ceiling, not a credit cap.
+    python .circleci/finance_baseline_deadline.py start
+    python .circleci/finance_baseline_deadline.py run python -m unittest discover \
+      -s .circleci -p 'test_equipment30_ci_config_static.py' -v
+    python .circleci/finance_baseline_deadline.py run python -m compileall -q ccpcerp
+    ;;
+  services)
+    for port in 3306 13000 11000; do
+      ready=0
+      for _ in $(seq 1 60); do
+        if (echo >/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+          ready=1
+          break
+        fi
+        sleep 2
+      done
+      [[ "$ready" == 1 ]] || { echo "Disposable CI sidecar unavailable" >&2; exit 1; }
+    done
+    ;;
+  install)
+    export PATH="$HOME/.local/bin:$PATH"
+    APP_CHECKOUT="$PWD"
+    BENCH_DIR="$HOME/ccpc-equipment30-bench"
+    FRAPPE_SHA=988e54f3c4c291e2077a83809663f123731abe76
+    ERPNEXT_SHA=4048fb70e14d1843956fcdabb7c3cca75a1cbcdd
+    sudo apt-get update -qq
+    sudo apt-get install -y --no-install-recommends cron mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+    sudo npm install -g yarn
+    python -m pip install --user frappe-bench
+    MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
+      -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+    bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+      --python "$(command -v python)" "$BENCH_DIR"
+    cd "$BENCH_DIR"
+    git -C apps/frappe fetch --depth 1 upstream "$FRAPPE_SHA"
+    git -C apps/frappe checkout --detach "$FRAPPE_SHA"
+    bench set-config -g redis_cache redis://127.0.0.1:13000
+    bench set-config -g redis_queue redis://127.0.0.1:11000
+    bench set-config -g redis_socketio redis://127.0.0.1:11000
+    bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+    git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
+    git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
+    bench get-app ccpcerp "$APP_CHECKOUT"
+    [[ "$(git -C apps/frappe rev-parse HEAD)" == "$FRAPPE_SHA" ]]
+    [[ "$(git -C apps/erpnext rev-parse HEAD)" == "$ERPNEXT_SHA" ]]
+    [[ "$(git -C apps/ccpcerp rev-parse HEAD)" == "$APPROVED" ]]
+    bench setup requirements --dev
+    bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
+      --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+      --admin-password "$CI_ADMIN_PASSWORD"
+    bench --site "$TEST_SITE" install-app erpnext
+    bench --site "$TEST_SITE" install-app ccpcerp
+    bench --site "$TEST_SITE" migrate
+    bench --site "$TEST_SITE" set-config allow_tests true
+    echo "PR30 disposable Frappe site installed; no persistent CCPC site used"
+    ;;
+  tests)
+    export PATH="$HOME/.local/bin:$PATH"
+    cd "$HOME/ccpc-equipment30-bench"
+    [[ "$(git -C apps/ccpcerp rev-parse HEAD)" == "$APPROVED" ]]
+    # The 15 authored Equipment source policy tests run inside installed Frappe,
+    # followed by five real MariaDB signed-source, source-quality, permissions and ledger tests.
+    bench --site "$TEST_SITE" run-tests --module \
+      ccpcerp.ccpc_erp.report.ccpc_equipment_job_material_activity.test_ccpc_equipment_job_material_activity
+    bench --site "$TEST_SITE" run-tests --module \
+      ccpcerp.ccpc_erp.test_equipment_report30_disposable_integration
+    echo "PR30 real Equipment acceptance finished; review each test and SQL log"
+    ;;
+  *)
+    echo "Expected identity|services|install|tests" >&2
+    exit 2
+    ;;
+esac
