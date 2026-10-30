@@ -355,8 +355,8 @@ jobs:
 
   integration2-backup-restore-isolated:
     # Actual October 29 encrypted Integration2 backup: dedicated disposable CI.
-    # Sensitive context MUST be restricted by CircleCI project, branch, owner
-    # group and not job.ssh.enabled BEFORE the manual hold is approved.
+    # Sensitive Context restricted by project and exact branch/no-SSH expression.
+    # circleci/ GitHub App orgs do NOT support OAuth context security groups.
     docker:
       - image: cimg/python:3.14-node
       - image: mariadb:11.8
@@ -383,6 +383,13 @@ jobs:
             env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m compileall -q .circleci
             env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_runtime.py' -v
             env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_config_static.py' -v
+      - run:
+          name: Pre-fetch exact encrypted ciphertext while signed GET is fresh
+          command: |
+            set -euo pipefail
+            umask 077
+            # No decryption, MariaDB or bench operations occur in this stage.
+            python .circleci/ci_restore_runtime.py --prefetch
       - run:
           name: Disposable MariaDB Redis and pinned Frappe prerequisites
           no_output_timeout: 20m
