@@ -32,6 +32,11 @@ parameters:
     type: boolean
     default: false
 
+  # No-backup review checks only; never accesses Context or databases.
+  run_integration2_restore_preflight:
+    type: boolean
+    default: false
+
 jobs:
   python-syntax:
     docker:
@@ -398,6 +403,32 @@ jobs:
             umask 077
             timeout --signal=TERM --kill-after=10s 2400 python .circleci/ci_restore_runtime.py --restore
 
+  pr32-restore-source-preflight:
+    # Cheap, no-secret unit + YAML parser job; never attach restore Context.
+    docker:
+      - image: cimg/python:3.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Verify dedicated checkout identity and run only offline source tests
+          command: |
+            set -euo pipefail
+            test "${CIRCLECI:-}" = true
+            test "${CIRCLE_PROJECT_USERNAME:-}" = CCPCerp_2026
+            test "${CIRCLE_PROJECT_REPONAME:-}" = ccpcerp
+            test "${CIRCLE_BRANCH:-}" = review/pr32-integration2-isolated-restore-2026-10-30
+            test "${CIRCLE_JOB:-}" = pr32-restore-source-preflight
+            test -n "${CIRCLE_PIPELINE_ID:-}"
+            test -n "${CIRCLE_WORKFLOW_ID:-}"
+            test -n "${CIRCLE_BUILD_NUM:-}"
+            test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:-}"
+            python -m compileall -q .circleci
+            for test in test_restore_guard.py test_ci_restore_runtime.py test_ci_restore_config_static.py test_ci_db_attestation.py test_ci_bench_preflight.py; do
+              python -m unittest discover -s .circleci -p "$test" -v
+            done
+            echo "OFFLINE RESTORE SOURCE PREFLIGHT: PASS"
+
 workflows:
   starter-validation:
     jobs:
@@ -483,6 +514,22 @@ workflows:
           context: ccpc-pr32-integration2-restore-once
           requires:
             - integration2-restore-manual-approval
+          filters:
+            branches:
+              only: review/pr32-integration2-isolated-restore-2026-10-30
+
+  # Separate low-cost source-only check. No secret context, DB, or backup.
+  opt-in-integration2-source-preflight:
+    when: << pipeline.parameters.run_integration2_restore_preflight >>
+    jobs:
+      - pr32-source-preflight-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/pr32-integration2-isolated-restore-2026-10-30
+      - pr32-restore-source-preflight:
+          requires:
+            - pr32-source-preflight-manual-approval
           filters:
             branches:
               only: review/pr32-integration2-isolated-restore-2026-10-30
