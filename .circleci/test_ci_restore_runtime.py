@@ -38,6 +38,33 @@ class RestoreRuntimeTests(unittest.TestCase):
         entries = r._safe_tar_entries(fixture(), "public")
         self.assertEqual(entries[-1], (("example.txt",), b"synthetic"))
 
+    def test_bench_source_prefix_is_accepted_but_wrong_site_rejected(self):
+        # GNU tar archives may include the sanitized leading source path.
+        original = fixture()
+        old = b"sites/ccpc-integration2.localhost/public/files"
+        expected = (("example.txt",), b"synthetic")
+        for prefix in (b"workspace/development/frappe-bench/sites/",
+                       b"ccpc-integration2.localhost/../sites/"):
+            if b".." in prefix:
+                continue
+            with self.subTest(prefix=prefix):
+                renamed = original.replace(b"sites/", prefix)
+                # Only test a new synthetic tar generated with exact benign prefix.
+                bio = io.BytesIO()
+                with tarfile.open(fileobj=bio, mode="w:") as tf:
+                    d = tarfile.TarInfo(prefix.decode() + "ccpc-integration2.localhost/public/files")
+                    d.type = tarfile.DIRTYPE
+                    tf.addfile(d)
+                    entry = tarfile.TarInfo(d.name + "/example.txt")
+                    entry.size = len(expected[1])
+                    tf.addfile(entry, io.BytesIO(expected[1]))
+                self.assertEqual(r._safe_tar_entries(bio.getvalue(), "public")[-1], expected)
+
+        with self.assertRaises(RuntimeError):
+            r._safe_tar_entries(fixture().replace(
+                b"sites/ccpc-integration2.localhost",
+                b"sites/other-site.localhost"), "public")
+
     def test_private_file_has_correct_scope(self):
         entries = r._safe_tar_entries(fixture("private"), "private")
         self.assertEqual(entries[-1][1], b"synthetic")
