@@ -17,7 +17,7 @@ import stat
 import subprocess
 import sys
 import tarfile
-from urllib.request import Request, HTTPRedirectHandler, build_opener
+from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
 
 import ci_bench_preflight as benchguard
 import ci_db_attestation as dbguard
@@ -52,7 +52,7 @@ def fetch_exact_ciphertext(url: str) -> bytes:
     """Exact private B2 ciphertext only; no redirects and bounded memory."""
     guard.validate_presigned_url(url)
     try:
-        response = build_opener(_NoRedirect()).open(
+        response = build_opener(_NoRedirect(), ProxyHandler({})).open(
             Request(url, headers={"Accept-Encoding": "identity"}), timeout=B2_TIMEOUT
         )
         with response:
