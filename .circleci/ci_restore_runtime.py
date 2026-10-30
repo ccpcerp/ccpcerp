@@ -83,6 +83,34 @@ def _write_secret(path: Path, data: bytes, *, strict_parent: bool = True) -> Non
     dbguard._owner_file(path, strict_parent=strict_parent)
 
 
+def prefetch_ciphertext(env: dict[str, str], checkout_sha: str, home: Path) -> None:
+    """Fetch the 15-minute signed GET before slow dependency/bench installation.
+
+    Store only the exact hash-pinned age ciphertext in a private scratch folder.
+    Never decrypt, print the URL, invoke bench, or touch MariaDB in this phase.
+    """
+    guard.require_ci_identity(env, checkout_sha)
+    if not env.get("CCPC_RESTORE_OBJECT_GET_URL") or not env.get("CCPC_RESTORE_AGE_IDENTITY"):
+        raise RuntimeError("Restricted CI restore secrets missing")
+    target_dir = home / ".ccpc-restore-ciphertext"
+    _new_private_dir(target_dir)
+    payload = fetch_exact_ciphertext(env["CCPC_RESTORE_OBJECT_GET_URL"])
+    guard.verify_ciphertext(payload)
+    _write_secret(target_dir / "payload.age", payload)
+    print("ENCRYPTED BACKUP: EARLY EXACT CIPHERTEXT GET PASS")
+
+
+def read_prefetched_ciphertext(home: Path) -> bytes:
+    """Accept only the same job's owner-only hash-pinned encrypted object."""
+    file_path = home / ".ccpc-restore-ciphertext" / "payload.age"
+    dbguard._owner_file(file_path)
+    if file_path.stat().st_size != guard.CIPHERTEXT_BYTES:
+        raise RuntimeError("Unexpected prefetched ciphertext size")
+    data = file_path.read_bytes()
+    guard.verify_ciphertext(data)
+    return data
+
+
 def decrypt_and_validate(payload: bytes, identity: str, scratch: Path) -> tuple[dict[str, bytes], str]:
     if not identity.startswith("AGE-SECRET-KEY-1") or "\n" in identity.strip():
         raise RuntimeError("Invalid ephemeral age identity delivery")
@@ -255,20 +283,23 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
     guard.require_ci_identity(env, checkout_sha)
     if env.get("CI_DB_ROOT_PASSWORD") != "ccpc-restore-disposable-db-only":
         raise RuntimeError("Disposable CI sidecar credential mismatch")
-    if any(k not in env for k in ("CCPC_RESTORE_OBJECT_GET_URL", "CCPC_RESTORE_AGE_IDENTITY")):
-        raise RuntimeError("Restricted CI restore secrets missing")
+    if not env.get("CCPC_RESTORE_AGE_IDENTITY"):
+        raise RuntimeError("Restricted CI age identity missing")
     benchguard.attest_pinned_bench(home, bench, site_created=False)
     option_file = _setup_db_client(home, env["CI_DB_ROOT_PASSWORD"])
     proof = dbguard.attest_before_new_site(env, checkout_sha, option_file=option_file)
 
     # First validate real ciphertext and all four source components before the
     # first potentially destructive DB/site operation.
-    url = env["CCPC_RESTORE_OBJECT_GET_URL"]
+    # The short-lived signed URL has already expired by the time the pinned
+    # Frappe/ERPNext bench is ready. Read the exact encrypted object prefetched
+    # in THIS same isolated CircleCI job; never perform a second network GET.
+    payload = read_prefetched_ciphertext(home)
     scratch = home / ".ccpc-restore-payload"
     _new_private_dir(scratch)
     try:
         verified, key = decrypt_and_validate(
-            fetch_exact_ciphertext(url), env["CCPC_RESTORE_AGE_IDENTITY"], scratch
+            payload, env["CCPC_RESTORE_AGE_IDENTITY"], scratch
         )
     finally:
         # Prevent later Frappe/bench child processes inheriting bearer URL/age key.
@@ -277,6 +308,8 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
         os.environ.pop("CCPC_RESTORE_AGE_IDENTITY", None)
         env.pop("CCPC_RESTORE_OBJECT_GET_URL", None)
         env.pop("CCPC_RESTORE_AGE_IDENTITY", None)
+        # The sealed object is no longer needed after decrypt validation.
+        (home / ".ccpc-restore-ciphertext" / "payload.age").unlink(missing_ok=True)
     public = _safe_tar_entries(_file_component(verified, "-files.tar"), "public")
     private = _safe_tar_entries(_file_component(verified, "-private-files.tar"), "private")
     sql = scratch / "verified.sql.gz"
@@ -329,11 +362,14 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
 
 def main() -> int:
     try:
-        if len(sys.argv) != 2 or sys.argv[1] != "--restore":
-            raise RuntimeError("Explicit restore invocation required")
+        if len(sys.argv) != 2 or sys.argv[1] not in ("--prefetch", "--restore"):
+            raise RuntimeError("Explicit isolated stage invocation required")
         head = _run(["/usr/bin/git", "rev-parse", "--verify", "HEAD"], seconds=8).decode().strip()
         home = Path.home()
-        restore_once(dict(os.environ), head, home, home / benchguard.BENCH_NAME)
+        if sys.argv[1] == "--prefetch":
+            prefetch_ciphertext(dict(os.environ), head, home)
+        else:
+            restore_once(dict(os.environ), head, home, home / benchguard.BENCH_NAME)
         return 0
     except Exception:
         print("INTEGRATION2 DISPOSABLE RESTORE: FAIL (sanitized)", file=sys.stderr)
