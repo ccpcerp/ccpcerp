@@ -76,6 +76,14 @@ class SmokeTests(unittest.TestCase):
                           "--force", "CCPC_RESTORE_OWNER_DATA_EGRESS_APPROVED"):
             self.assertNotIn(forbidden, source)
 
+    def test_original_source_requires_independent_fetch_and_git_integrity(self):
+        stage = Path(__file__).with_name("pr32_smoke_stage.sh").read_text(encoding="utf8")
+        self.assertIn("git@github.com:ccpcerp/ccpcerp.git", stage)
+        self.assertIn("fetch.fsckObjects=true", stage)
+        self.assertIn("fsck --full --strict --no-reflogs", stage)
+        self.assertIn("status --porcelain=v1 --untracked-files=no", stage)
+        self.assertIn("Original app pinned worktree is incomplete or changed", stage)
+
     def test_pre_post_sql_probes_share_one_function(self):
         source = Path(smoke.__file__).read_text(encoding="utf8")
         self.assertIn("first, absent = db._local_mariadb_probe", source)
