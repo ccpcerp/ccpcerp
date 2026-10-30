@@ -144,17 +144,35 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 guard.validate_decrypted_tar(bad)
 
-    def test_proposed_workflow_is_inert_even_if_accidentally_enabled(self):
-        config = SRC.with_name("config-proposal.yml").read_text(encoding="utf8")
-        self.assertIn("default: false", config)
+    def test_active_restore_is_default_off_held_and_context_restricted(self):
+        # The app CI uses an executable, gated workflow. The documentation-only
+        # proposal's config-proposal.yml and deliberate exit 86 must NEVER be
+        # copied into the real .circleci job or treated as its acceptance test.
+        config = SRC.with_name("config.yml").read_text(encoding="utf8")
+        self.assertIn(
+            "run_integration2_backup_restore:\\n    type: boolean\\n    default: false",
+            config,
+        )
+        self.assertIn("integration2-restore-manual-approval:", config)
         self.assertIn("type: approval", config)
-        self.assertIn("exit 86", config)
-        self.assertIn("requires:", config)
+        self.assertIn(
+            "context: ccpc-pr32-integration2-restore-once",
+            config,
+        )
+        self.assertIn(
+            "requires:\\n            - integration2-restore-manual-approval",
+            config,
+        )
         self.assertIn("only: " + guard.BRANCH, config)
-        self.assertNotIn("bench restore", config)
+        self.assertIn("run_integration2_restore_preflight:", config)
+        self.assertIn("pr32-source-preflight-manual-approval:", config)
         self.assertNotIn("CCPC_RESTORE_AGE_IDENTITY_B64:", config)
-        self.assertNotIn("save_cache:", config)
-        self.assertNotIn("store_artifacts:", config)
+        restore_job = config.split("  integration2-backup-restore-isolated:", 1)[1].split(
+            "\\n  pr32-restore-source-preflight:", 1
+        )[0]
+        self.assertNotIn("save_cache:", restore_job)
+        self.assertNotIn("store_artifacts:", restore_job)
+        self.assertNotIn("persist_to_workspace:", restore_job)
 
     def test_no_network_database_or_restore_function_in_preflight_module(self):
         content = SRC.read_text(encoding="utf8")
