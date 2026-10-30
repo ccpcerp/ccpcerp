@@ -128,9 +128,9 @@ class RestoreRuntimeTests(unittest.TestCase):
             }
             # No real network, DB, age or SQL operation. Hash gate is mocked
             # solely because this unit fixture is not the confidential backup.
-            with patch.object(r.guard, "require_ci_identity") as identity, \\
-                 patch.object(r.guard, "verify_ciphertext") as verify, \\
-                 patch.object(r, "fetch_exact_ciphertext", return_value=b"fake-age-ciphertext") as fetch, \\
+            with patch.object(r.guard, "require_ci_identity") as identity, \
+                 patch.object(r.guard, "verify_ciphertext") as verify, \
+                 patch.object(r, "fetch_exact_ciphertext", return_value=b"fake-age-ciphertext") as fetch, \
                  patch.object(r.guard, "CIPHERTEXT_BYTES", len(b"fake-age-ciphertext")):
                 r.prefetch_ciphertext(env, "f" * 40, home)
                 identity.assert_called_once()
