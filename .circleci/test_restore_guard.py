@@ -150,7 +150,7 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
         # copied into the real .circleci job or treated as its acceptance test.
         config = SRC.with_name("config.yml").read_text(encoding="utf8")
         self.assertIn(
-            "run_integration2_backup_restore:\\n    type: boolean\\n    default: false",
+            "run_integration2_backup_restore:\n    type: boolean\n    default: false",
             config,
         )
         self.assertIn("integration2-restore-manual-approval:", config)
@@ -160,7 +160,7 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
             config,
         )
         self.assertIn(
-            "requires:\\n            - integration2-restore-manual-approval",
+            "requires:\n            - integration2-restore-manual-approval",
             config,
         )
         self.assertIn("only: " + guard.BRANCH, config)
@@ -168,7 +168,7 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
         self.assertIn("pr32-source-preflight-manual-approval:", config)
         self.assertNotIn("CCPC_RESTORE_AGE_IDENTITY_B64:", config)
         restore_job = config.split("  integration2-backup-restore-isolated:", 1)[1].split(
-            "\\n  pr32-restore-source-preflight:", 1
+            "\n  pr32-restore-source-preflight:", 1
         )[0]
         self.assertNotIn("save_cache:", restore_job)
         self.assertNotIn("store_artifacts:", restore_job)
