@@ -22,6 +22,11 @@ parameters:
     type: boolean
     default: false
 
+  # Synthetic-only one-time sidecar smoke, disabled on normal pushes.
+  run_pr32_sidecar_smoke:
+    type: boolean
+    default: false
+
 jobs:
   python-syntax:
     docker:
@@ -294,10 +299,57 @@ jobs:
             set -euo pipefail
             python .circleci/finance_baseline_deadline.py run bash .circleci/four_reports_stage.sh tests
 
+  integration2-sidecar-smoke-isolated:
+    # Disposable Frappe/MariaDB pre/post proof; no backups or credentials context.
+    docker:
+      - image: cimg/python:3.14-node
+      - image: mariadb:11.8
+        environment:
+          MARIADB_ROOT_PASSWORD: ccpc-smoke-disposable-root-only
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "13000"]
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "11000"]
+    resource_class: large
+    environment:
+      TEST_SITE: ci-ccpc-pr32-restore.localhost
+      CI_DB_ROOT_PASSWORD: ccpc-smoke-disposable-root-only
+      CCPC_NO_BACKUP_SMOKE: disposable-only
+    steps:
+      - checkout
+      - run:
+          name: Check exact smoke project branch job and approved source SHA
+          command: |
+            set -euo pipefail
+            python .circleci/ci_sidecar_smoke.py identity
+            python -m unittest discover -s .circleci -p 'test_ci_sidecar_smoke.py' -v
+            python -m compileall -q .circleci
+      - run:
+          name: Wait for fresh MariaDB Redis and install bench tools
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            timeout --signal=TERM --kill-after=10s 900 bash .circleci/pr32_smoke_stage.sh prerequisites
+      - run:
+          name: Construct source pinned Frappe ERPNext and original CCPC bench
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            timeout --signal=TERM --kill-after=10s 3000 bash .circleci/pr32_smoke_stage.sh bench
+      - run:
+          name: Prove scratch database absent then present against same MariaDB sidecar
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            timeout --signal=TERM --kill-after=10s 900 python .circleci/ci_sidecar_smoke.py site
+
 workflows:
   starter-validation:
     jobs:
-      - python-syntax
+      - python-syntax:
+          filters:
+            branches:
+              ignore: review/pr32-integration2-smoke-2026-10-30
   opt-in-isolated-erpnext:
     when: << pipeline.parameters.run_integration >>
     jobs:
@@ -345,3 +397,18 @@ workflows:
           filters:
             branches:
               only: feature/finance-mapping-lifecycle-2026-10-28
+
+  opt-in-pr32-sidecar-smoke:
+    when: << pipeline.parameters.run_pr32_sidecar_smoke >>
+    jobs:
+      - pr32-sidecar-smoke-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/pr32-integration2-smoke-2026-10-30
+      - integration2-sidecar-smoke-isolated:
+          requires:
+            - pr32-sidecar-smoke-manual-approval
+          filters:
+            branches:
+              only: review/pr32-integration2-smoke-2026-10-30
