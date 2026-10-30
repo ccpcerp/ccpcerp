@@ -44,7 +44,24 @@ case "${1:-}" in
     git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
     git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
     bench get-app ccpcerp "$APP_CHECKOUT"
+    # CircleCI's local checkout may be a partial Git object store even when
+    # checkout of an ancestor exits zero. Fetch the pinned original SHA from
+    # the private authoritative GitHub repo using CircleCI's existing GitHub
+    # checkout deploy key (no new CI/DEV/PROD credentials).
+    # Fail closed if that key cannot read the pinned commit.
+    git -C apps/ccpcerp -c fetch.fsckObjects=true fetch --no-tags --depth 1 \
+      git@github.com:ccpcerp/ccpcerp.git "$ORIGINAL_APP_SHA"
     git -C apps/ccpcerp checkout --detach "$ORIGINAL_APP_SHA"
+    # Exact HEAD alone was insufficient in Build #54: eight tracked blobs
+    # were absent despite a zero-exit checkout and a green follow-on test.
+    if ! git -C apps/ccpcerp fsck --full --strict --no-reflogs >/dev/null 2>&1; then
+      echo "Original app Git object integrity cannot be proven" >&2
+      exit 1
+    fi
+    if [[ -n "$(git -C apps/ccpcerp status --porcelain=v1 --untracked-files=no)" ]]; then
+      echo "Original app pinned worktree is incomplete or changed" >&2
+      exit 1
+    fi
     [[ "$(git -C apps/frappe rev-parse HEAD)" == "$FRAPPE_SHA" ]]
     [[ "$(git -C apps/erpnext rev-parse HEAD)" == "$ERPNEXT_SHA" ]]
     [[ "$(git -C apps/ccpcerp rev-parse HEAD)" == "$ORIGINAL_APP_SHA" ]]
