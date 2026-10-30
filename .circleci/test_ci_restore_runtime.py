@@ -119,6 +119,36 @@ class RestoreRuntimeTests(unittest.TestCase):
                 r.restore_once({}, "x" * 40, Path("/tmp"), Path("/tmp/test"))
             bench.assert_not_called()
 
+    def test_early_prefetch_stores_encrypted_bytes_only_with_private_mode(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            env = {
+                "CCPC_RESTORE_OBJECT_GET_URL": "synthetic-not-a-real-url",
+                "CCPC_RESTORE_AGE_IDENTITY": "synthetic-no-private-key",
+            }
+            # No real network, DB, age or SQL operation. Hash gate is mocked
+            # solely because this unit fixture is not the confidential backup.
+            with patch.object(r.guard, "require_ci_identity") as identity, \\
+                 patch.object(r.guard, "verify_ciphertext") as verify, \\
+                 patch.object(r, "fetch_exact_ciphertext", return_value=b"fake-age-ciphertext") as fetch, \\
+                 patch.object(r.guard, "CIPHERTEXT_BYTES", len(b"fake-age-ciphertext")):
+                r.prefetch_ciphertext(env, "f" * 40, home)
+                identity.assert_called_once()
+                fetch.assert_called_once_with(env["CCPC_RESTORE_OBJECT_GET_URL"])
+                self.assertGreaterEqual(verify.call_count, 1)
+                stored = home / ".ccpc-restore-ciphertext" / "payload.age"
+                self.assertEqual(stored.read_bytes(), b"fake-age-ciphertext")
+                self.assertEqual(stored.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(stored.parent.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(r.read_prefetched_ciphertext(home), b"fake-age-ciphertext")
+                with self.assertRaises(RuntimeError):
+                    r.prefetch_ciphertext(env, "f" * 40, home)
+
+    def test_restore_refuses_missing_prefetched_ciphertext(self):
+        with tempfile.TemporaryDirectory() as t:
+            with self.assertRaises(RuntimeError):
+                r.read_prefetched_ciphertext(Path(t))
+
     def test_presigned_url_rejected_before_http(self):
         with patch.object(r, "build_opener") as opener:
             with self.assertRaises(RuntimeError):
