@@ -27,6 +27,11 @@ parameters:
     type: boolean
     default: false
 
+  # Confidential Integration2 restore: only manually held, restricted context.
+  run_integration2_backup_restore:
+    type: boolean
+    default: false
+
 jobs:
   python-syntax:
     docker:
@@ -343,13 +348,65 @@ jobs:
             set -euo pipefail
             timeout --signal=TERM --kill-after=10s 900 python .circleci/ci_sidecar_smoke.py site
 
+  integration2-backup-restore-isolated:
+    # Actual October 29 encrypted Integration2 backup: dedicated disposable CI.
+    # Sensitive context MUST be restricted by CircleCI project, branch, owner
+    # group and not job.ssh.enabled BEFORE the manual hold is approved.
+    docker:
+      - image: cimg/python:3.14-node
+      - image: mariadb:11.8
+        environment:
+          MARIADB_ROOT_PASSWORD: ccpc-restore-disposable-db-only
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "13000"]
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "11000"]
+    resource_class: large
+    environment:
+      TEST_SITE: ci-ccpc-pr32-restore.localhost
+      CI_DB_HOST: "127.0.0.1"
+      CI_DB_NAME: ci_pr32_restore_20261030
+      CI_DB_ROOT_PASSWORD: ccpc-restore-disposable-db-only
+      CCPC_ALLOW_INTEGRATION2_RESTORE: approved-only
+    steps:
+      - checkout
+      - run:
+          name: Exact SHA and owner-approved confidential restore policy gate
+          command: |
+            set -euo pipefail
+            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python .circleci/restore_guard.py
+            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m compileall -q .circleci
+            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_runtime.py' -v
+            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_config_static.py' -v
+      - run:
+          name: Disposable MariaDB Redis and pinned Frappe prerequisites
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 900 bash .circleci/pr32_restore_stage.sh prerequisites
+      - run:
+          name: Verify clean original source SHA and construct disposable bench
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 3000 bash .circleci/pr32_restore_stage.sh bench
+      - run:
+          name: Decrypt and restore exact four-part source to isolated scratch only
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            umask 077
+            timeout --signal=TERM --kill-after=10s 2400 python .circleci/ci_restore_runtime.py --restore
+
 workflows:
   starter-validation:
     jobs:
       - python-syntax:
           filters:
             branches:
-              ignore: review/pr32-integration2-smoke-2026-10-30
+              ignore:
+                - review/pr32-integration2-smoke-2026-10-30
+                - review/pr32-integration2-isolated-restore-2026-10-30
   opt-in-isolated-erpnext:
     when: << pipeline.parameters.run_integration >>
     jobs:
@@ -412,3 +469,20 @@ workflows:
           filters:
             branches:
               only: review/pr32-integration2-smoke-2026-10-30
+
+  # Owner-approved ONE-TIME restore; no automatic runs or fork/PR labels.
+  opt-in-integration2-backup-restore:
+    when: << pipeline.parameters.run_integration2_backup_restore >>
+    jobs:
+      - integration2-restore-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/pr32-integration2-isolated-restore-2026-10-30
+      - integration2-backup-restore-isolated:
+          context: ccpc-pr32-integration2-restore-once
+          requires:
+            - integration2-restore-manual-approval
+          filters:
+            branches:
+              only: review/pr32-integration2-isolated-restore-2026-10-30
