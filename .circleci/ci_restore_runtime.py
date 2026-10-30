@@ -117,7 +117,12 @@ def _safe_tar_entries(data: bytes, scope: str) -> list[tuple[tuple[str, ...], by
     """
     if scope not in ("public", "private"):
         raise RuntimeError("Invalid archive scope")
-    prefix = ("sites", "ccpc-integration2.localhost", scope, "files")
+    # Frappe BackupGenerator passes frappe.get_site_path() to tar -cf.
+    # The source site path can be relative to sites/ or an absolute host path;
+    # GNU tar strips a leading "/" when recording an absolute path. Confine
+    # extraction to the exact original site/scope anchor, without assuming
+    # how many benign parent directories preceded that anchor.
+    site_anchor = ("ccpc-integration2.localhost", scope, "files")
     entries = []
     seen = set()
     total = 0
@@ -134,9 +139,14 @@ def _safe_tar_entries(data: bytes, scope: str) -> list[tuple[tuple[str, ...], by
                 parts = tuple(x for x in path.parts if x != ".")
                 if any(x in ("..", "", ".") for x in parts):
                     raise ValueError("Traversal attachment")
-                if parts[:4] != prefix:
+                anchors = [i for i in range(len(parts) - 2)
+                           if parts[i:i+3] == site_anchor]
+                if len(anchors) != 1:
                     raise ValueError("Archive not owned by original site/scope")
-                relative = parts[4:]
+                anchor = anchors[0]
+                if anchor and parts[anchor - 1] != "sites":
+                    raise ValueError("Site anchor must follow sites directory")
+                relative = parts[anchor + 3:]
                 if relative in seen:
                     raise ValueError("Duplicate attachment")
                 seen.add(relative)
