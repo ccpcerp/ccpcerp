@@ -96,6 +96,24 @@ class BackblazeNativeTests(unittest.TestCase):
                     b.fetch_exact_ciphertext(a, c)
             opener.assert_not_called()
 
+    def test_scoped_read_only_share_files_capability_is_accepted(self):
+        # Read Only keys can authorize links to scope-matching encrypted files.
+        # This is not permission to write, delete or administer B2 resources.
+        auth = synthetic_auth(allowed_capabilities=[
+            "listFiles", "readFiles", "shareFiles",
+        ])
+        self.assertEqual(
+            b._restricted_authorization(auth),
+            ("https://f004.backblazeb2.com", "synthetic-token"),
+        )
+        for added in ("writeFiles", "deleteFiles", "writeKeys",
+                      "deleteKeys", "writeBuckets", "deleteBuckets",
+                      "bypassGovernance", "listAllBucketNames"):
+            with self.subTest(extra_capability=added), self.assertRaises(RuntimeError):
+                b._restricted_authorization(synthetic_auth(allowed_capabilities=[
+                    "readFiles", "shareFiles", added,
+                ]))
+
     def test_fail_closed_on_broad_or_wrong_key_and_redirect_origins(self):
         bad = [
             {"allowed_namePrefix": ""},
