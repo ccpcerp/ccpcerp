@@ -123,18 +123,21 @@ class RestoreRuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             home = Path(t)
             env = {
-                "CCPC_RESTORE_OBJECT_GET_URL": "synthetic-not-a-real-url",
+                "CCPC_RESTORE_B2_KEY_ID": "synthetic-key-id",
+                "CCPC_RESTORE_B2_APP_KEY": "synthetic-application-key",
                 "CCPC_RESTORE_AGE_IDENTITY": "synthetic-no-private-key",
             }
             # No real network, DB, age or SQL operation. Hash gate is mocked
             # solely because this unit fixture is not the confidential backup.
             with patch.object(r.guard, "require_ci_identity") as identity, \
                  patch.object(r.guard, "verify_ciphertext") as verify, \
-                 patch.object(r, "fetch_exact_ciphertext", return_value=b"fake-age-ciphertext") as fetch, \
+                 patch.object(r.b2, "fetch_exact_ciphertext", return_value=b"fake-age-ciphertext") as fetch, \
                  patch.object(r.guard, "CIPHERTEXT_BYTES", len(b"fake-age-ciphertext")):
                 r.prefetch_ciphertext(env, "f" * 40, home)
                 identity.assert_called_once()
-                fetch.assert_called_once_with(env["CCPC_RESTORE_OBJECT_GET_URL"])
+                fetch.assert_called_once_with(
+                    env["CCPC_RESTORE_B2_KEY_ID"], env["CCPC_RESTORE_B2_APP_KEY"]
+                )
                 self.assertGreaterEqual(verify.call_count, 1)
                 stored = home / ".ccpc-restore-ciphertext" / "payload.age"
                 self.assertEqual(stored.read_bytes(), b"fake-age-ciphertext")
@@ -149,11 +152,16 @@ class RestoreRuntimeTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 r.read_prefetched_ciphertext(Path(t))
 
-    def test_presigned_url_rejected_before_http(self):
-        with patch.object(r, "build_opener") as opener:
-            with self.assertRaises(RuntimeError):
-                r.fetch_exact_ciphertext("https://public.example.org/secret.tar.age")
-            opener.assert_not_called()
+    def test_missing_readonly_key_denied_before_http_and_scratch_creation(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            env = {"CCPC_RESTORE_AGE_IDENTITY": "synthetic-no-private-key"}
+            with patch.object(r.guard, "require_ci_identity"), \
+                 patch.object(r.b2, "fetch_exact_ciphertext") as fetch, \
+                 self.assertRaisesRegex(RuntimeError, "credentials missing"):
+                r.prefetch_ciphertext(env, "f" * 40, home)
+            fetch.assert_not_called()
+            self.assertFalse((home / ".ccpc-restore-ciphertext").exists())
 
     def test_no_unauthorized_invocation(self):
         with patch.object(r.sys, "argv", ["ci_restore_runtime.py"]):
