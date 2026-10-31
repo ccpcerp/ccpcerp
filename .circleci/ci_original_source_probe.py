@@ -10,7 +10,6 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from ci_source_hydration import HydrationFailure, hydrate_missing, missing_object_ids
 
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
@@ -105,58 +104,16 @@ def main():
             run_git("clone", "--quiet", "--branch", BRANCH, checkout, bench),
             "clone-disposable-bench-source",
         )
-        require_ok(run_git("-C", checkout, "-c", "fetch.fsckObjects=true",
-                           "fetch", "--quiet", "--no-tags", "--no-filter",
-                           "--depth", "1", "origin", ORIGINAL_SHA,
-                           timeout=120), "authenticated-ancestor-fetch")
-        # Report only a count, never object IDs / Git stdout.
-        availability = run_git("-C", checkout, "rev-list", "--objects",
-                               "--missing=print", ORIGINAL_SHA,
-                               no_lazy_fetch=True)
-        require_ok(availability, "missing-object-scan")
-        missing = sum(line.startswith("?") for line in availability.stdout.splitlines())
-        print("SOURCE GIT PROBE: original-source-missing-objects=" + str(missing), flush=True)
-        # Build #82 proved eight promised blobs remain after --no-filter.
-        # Fetch each absent object through the existing authenticated promisor
-        # remote, then verify no pinned-history objects remain missing.
-        try:
-            hydrated = hydrate_missing(checkout, ORIGINAL_SHA)
-            remaining = len(missing_object_ids(checkout, ORIGINAL_SHA))
-        except HydrationFailure as error:
-            raise RuntimeError("SOURCE GIT PROBE: hydration-" + str(error) + " FAIL") from None
-        print("SOURCE GIT PROBE: hydrated-original-objects=" + str(hydrated), flush=True)
-        print("SOURCE GIT PROBE: original-source-missing-after=" + str(remaining), flush=True)
-        gate(remaining == 0, "hydration-incomplete")
-        direct = run_git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
-                         "--quiet", "--no-tags", "--depth", "1",
-                         checkout, ORIGINAL_SHA)
-        if direct.returncode == 0:
-            git_integrity(bench)
-            gate(missing == 0, "promised-objects-remain")
-            print("SOURCE GIT PROBE: DIRECT LOCAL ORIGINAL SHA TRANSFER PASS", flush=True)
-            return
-        print("SOURCE GIT PROBE: direct-copy FAIL (exit "
-              + str(direct.returncode) + ", class " + classify(direct.stderr) + ")", flush=True)
-        # Diagnostic alternative: a temporary *local* ref makes the exact SHA
-        # advertised by upload-pack. Never push this ref to GitHub.
-        require_ok(run_git("-C", checkout, "update-ref", LOCAL_REF, ORIGINAL_SHA),
-                   "create-temporary-local-ref")
-        try:
-            named = run_git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
-                            "--quiet", "--no-tags", "--depth", "1",
-                            checkout, LOCAL_REF)
-            if named.returncode == 0:
-                git_integrity(bench)
-                print("SOURCE GIT PROBE: NAMED LOCAL REF TRANSFER PASS", flush=True)
-            else:
-                print("SOURCE GIT PROBE: named-ref-copy FAIL (exit "
-                      + str(named.returncode) + ", class "
-                      + classify(named.stderr) + ")", flush=True)
-        finally:
-            run_git("-C", checkout, "update-ref", "-d", LOCAL_REF)
-        # The active restore uses the direct command; do not pass preflight
-        # unless that exact unmodified path works.
-        raise RuntimeError("SOURCE GIT PROBE: DIRECT TRANSFER BLOCKER UNRESOLVED")
+        # Build #84: local upload-pack fails even after all eight historical
+        # blobs are hydrated. Use the GitHub App authenticated HTTPS origin
+        # directly from the bench repository, not the partial clone as a
+        # temporary Git server. This is the exact method in restore_stage.sh.
+        result = run_git("-C", bench, "-c", "fetch.fsckObjects=true",
+                         "fetch", "--quiet", "--no-tags", "--no-filter",
+                         "--depth", "1", origin, ORIGINAL_SHA, timeout=180)
+        require_ok(result, "authenticated-direct-origin-fetch")
+        git_integrity(bench)
+        print("SOURCE GIT PROBE: DIRECT AUTHENTICATED ORIGIN TRANSFER PASS", flush=True)
 
 
 if __name__ == "__main__":
