@@ -112,7 +112,7 @@ def read_prefetched_ciphertext(home: Path) -> bytes:
 def decrypt_and_validate(
     payload: bytes, identity: str, scratch: Path,
     *, report_phase: Callable[[str], None] | None = None,
-) -> tuple[dict[str, bytes], str]:
+) -> tuple[dict[str, bytes], str | None]:
     # Each callback input is a hardcoded allowlisted label. Never propagate
     # exception details, paths, subprocess output or decrypted data to CI logs.
     if report_phase is not None:
@@ -276,14 +276,27 @@ def _check_companies(options: Path) -> None:
         raise RuntimeError("Expected two synthetic restored companies absent")
 
 
-def _set_local_site_crypto(bench: Path, old_key: str) -> None:
+def _set_local_site_crypto(bench: Path, old_key: str | None) -> None:
     path = bench / "sites" / guard.SITE / "site_config.json"
     dbguard._owner_file(path, strict_parent=False)
-    if not re.fullmatch(r"[A-Za-z0-9_=-]{16,256}", old_key):
-        raise RuntimeError("Invalid original site cryptographic key")
     config = json.loads(path.read_text(encoding="utf8"))
-    # Preserve only CI-generated DB credentials, replace encryption key only.
-    config["encryption_key"] = old_key
+    if not isinstance(config, dict):
+        raise RuntimeError("Unexpected isolated site config")
+    if old_key is not None:
+        if not isinstance(old_key, str) or not re.fullmatch(r"[A-Za-z0-9_=-]{16,256}", old_key):
+            raise RuntimeError("Invalid original site cryptographic key")
+        # Preserve only CI-generated DB credentials, replace encryption key only.
+        config["encryption_key"] = old_key
+    else:
+        # Guard has already proven the archived SQL has no encrypted __Auth
+        # rows. Preserve any NEW CI-local site key; never invent or transplant
+        # a substitute for an unknown original encryption key.
+        local_key = config.get("encryption_key")
+        if local_key is not None and (
+            not isinstance(local_key, str)
+            or not re.fullmatch(r"[A-Za-z0-9_=-]{16,256}", local_key)
+        ):
+            raise RuntimeError("Invalid disposable site encryption key")
     config["disable_scheduler"] = 1
     config["maintenance_mode"] = 1
     config["mute_emails"] = 1
