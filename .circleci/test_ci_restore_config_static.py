@@ -135,7 +135,35 @@ class RestoreCIStaticTests(unittest.TestCase):
             git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
                 "--quiet", "--no-tags", "--depth", "1", checkout, old_sha)
             git("-C", bench, "checkout", "--quiet", "--detach", old_sha)
-            git("-C", bench, "fsck", "--full", "--strict", "--no-reflogs")
+            # Build #76 demonstrated a Git-version-specific full-fsck exit 1.
+            # This fixture contains only generated data and file:// remotes;
+            # expose *sanitized* Git diagnostics for that fixture ONLY.
+            # Never do this with the real credential-bearing restore runner.
+            full_check = subprocess.run(
+                ["git", "-C", str(bench), "fsck",
+                 "--full", "--strict", "--no-reflogs"],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=15,
+            )
+            if full_check.returncode:
+                pinned_check = subprocess.run(
+                    ["git", "-C", str(bench), "fsck",
+                     "--full", "--strict", "--no-reflogs", old_sha],
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, timeout=15,
+                )
+                git_version = git("--version")
+                def safe_excerpt(value):
+                    # No project contents, URLs, remote credentials or
+                    # real backup metadata are read by this synthetic test.
+                    return value.replace(str(root), "[synthetic-temp]").strip()[:600]
+                self.fail(
+                    "Synthetic Git full-fsck failed "
+                    f"(exit={full_check.returncode}, git={git_version}); "
+                    f"full stderr={safe_excerpt(full_check.stderr)!r}; "
+                    f"pinned-fsck exit={pinned_check.returncode}, "
+                    f"stderr={safe_excerpt(pinned_check.stderr)!r}"
+                )
             self.assertEqual(git("-C", bench, "rev-parse", "HEAD"), old_sha)
             self.assertEqual((bench / "tracked7.txt").read_text(), "original-7\n")
 
