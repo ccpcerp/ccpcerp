@@ -48,6 +48,10 @@ case "${1:-}" in
     # GitHub App CircleCI checkout uses an HTTPS credential helper, NOT an
     # SSH deploy key. Fetch the pinned ancestor through that exact authenticated
     # checkout; then transfer it into the disposable bench from the local path.
+    # The CircleCI checkout is blobless: plain fetch can retrieve the commit
+    # while leaving its tracked blobs promised, causing the following local
+    # fetch's upload-pack to fail. --no-filter hydrates the pinned snapshot
+    # in the authenticated checkout before copying it to the disposable bench.
     # No new token, SSH trust-on-first-use, credential files, or interactive
     # prompts. If access is unavailable, stop with a sanitized fixed message.
     SOURCE_REMOTE="$(git -C "$APP_CHECKOUT" remote get-url origin 2>/dev/null || true)"
@@ -59,7 +63,7 @@ case "${1:-}" in
     export GIT_TERMINAL_PROMPT=0
     export GCM_INTERACTIVE=Never
     if ! timeout --signal=TERM --kill-after=5s 120 git -C "$APP_CHECKOUT" \
-      -c fetch.fsckObjects=true fetch --no-tags --depth 1 origin \
+      -c fetch.fsckObjects=true fetch --no-tags --no-filter --depth 1 origin \
       "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
       echo "Pinned original commit unavailable from authenticated checkout" >&2
       exit 1
