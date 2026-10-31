@@ -45,26 +45,25 @@ case "${1:-}" in
     git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
     git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
     bench get-app ccpcerp "$APP_CHECKOUT"
-    # Build #84 showed the local checkout-to-bench Git upload-pack transfer
-    # still fails despite zero missing objects in the pinned source tree.
-    # Bypass the partial-clone local server: fetch directly into the disposable
-    # bench from the SAME allowlisted GitHub HTTPS origin as CircleCI checkout.
-    # The existing GitHub App credential helper is used non-interactively;
-    # no SSH, token copying, disabled fsck, or new remote permissions.
-    SOURCE_REMOTE="$(git -C "$APP_CHECKOUT" remote get-url origin 2>/dev/null || true)"
-    case "$SOURCE_REMOTE" in
-      https://github.com/ccpcerp/ccpcerp|https://github.com/ccpcerp/ccpcerp.git) ;;
-      *) echo "Expected authenticated checkout origin missing" >&2; exit 1 ;;
-    esac
-    export GIT_TERMINAL_PROMPT=0
-    export GCM_INTERACTIVE=Never
-    if ! timeout --signal=TERM --kill-after=5s 180 git -C apps/ccpcerp \
-      -c fetch.fsckObjects=true fetch --no-tags --no-filter --depth 1 \
-      "$SOURCE_REMOTE" "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
-      echo "Pinned original commit could not be fetched directly from authenticated origin" >&2
+    # Build #86 showed that even direct fetch into bench get-app's inherited
+    # partial-clone repository fails. Avoid carrying its promisor state at all.
+    # Construct, verify and check out the exact pinned revision in a NEW,
+    # empty scratch Git repo, using only CircleCI's authenticated HTTPS origin.
+    # This bench is newly disposable, with no site or user data.
+    FRESH_SOURCE_DIR="$(mktemp -d "$BENCH_DIR/.ccpc-pinned-source.XXXXXXXX")"
+    if ! timeout --signal=TERM --kill-after=5s 420 \
+      python "$APP_CHECKOUT/.circleci/ci_fresh_pinned_source.py" \
+        "$APP_CHECKOUT" "$FRESH_SOURCE_DIR"; then
+      echo "Fresh pinned historical app source could not be verified" >&2
       exit 1
     fi
-    unset SOURCE_REMOTE
+    # Preserve the original incomplete local clone inside disposable bench
+    # instead of deleting it. Never act on a site/DEV/PROD path.
+    [[ -d "$BENCH_DIR/apps/ccpcerp" && ! -L "$BENCH_DIR/apps/ccpcerp" ]]
+    [[ ! -e "$BENCH_DIR/.ccpc-inherited-app-clone" &&
+       ! -L "$BENCH_DIR/.ccpc-inherited-app-clone" ]]
+    mv "$BENCH_DIR/apps/ccpcerp" "$BENCH_DIR/.ccpc-inherited-app-clone"
+    mv "$FRESH_SOURCE_DIR" "$BENCH_DIR/apps/ccpcerp"
     git -C apps/ccpcerp checkout --detach "$ORIGINAL_APP_SHA"
     # Exact HEAD alone was insufficient in Build #54: eight tracked blobs
     # were absent despite a zero-exit checkout and a green follow-on test.
