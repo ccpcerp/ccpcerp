@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 from pathlib import Path
 import tarfile
@@ -285,6 +286,69 @@ class RestoreRuntimeTests(unittest.TestCase):
             tf.addfile(i)
         with self.assertRaises(RuntimeError):
             r._safe_tar_entries(bio.getvalue(), "public")
+
+    def test_missing_original_crypto_preserves_new_site_key_and_isolation_flags(self):
+        for local_config in (
+            {"db_name": "ci-only", "db_password": "synthetic-db"},
+            {"db_name": "ci-only", "db_password": "synthetic-db",
+             "encryption_key": "synthetic-ci-new-site-key"},
+        ):
+            with self.subTest(has_generated_key="encryption_key" in local_config):
+                with tempfile.TemporaryDirectory() as directory:
+                    bench = Path(directory)
+                    path = bench / "sites" / r.guard.SITE / "site_config.json"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(json.dumps(local_config), encoding="utf8")
+                    with patch.object(r.dbguard, "_owner_file") as owner, \
+                         patch.object(r.dbguard, "_same_isolated_site") as isolate:
+                        r._set_local_site_crypto(bench, None)
+                        owner.assert_called_once()
+                        isolate.assert_called_once_with(bench)
+                    updated = json.loads(path.read_text(encoding="utf8"))
+                    self.assertEqual(updated.get("encryption_key"),
+                                     local_config.get("encryption_key"))
+                    self.assertEqual(updated["db_password"], "synthetic-db")
+                    self.assertEqual(updated["disable_scheduler"], 1)
+                    self.assertEqual(updated["maintenance_mode"], 1)
+                    self.assertEqual(updated["mute_emails"], 1)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_present_original_crypto_overrides_only_ci_new_site_key(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bench = Path(directory)
+            path = bench / "sites" / r.guard.SITE / "site_config.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({
+                "db_name": "ci-only", "db_password": "synthetic-db",
+                "encryption_key": "synthetic-ci-new-site-key"
+            }), encoding="utf8")
+            with patch.object(r.dbguard, "_owner_file"), \
+                 patch.object(r.dbguard, "_same_isolated_site"):
+                r._set_local_site_crypto(bench, "synthetic-original-key")
+            updated = json.loads(path.read_text(encoding="utf8"))
+            self.assertEqual(updated["encryption_key"], "synthetic-original-key")
+            self.assertEqual(updated["db_name"], "ci-only")
+            self.assertEqual(updated["db_password"], "synthetic-db")
+
+    def test_missing_key_path_rejects_invalid_disposable_site_key(self):
+        for bad in ("", 42, None):
+            with self.subTest(bad_type=type(bad).__name__):
+                with tempfile.TemporaryDirectory() as directory:
+                    bench = Path(directory)
+                    path = bench / "sites" / r.guard.SITE / "site_config.json"
+                    path.parent.mkdir(parents=True)
+                    path.write_text(json.dumps({
+                        "db_name": "ci-only", "encryption_key": bad
+                    }), encoding="utf8")
+                    with patch.object(r.dbguard, "_owner_file"), \
+                         patch.object(r.dbguard, "_same_isolated_site") as isolate:
+                        if bad is None:
+                            # Explicit JSON null is not a usable CI site key.
+                            # Exercise strictly typed key branch below instead.
+                            continue
+                        with self.assertRaises(RuntimeError):
+                            r._set_local_site_crypto(bench, None)
+                        isolate.assert_not_called()
 
     def test_exclusive_private_file(self):
         with tempfile.TemporaryDirectory() as t:
