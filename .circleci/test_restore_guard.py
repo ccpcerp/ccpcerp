@@ -166,6 +166,63 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
                         config=b"{}", sql_backup=synthetic_auth_sql(statement)
                     ))
 
+    def test_missing_key_accepts_pinned_multiline_values_format(self):
+        # Actual archived syntax: uppercase VALUES, standard preceding space,
+        # a newline after VALUES, and one or more tuples on following lines.
+        statements = (
+            b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','hash',0);",
+            b"INSERT INTO `__Auth` VALUES\r\n('User','synthetic','password','hash',0);",
+            b"INSERT INTO `__Auth` VALUES\n"
+            b"('User','synthetic','password','a\\\\'b,\\\\)c;z',0),\n"
+            b"('User','synthetic2','password','hash',0);",
+        )
+        for n, statement in enumerate(statements):
+            with self.subTest(case=n):
+                restored, key = guard.validate_decrypted_tar(synthetic_tar(
+                    config=b"{}", sql_backup=synthetic_auth_sql(statement)
+                ))
+                self.assertEqual(len(restored), 4)
+                self.assertIsNone(key)
+
+    def test_missing_key_rejects_encrypted_multiline_values_rows(self):
+        statements = (
+            b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','cipher',1);",
+            b"INSERT INTO `__Auth` VALUES\n"
+            b"('User','synthetic','password','hash',0),\n"
+            b"('User','synthetic2','password','cipher',1);",
+            b"INSERT INTO `__Auth` VALUES\r\n"
+            b"('User','synthetic','password','cipher',1);",
+        )
+        for n, statement in enumerate(statements):
+            with self.subTest(case=n), self.assertRaisesRegex(
+                RuntimeError, "Decrypted archive validation failed"
+            ):
+                guard.validate_decrypted_tar(synthetic_tar(
+                    config=b"{}", sql_backup=synthetic_auth_sql(statement)
+                ))
+
+    def test_multiline_auth_values_stays_fail_closed_on_unknown_shapes(self):
+        statements = (
+            b"INSERT INTO `__Auth` VALUES\n",
+            b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','hash',0)",
+            b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','hash',2);",
+            b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','hash',0),;",
+            b"INSERT INTO `__Auth` VALUES\nSELECT 'not a tuple';",
+            b"INSERT INTO `__Auth` VALUES\n;",
+            b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','hash',0); DROP TABLE `__Auth`;",
+            b"INSERT INTO `__Auth` VALUES \n('User','synthetic','password','hash',0);",
+            b"INSERT INTO `__Auth`  VALUES\n('User','synthetic','password','hash',0);",
+            b"INSERT INTO `__Auth` values\n('User','synthetic','password','hash',0);",
+            b"REPLACE INTO `__Auth` VALUES\n('User','synthetic','password','hash',0);",
+        )
+        for n, statement in enumerate(statements):
+            with self.subTest(case=n), self.assertRaisesRegex(
+                RuntimeError, "Decrypted archive validation failed"
+            ):
+                guard.validate_decrypted_tar(synthetic_tar(
+                    config=b"{}", sql_backup=synthetic_auth_sql(statement)
+                ))
+
     def test_missing_key_rejects_unparseable_or_incomplete_auth_sql(self):
         cases = [
             b"not gzip",
