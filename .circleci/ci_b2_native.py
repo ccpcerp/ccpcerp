@@ -16,9 +16,9 @@ from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_ope
 import restore_guard as guard
 
 AUTH_URL = "https://api.backblazeb2.com/b2api/v4/b2_authorize_account"
-BUCKET = "ccpc-ci-restore-20261030"
+# The exact bucket/key is pinned once in restore_guard.py.
+BUCKET, OBJECT = guard.B2_OBJECT_PATH.lstrip("/").split("/", 1)
 PREFIX = "integration2-restore-20261030/"
-OBJECT = PREFIX + "integration2-restore-20261030-85ff2c424e4cb5cf.tar.age"
 S3_ENDPOINT = "https://" + guard.B2_HOST
 MAX_AUTH_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 20
