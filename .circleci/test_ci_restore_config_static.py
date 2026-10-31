@@ -4,8 +4,10 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from ci_original_source_probe import classify
+from ci_source_hydration import hydrate_missing, missing_object_ids
 
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
@@ -77,6 +79,7 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertIn("timeout --signal=TERM --kill-after=5s 120", self.stage)
         self.assertIn("timeout --signal=TERM --kill-after=5s 60", self.stage)
         self.assertIn("fetch --no-tags --no-filter --depth 1 origin", self.stage)
+        self.assertIn("ci_source_hydration.py", self.stage)
         self.assertIn('"$APP_CHECKOUT" "$ORIGINAL_APP_SHA"', self.stage)
         self.assertIn(">/dev/null 2>&1", self.stage)
         self.assertNotIn("git@github.com:", self.stage)
@@ -86,9 +89,9 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
 
     def test_blobless_checkout_hydrates_original_commit_before_local_copy(self):
-        # Actual local Git transfer, not mocks; no external network, CI secrets,
-        # Frappe, CircleCI API or database. Reproduces Build #74's blobless
-        # promisor-clone failure and verifies the --no-filter repair.
+        # Synthetic file:// Git transfer reproduces Build #82's eight missing
+        # historical blobs even after fetching the old commit. No external
+        # network, CI credentials, Frappe, or databases are accessed.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             original = root / "original"
@@ -132,8 +135,22 @@ class RestoreCIStaticTests(unittest.TestCase):
             )
             git("clone", "--quiet", checkout, bench)
             git("-C", checkout, "-c", "fetch.fsckObjects=true", "fetch",
-                "--quiet", "--no-tags", "--no-filter", "--depth", "1",
+                "--quiet", "--no-tags", "--filter=blob:none", "--depth", "1",
                 "origin", old_sha)
+            self.assertEqual(len(missing_object_ids(checkout, old_sha)), 8)
+            blocked = subprocess.run(
+                ["git", "-C", str(bench), "-c", "fetch.fsckObjects=true",
+                 "fetch", "--quiet", "--no-tags", "--depth", "1",
+                 str(checkout), old_sha],
+                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=15,
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            # The helper must explicitly enable Git promisor lazy fetching,
+            # unlike the no-network object scan, then close the missing set.
+            with mock.patch.dict(os.environ, env):
+                self.assertEqual(hydrate_missing(checkout, old_sha), 8)
+            self.assertEqual(len(missing_object_ids(checkout, old_sha)), 0)
             git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
                 "--quiet", "--no-tags", "--depth", "1", checkout, old_sha)
             git("-C", bench, "checkout", "--quiet", "--detach", old_sha)
@@ -185,6 +202,9 @@ class RestoreCIStaticTests(unittest.TestCase):
                        "store_artifacts:", "persist_to_workspace:"):
             self.assertNotIn(unsafe, job)
         self.assertIn("python .circleci/ci_original_source_probe.py", job)
+        self.assertIn("ci_source_hydration.py", self.stage)
+        self.assertIn("hydrate_missing(checkout, ORIGINAL_SHA)",
+                      (self.root / "ci_original_source_probe.py").read_text(encoding="utf8"))
 
     def test_github_source_probe_failure_classifiers_never_reflect_credentials(self):
         cases = (
