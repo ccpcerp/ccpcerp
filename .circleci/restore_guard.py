@@ -172,6 +172,7 @@ def no_encrypted_auth_entries(sql_gz: bytes) -> bool:
     collecting = False
     columns = []
     encrypted = False
+    pending_values = None  # A bounded multiline __Auth VALUES statement, if any.
     try:
         with gzip.GzipFile(fileobj=io.BytesIO(sql_gz)) as source:
             while line := source.readline(32 * 1024 * 1024 + 1):
@@ -179,6 +180,17 @@ def no_encrypted_auth_entries(sql_gz: bytes) -> bool:
                 if len(line) > 32 * 1024 * 1024 or total > 256 * 1024 * 1024:
                     raise ValueError("Oversized SQL dump")
                 clean = line.lstrip()
+                if pending_values is not None:
+                    # MariaDB dumps can put the Auth tuples on lines after
+                    # the exact "INSERT INTO `__Auth` VALUES" header.
+                    # Do not silently skip ANY line until its tuples validate.
+                    pending_values.extend(line)
+                    if len(pending_values) > 32 * 1024 * 1024:
+                        raise ValueError("Oversized Auth insert")
+                    if line.rstrip().endswith(b";"):
+                        encrypted |= _auth_encrypted_flags(bytes(pending_values))
+                        pending_values = None
+                    continue
                 if clean.startswith(b"CREATE TABLE `__Auth`"):
                     if seen_schema or clean.rstrip() != b"CREATE TABLE `__Auth` (":
                         raise ValueError("Unrecognized Auth schema")
@@ -198,13 +210,25 @@ def no_encrypted_auth_entries(sql_gz: bytes) -> bool:
                         and (b"__AUTH" in action_prefix
                              or action_prefix.startswith(b"LOAD DATA"))):
                     prefix = b"INSERT INTO `__Auth` VALUES "
+                    multiline_header = b"INSERT INTO `__Auth` VALUES"
                     if (not schema_complete or columns != [
                         b"doctype", b"name", b"fieldname", b"password", b"encrypted"
-                    ] or not clean.startswith(prefix)):
+                    ]):
                         raise ValueError("Unrecognized Auth SQL")
-                    encrypted |= _auth_encrypted_flags(clean[len(prefix):])
+                    if clean.startswith(prefix):
+                        encrypted |= _auth_encrypted_flags(clean[len(prefix):])
+                    elif clean in (multiline_header + b"\n",
+                                  multiline_header + b"\r\n"):
+                        # Only the independently observed uppercase VALUES,
+                        # standard-before-gap, linebreak-after variant.
+                        # Parsing remains mandatory; no missing-key bypass.
+                        pending_values = bytearray()
+                    else:
+                        raise ValueError("Unrecognized Auth SQL")
     except (OSError, EOFError, zlib.error):
         raise ValueError("Invalid SQL gzip") from None
+    if pending_values is not None:
+        raise ValueError("Unterminated Auth insert")
     if not schema_complete or columns != [
         b"doctype", b"name", b"fieldname", b"password", b"encrypted"
     ]:
