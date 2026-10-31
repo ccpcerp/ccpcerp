@@ -1,5 +1,8 @@
 """Source-only restore CI safety checks. Does not invoke CircleCI or decrypt anything."""
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 
 
@@ -71,7 +74,7 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertIn("GCM_INTERACTIVE=Never", self.stage)
         self.assertIn("timeout --signal=TERM --kill-after=5s 120", self.stage)
         self.assertIn("timeout --signal=TERM --kill-after=5s 60", self.stage)
-        self.assertIn("fetch --no-tags --depth 1 origin", self.stage)
+        self.assertIn("fetch --no-tags --no-filter --depth 1 origin", self.stage)
         self.assertIn('"$APP_CHECKOUT" "$ORIGINAL_APP_SHA"', self.stage)
         self.assertIn(">/dev/null 2>&1", self.stage)
         self.assertNotIn("git@github.com:", self.stage)
@@ -79,6 +82,62 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertNotIn("ssh-keyscan", self.stage)
         self.assertNotIn("credential.helper store", self.stage)
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
+
+    def test_blobless_checkout_hydrates_original_commit_before_local_copy(self):
+        # Actual local Git transfer, not mocks; no external network, CI secrets,
+        # Frappe, CircleCI API or database. Reproduces Build #74's blobless
+        # promisor-clone failure and verifies the --no-filter repair.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original = root / "original"
+            checkout = root / "checkout"
+            bench = root / "bench"
+            original.mkdir()
+            env = dict(os.environ)
+            env.update({
+                "GIT_ALLOW_PROTOCOL": "file",
+                "GIT_TERMINAL_PROMPT": "0",
+                "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": os.devnull,
+                "GIT_CONFIG_COUNT": "0",
+            })
+
+            def git(*argv):
+                run = subprocess.run(
+                    ["git", *map(str, argv)],
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, check=True, timeout=15,
+                )
+                return run.stdout.strip()
+
+            git("init", "--quiet", original)
+            git("-C", original, "config", "user.name", "Source Test")
+            git("-C", original, "config", "user.email", "ci@example.invalid")
+            for i in range(8):
+                (original / f"tracked{i}.txt").write_text(f"original-{i}\n")
+            git("-C", original, "add", ".")
+            git("-C", original, "commit", "--quiet", "-m", "pinned original")
+            old_sha = git("-C", original, "rev-parse", "HEAD")
+            for i in range(8):
+                (original / f"tracked{i}.txt").write_text(f"new-{i}\n")
+            git("-C", original, "commit", "--quiet", "-am", "review")
+            git("-C", original, "config", "uploadpack.allowFilter", "true")
+            git("clone", "--quiet", "--filter=blob:none", "--depth", "1",
+                original.as_uri(), checkout)
+            self.assertEqual(
+                git("-C", checkout, "config", "--get", "remote.origin.promisor"),
+                "true",
+            )
+            git("clone", "--quiet", checkout, bench)
+            git("-C", checkout, "-c", "fetch.fsckObjects=true", "fetch",
+                "--quiet", "--no-tags", "--no-filter", "--depth", "1",
+                "origin", old_sha)
+            git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
+                "--quiet", "--no-tags", "--depth", "1", checkout, old_sha)
+            git("-C", bench, "checkout", "--quiet", "--detach", old_sha)
+            git("-C", bench, "fsck", "--full", "--strict", "--no-reflogs")
+            self.assertEqual(git("-C", bench, "rev-parse", "HEAD"), old_sha)
+            self.assertEqual((bench / "tracked7.txt").read_text(), "original-7\n")
 
     def test_exact_original_sha_source_and_git_fsck(self):
         self.assertIn("ORIGINAL_APP_SHA=0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41", self.stage)
