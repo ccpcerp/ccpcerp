@@ -45,13 +45,31 @@ case "${1:-}" in
     git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
     git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
     bench get-app ccpcerp "$APP_CHECKOUT"
-    # CircleCI's local checkout may be a partial Git object store even when
-    # checkout of an ancestor exits zero. Fetch the pinned original SHA from
-    # the private authoritative GitHub repo using CircleCI's existing GitHub
-    # checkout deploy key (no new CI/DEV/PROD credentials).
-    # Fail closed if that key cannot read the pinned commit.
-    git -C apps/ccpcerp -c fetch.fsckObjects=true fetch --no-tags --depth 1 \
-      git@github.com:ccpcerp/ccpcerp.git "$ORIGINAL_APP_SHA"
+    # GitHub App CircleCI checkout uses an HTTPS credential helper, NOT an
+    # SSH deploy key. Fetch the pinned ancestor through that exact authenticated
+    # checkout; then transfer it into the disposable bench from the local path.
+    # No new token, SSH trust-on-first-use, credential files, or interactive
+    # prompts. If access is unavailable, stop with a sanitized fixed message.
+    SOURCE_REMOTE="$(git -C "$APP_CHECKOUT" remote get-url origin 2>/dev/null || true)"
+    case "$SOURCE_REMOTE" in
+      https://github.com/ccpcerp/ccpcerp|https://github.com/ccpcerp/ccpcerp.git) ;;
+      *) echo "Expected authenticated checkout origin missing" >&2; exit 1 ;;
+    esac
+    unset SOURCE_REMOTE
+    export GIT_TERMINAL_PROMPT=0
+    export GCM_INTERACTIVE=Never
+    if ! timeout --signal=TERM --kill-after=5s 120 git -C "$APP_CHECKOUT" \
+      -c fetch.fsckObjects=true fetch --no-tags --depth 1 origin \
+      "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
+      echo "Pinned original commit unavailable from authenticated checkout" >&2
+      exit 1
+    fi
+    if ! timeout --signal=TERM --kill-after=5s 60 git -C apps/ccpcerp \
+      -c fetch.fsckObjects=true fetch --no-tags --depth 1 \
+      "$APP_CHECKOUT" "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
+      echo "Pinned original commit could not be copied into isolated bench" >&2
+      exit 1
+    fi
     git -C apps/ccpcerp checkout --detach "$ORIGINAL_APP_SHA"
     # Exact HEAD alone was insufficient in Build #54: eight tracked blobs
     # were absent despite a zero-exit checkout and a green follow-on test.
