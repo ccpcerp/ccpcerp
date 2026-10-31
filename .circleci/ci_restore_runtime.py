@@ -17,7 +17,7 @@ import stat
 import subprocess
 import sys
 import tarfile
-from urllib.request import Request, HTTPRedirectHandler, ProxyHandler, build_opener
+import ci_b2_native as b2
 
 import ci_bench_preflight as benchguard
 import ci_db_attestation as dbguard
@@ -26,7 +26,6 @@ import restore_guard as guard
 MAX_ARCHIVE = 32 * 1024 * 1024
 MAX_FILE = 16 * 1024 * 1024
 MAX_FILES_BYTES = 64 * 1024 * 1024
-B2_TIMEOUT = 20
 
 
 def _run(command: list[str], *, cwd: Path | None = None, input_data: bytes | None = None,
@@ -41,31 +40,6 @@ def _run(command: list[str], *, cwd: Path | None = None, input_data: bytes | Non
         return p.stdout
     except (OSError, subprocess.SubprocessError, ValueError):
         raise RuntimeError("Isolated restore stage failed (redacted)") from None
-
-
-class _NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *args, **kwargs):
-        raise RuntimeError("Encrypted object redirect forbidden")
-
-
-def fetch_exact_ciphertext(url: str) -> bytes:
-    """Exact private B2 ciphertext only; no redirects and bounded memory."""
-    guard.validate_presigned_url(url)
-    try:
-        response = build_opener(_NoRedirect(), ProxyHandler({})).open(
-            Request(url, headers={"Accept-Encoding": "identity"}), timeout=B2_TIMEOUT
-        )
-        with response:
-            if response.getcode() != 200:
-                raise ValueError("Unexpected encrypted object HTTP status")
-            length = response.headers.get("Content-Length")
-            if length is not None and length != str(guard.CIPHERTEXT_BYTES):
-                raise ValueError("Unexpected encrypted object Content-Length")
-            payload = response.read(guard.CIPHERTEXT_BYTES + 1)
-        guard.verify_ciphertext(payload)
-        return payload
-    except Exception:
-        raise RuntimeError("Private ciphertext fetch/integrity failed (redacted)") from None
 
 
 def _new_private_dir(root: Path) -> None:
@@ -84,17 +58,21 @@ def _write_secret(path: Path, data: bytes, *, strict_parent: bool = True) -> Non
 
 
 def prefetch_ciphertext(env: dict[str, str], checkout_sha: str, home: Path) -> None:
-    """Fetch the 15-minute signed GET before slow dependency/bench installation.
+    """Use a scoped B2 read-only key before slow dependency/bench installation.
 
     Store only the exact hash-pinned age ciphertext in a private scratch folder.
-    Never decrypt, print the URL, invoke bench, or touch MariaDB in this phase.
+    Never decrypt, persist B2 credentials, invoke bench, or touch MariaDB here.
     """
     guard.require_ci_identity(env, checkout_sha)
-    if not env.get("CCPC_RESTORE_OBJECT_GET_URL") or not env.get("CCPC_RESTORE_AGE_IDENTITY"):
-        raise RuntimeError("Restricted CI restore secrets missing")
+    if not all(env.get(k) for k in (
+        "CCPC_RESTORE_B2_KEY_ID", "CCPC_RESTORE_B2_APP_KEY", "CCPC_RESTORE_AGE_IDENTITY"
+    )):
+        raise RuntimeError("Restricted CI restore credentials missing")
     target_dir = home / ".ccpc-restore-ciphertext"
     _new_private_dir(target_dir)
-    payload = fetch_exact_ciphertext(env["CCPC_RESTORE_OBJECT_GET_URL"])
+    payload = b2.fetch_exact_ciphertext(
+        env["CCPC_RESTORE_B2_KEY_ID"], env["CCPC_RESTORE_B2_APP_KEY"]
+    )
     guard.verify_ciphertext(payload)
     _write_secret(target_dir / "payload.age", payload)
     print("ENCRYPTED BACKUP: EARLY EXACT CIPHERTEXT GET PASS")
@@ -291,8 +269,7 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
 
     # First validate real ciphertext and all four source components before the
     # first potentially destructive DB/site operation.
-    # The short-lived signed URL has already expired by the time the pinned
-    # Frappe/ERPNext bench is ready. Read the exact encrypted object prefetched
+    # The B2 scoped key is needed only during early prefetch. Read ciphertext
     # in THIS same isolated CircleCI job; never perform a second network GET.
     payload = read_prefetched_ciphertext(home)
     scratch = home / ".ccpc-restore-payload"
@@ -302,12 +279,14 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
             payload, env["CCPC_RESTORE_AGE_IDENTITY"], scratch
         )
     finally:
-        # Prevent later Frappe/bench child processes inheriting bearer URL/age key.
-        # These secrets are needed for only the early authenticated decrypt stage.
-        os.environ.pop("CCPC_RESTORE_OBJECT_GET_URL", None)
-        os.environ.pop("CCPC_RESTORE_AGE_IDENTITY", None)
-        env.pop("CCPC_RESTORE_OBJECT_GET_URL", None)
-        env.pop("CCPC_RESTORE_AGE_IDENTITY", None)
+        # Prevent any credential/identity exposure to later Frappe/bench commands.
+        # B2 keys are also stripped at CI command launch in config.yml.
+        for secret_name in (
+            "CCPC_RESTORE_B2_KEY_ID", "CCPC_RESTORE_B2_APP_KEY",
+            "CCPC_RESTORE_AGE_IDENTITY",
+        ):
+            os.environ.pop(secret_name, None)
+            env.pop(secret_name, None)
         # The sealed object is no longer needed after decrypt validation.
         (home / ".ccpc-restore-ciphertext" / "payload.age").unlink(missing_ok=True)
     public = _safe_tar_entries(_file_component(verified, "-files.tar"), "public")
