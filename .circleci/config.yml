@@ -37,6 +37,11 @@ parameters:
     type: boolean
     default: false
 
+  # Separate low-cost live GitHub App checkout transfer probe, no backup/DB.
+  run_integration2_git_source_probe:
+    type: boolean
+    default: false
+
 jobs:
   python-syntax:
     docker:
@@ -437,6 +442,21 @@ jobs:
             done
             echo "OFFLINE RESTORE SOURCE PREFLIGHT: PASS"
 
+  pr32-git-source-probe:
+    # Small, explicit manual-held GitHub read-only probe: authentic checkout,
+    # pinned historical source transfer, and strict local Git integrity.
+    # NO B2/age restricted Context, MariaDB/Redis, or bench packages.
+    docker:
+      - image: cimg/python:3.14
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Authenticated GitHub source transfer probe (no B2, DB, or bench)
+          command: |
+            set -euo pipefail
+            python .circleci/ci_original_source_probe.py
+
 workflows:
   starter-validation:
     jobs:
@@ -538,6 +558,22 @@ workflows:
       - pr32-restore-source-preflight:
           requires:
             - pr32-source-preflight-manual-approval
+          filters:
+            branches:
+              only: review/pr32-integration2-isolated-restore-2026-10-30
+
+  # Hosted Git source-copy probe: GitHub App HTTPS only, no secret Context.
+  opt-in-integration2-git-source-probe:
+    when: << pipeline.parameters.run_integration2_git_source_probe >>
+    jobs:
+      - pr32-git-source-probe-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/pr32-integration2-isolated-restore-2026-10-30
+      - pr32-git-source-probe:
+          requires:
+            - pr32-git-source-probe-manual-approval
           filters:
             branches:
               only: review/pr32-integration2-isolated-restore-2026-10-30
