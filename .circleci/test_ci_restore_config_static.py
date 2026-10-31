@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from ci_original_source_probe import classify
+
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
 CONTEXT = "ccpc-pr32-integration2-restore-once"
@@ -166,6 +168,42 @@ class RestoreCIStaticTests(unittest.TestCase):
                 )
             self.assertEqual(git("-C", bench, "rev-parse", "HEAD"), old_sha)
             self.assertEqual((bench / "tracked7.txt").read_text(), "original-7\n")
+
+    def test_github_source_probe_is_default_off_held_without_secret_context(self):
+        self.assertIn(
+            "run_integration2_git_source_probe:\\n    type: boolean\\n    default: false",
+            self.config,
+        )
+        self.assertIn("opt-in-integration2-git-source-probe:", self.config)
+        self.assertIn("pr32-git-source-probe-manual-approval:", self.config)
+        self.assertIn("requires:\\n            - pr32-git-source-probe-manual-approval", self.config)
+        job = self.config.split("  pr32-git-source-probe:\\n", 1)[1].split(
+            "\\nworkflows:", 1
+        )[0]
+        for unsafe in ("context:", "mariadb:", "redis:", "ssh ", "setup_remote_docker:",
+                       "CCPC_RESTORE_B2_APP_KEY", "CCPC_RESTORE_AGE_IDENTITY",
+                       "store_artifacts:", "persist_to_workspace:"):
+            self.assertNotIn(unsafe, job)
+        self.assertIn("python .circleci/ci_original_source_probe.py", job)
+
+    def test_github_source_probe_failure_classifiers_never_reflect_credentials(self):
+        cases = (
+            ("remote: warning: lazy fetching disabled; some objects may not be available", "promisor-missing-objects"),
+            ("fatal: could not fetch abc from promisor remote", "promisor-missing-objects"),
+            ("fatal: not our ref abc", "unadvertised-object"),
+            ("server does not allow request for unadvertised object", "unadvertised-object"),
+            ("fatal: shallow update not allowed", "shallow-boundary"),
+            ("fatal: missing blob abc", "missing-objects"),
+            ("fatal: Authentication failed for https://example.invalid/TOKEN", "authentication"),
+            ("fatal: repository corruption on the remote side", "git-integrity"),
+            ("fatal: some other problem with https://example.invalid/TOKEN", "other"),
+        )
+        for diagnostic, expected in cases:
+            category = classify(diagnostic)
+            self.assertEqual(category, expected)
+            self.assertNotIn("TOKEN", category)
+            self.assertNotIn("http", category)
+            self.assertNotIn("abc", category)
 
     def test_exact_original_sha_source_and_git_fsck(self):
         self.assertIn("ORIGINAL_APP_SHA=0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41", self.stage)
