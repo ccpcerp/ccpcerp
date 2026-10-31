@@ -71,7 +71,7 @@ class BackblazeNativeTests(unittest.TestCase):
     def test_missing_or_malformed_keys_denied_before_network(self):
         with patch.object(b, "_open") as opener:
             for a, c in (("", "b" * 18), ("a" * 18, ""), ("a b" * 6, "b" * 18),
-                         ("a" * 18, "secret\\nsecond"), ("x" * 18, "y:secret")):
+                         ("a" * 18, "secret\nsecond"), ("x" * 18, "y:secret")):
                 with self.subTest(a=a), self.assertRaises(RuntimeError):
                     b.fetch_exact_ciphertext(a, c)
             opener.assert_not_called()
@@ -94,7 +94,7 @@ class BackblazeNativeTests(unittest.TestCase):
             {"applicationKeyExpirationTimestamp": None},
             {"applicationKeyExpirationTimestamp": int(
                 (datetime.now(timezone.utc) + timedelta(days=30)).timestamp() * 1000)},
-            {"authorizationToken": "token\\r\\nevil"},
+            {"authorizationToken": "token\r\nevil"},
         ]
         for changes in bad:
             with self.subTest(changes=changes):
