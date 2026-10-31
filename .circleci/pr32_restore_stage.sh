@@ -45,43 +45,26 @@ case "${1:-}" in
     git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
     git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
     bench get-app ccpcerp "$APP_CHECKOUT"
-    # GitHub App CircleCI checkout uses an HTTPS credential helper, NOT an
-    # SSH deploy key. Fetch the pinned ancestor through that exact authenticated
-    # checkout; then transfer it into the disposable bench from the local path.
-    # The CircleCI checkout is blobless: even --no-filter can retrieve the
-    # original commit while leaving historical tracked blobs promised (Build
-    #82: eight missing). A separate bounded promisor hydration now fills
-    # those objects before any local copy into the disposable bench.
-    # No new token, SSH trust-on-first-use, credential files, or interactive
-    # prompts. If access is unavailable, stop with a sanitized fixed message.
+    # Build #84 showed the local checkout-to-bench Git upload-pack transfer
+    # still fails despite zero missing objects in the pinned source tree.
+    # Bypass the partial-clone local server: fetch directly into the disposable
+    # bench from the SAME allowlisted GitHub HTTPS origin as CircleCI checkout.
+    # The existing GitHub App credential helper is used non-interactively;
+    # no SSH, token copying, disabled fsck, or new remote permissions.
     SOURCE_REMOTE="$(git -C "$APP_CHECKOUT" remote get-url origin 2>/dev/null || true)"
     case "$SOURCE_REMOTE" in
       https://github.com/ccpcerp/ccpcerp|https://github.com/ccpcerp/ccpcerp.git) ;;
       *) echo "Expected authenticated checkout origin missing" >&2; exit 1 ;;
     esac
-    unset SOURCE_REMOTE
     export GIT_TERMINAL_PROMPT=0
     export GCM_INTERACTIVE=Never
-    if ! timeout --signal=TERM --kill-after=5s 120 git -C "$APP_CHECKOUT" \
-      -c fetch.fsckObjects=true fetch --no-tags --no-filter --depth 1 origin \
-      "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
-      echo "Pinned original commit unavailable from authenticated checkout" >&2
+    if ! timeout --signal=TERM --kill-after=5s 180 git -C apps/ccpcerp \
+      -c fetch.fsckObjects=true fetch --no-tags --no-filter --depth 1 \
+      "$SOURCE_REMOTE" "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
+      echo "Pinned original commit could not be fetched directly from authenticated origin" >&2
       exit 1
     fi
-    # Build #82 confirmed eight promised Git objects remain absent after a
-    # successful --no-filter fetch. Hydrate only that pinned revision through
-    # the existing checkout's authenticated promisor remote; never relax fsck.
-    if ! timeout --signal=TERM --kill-after=5s 420 \
-      python "$APP_CHECKOUT/.circleci/ci_source_hydration.py" "$APP_CHECKOUT"; then
-      echo "Pinned original commit objects could not be hydrated" >&2
-      exit 1
-    fi
-    if ! timeout --signal=TERM --kill-after=5s 60 git -C apps/ccpcerp \
-      -c fetch.fsckObjects=true fetch --no-tags --depth 1 \
-      "$APP_CHECKOUT" "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
-      echo "Pinned original commit could not be copied into isolated bench" >&2
-      exit 1
-    fi
+    unset SOURCE_REMOTE
     git -C apps/ccpcerp checkout --detach "$ORIGINAL_APP_SHA"
     # Exact HEAD alone was insufficient in Build #54: eight tracked blobs
     # were absent despite a zero-exit checkout and a green follow-on test.
