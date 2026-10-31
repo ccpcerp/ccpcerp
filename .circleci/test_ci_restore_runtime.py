@@ -26,6 +26,49 @@ def fixture(scope="public", name="example.txt", body=b"synthetic"):
 
 
 class RestoreRuntimeTests(unittest.TestCase):
+    def test_restore_phase_reports_safe_fixed_label_without_exception(self):
+        # Synthetic-only: simulate a stage failure, never touch DB, B2 or age.
+        from contextlib import redirect_stderr
+
+        def synthetic_failure(*args, **kwargs):
+            kwargs["diagnostic_phase"][0] = "SITE_CREATE"
+            raise RuntimeError("SENSITIVE_EXCEPTION_SENTINEL")
+
+        with patch.object(r.sys, "argv", ["ci_restore_runtime.py", "--restore"]), \
+             patch.object(r, "_run", return_value=b"f" * 40), \
+             patch.object(r, "restore_once", side_effect=synthetic_failure), \
+             io.StringIO() as error_output, redirect_stderr(error_output):
+            self.assertEqual(r.main(), 1)
+            output = error_output.getvalue()
+        self.assertIn("INTEGRATION2 DISPOSABLE RESTORE: FAIL (sanitized)", output)
+        self.assertIn("INTEGRATION2 RESTORE FAILURE PHASE: SITE_CREATE", output)
+        self.assertNotIn("SENSITIVE_EXCEPTION_SENTINEL", output)
+
+    def test_restore_phase_rejects_unlisted_label_to_prevent_secret_leak(self):
+        from contextlib import redirect_stderr
+
+        def synthetic_failure(*args, **kwargs):
+            kwargs["diagnostic_phase"][0] = "SECRET_VALUE_MUST_NOT_APPEAR"
+            raise RuntimeError("SECRET_EXCEPTION_MUST_NOT_APPEAR")
+
+        with patch.object(r.sys, "argv", ["ci_restore_runtime.py", "--restore"]), \
+             patch.object(r, "_run", return_value=b"f" * 40), \
+             patch.object(r, "restore_once", side_effect=synthetic_failure), \
+             io.StringIO() as error_output, redirect_stderr(error_output):
+            self.assertEqual(r.main(), 1)
+            output = error_output.getvalue()
+        self.assertIn("INTEGRATION2 RESTORE FAILURE PHASE: UNKNOWN", output)
+        self.assertNotIn("SECRET_VALUE_MUST_NOT_APPEAR", output)
+        self.assertNotIn("SECRET_EXCEPTION_MUST_NOT_APPEAR", output)
+
+    def test_phase_attestation_fails_closed_at_ci_policy_with_no_io(self):
+        phase = ["ENTRY"]
+        with patch.object(r.guard, "require_ci_identity", side_effect=RuntimeError("private")):
+            with self.assertRaises(RuntimeError):
+                r.restore_once({}, "f" * 40, Path("/nonexistent"),
+                               Path("/nonexistent/bench"), diagnostic_phase=phase)
+        self.assertEqual(phase, ["CI_POLICY"])
+
     def test_subprocess_drops_secret_environment_without_removing_from_python(self):
         # Build #92 correction: the restore Python process needs the temporary
         # age identity, but no spawned child command may inherit it or B2 keys.
