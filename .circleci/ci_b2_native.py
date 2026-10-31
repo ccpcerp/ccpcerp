@@ -38,7 +38,7 @@ def _scoped_read_only(capabilities: object) -> bool:
     if not isinstance(capabilities, list) or not capabilities:
         return False
     if any(not isinstance(cap, str) or not 1 <= len(cap) <= 128
-           or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*|\\*", cap)
+           or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*", cap)
            for cap in capabilities):
         return False
     if "readFiles" not in capabilities or len(capabilities) != len(set(capabilities)):
