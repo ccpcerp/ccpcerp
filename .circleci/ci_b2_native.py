@@ -18,6 +18,7 @@ import restore_guard as guard
 AUTH_URL = "https://api.backblazeb2.com/b2api/v4/b2_authorize_account"
 # The exact bucket/key is pinned once in restore_guard.py.
 BUCKET, OBJECT = guard.B2_OBJECT_PATH.lstrip("/").split("/", 1)
+BUCKET_ID = "00e7494466f980a0a8120e16"  # Owner-verified private bucket ID
 PREFIX = "integration2-restore-20261030/"
 S3_ENDPOINT = "https://" + guard.B2_HOST
 MAX_AUTH_BYTES = 64 * 1024
@@ -61,8 +62,9 @@ def _restricted_authorization(response: dict) -> tuple[str, str]:
     if (
         storage["s3ApiUrl"] != S3_ENDPOINT
         or not isinstance(buckets, list) or len(buckets) != 1
-        or not isinstance(buckets[0], dict) or buckets[0].get("name") != BUCKET
-        or not isinstance(buckets[0].get("id"), str) or not buckets[0]["id"]
+        or not isinstance(buckets[0], dict) or buckets[0].get("id") != BUCKET_ID
+        # B2 may return name=null for scoped keys without bucket-list access.
+        or buckets[0].get("name") not in (None, BUCKET)
         or allowed.get("namePrefix") != PREFIX
         or not isinstance(capabilities, list) or "readFiles" not in capabilities
         or set(capabilities).intersection({
