@@ -1,16 +1,17 @@
-"""Opt-in no-Context GitHub App original-source transfer diagnostic.
+"""Opt-in no-Context GitHub App pinned-source diagnostic.
 
-No B2 credentials, age keys, DB, Frappe bench, or deployments. A small CircleCI
-job clones the checkout into a disposable directory and tests a direct HTTPS
-fetch of the pinned original SHA from the exact authenticated GitHub origin.
-This bypasses the partial-clone local Git transfer broken in Build #84.
-Raw Git command stderr, URLs and credential-helper output are never logged.
+Builds #82/#84/#86 found missing objects or failed fetches when reusing
+CircleCI's inherited partial clone as either source or destination.
+This probe validates a new empty Git repository, then tests the exact
+disposable bench swap. No B2/age keys, Frappe, database or deployment.
+Raw Git stderr, URLs and credential-helper output never reach CI logs.
 """
 import os
 from pathlib import Path
 import subprocess
 import tempfile
 
+from ci_fresh_pinned_source import SourceFailure, prepare_fresh_source
 
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
@@ -98,22 +99,26 @@ def main():
     gate(origin in ORIGIN, "unexpected-https-origin")
     with tempfile.TemporaryDirectory(prefix="ccpc-git-source-probe-") as scratch:
         bench = Path(scratch) / "bench-ccpcerp"
-        # Match bench get-app local clone order: copy the CircleCI checkout
-        # first, then fetch its pinned historical SHA directly from GitHub.
-        require_ok(
-            run_git("clone", "--quiet", "--branch", BRANCH, checkout, bench),
-            "clone-disposable-bench-source",
-        )
-        # Build #84: local upload-pack fails even after all eight historical
-        # blobs are hydrated. Use the GitHub App authenticated HTTPS origin
-        # directly from the bench repository, not the partial clone as a
-        # temporary Git server. This is the exact method in restore_stage.sh.
-        result = run_git("-C", bench, "-c", "fetch.fsckObjects=true",
-                         "fetch", "--quiet", "--no-tags", "--no-filter",
-                         "--depth", "1", origin, ORIGINAL_SHA, timeout=180)
-        require_ok(result, "authenticated-direct-origin-fetch")
+        fresh = Path(scratch) / "fresh-pinned-ccpcerp"
+        prior = Path(scratch) / "inherited-partial-clone"
+        # Match restore bench get-app: first clone inherited CircleCI source
+        # into the new disposable bench location.
+        require_ok(run_git("clone", "--quiet", "--branch", BRANCH, checkout, bench),
+                   "clone-inherited-disposable-bench-source")
+        # Fetch the pinned historical source into an independent EMPTY Git
+        # repository, not into the inherited blobless/promisor bench clone.
+        fresh.mkdir()
+        try:
+            prepare_fresh_source(fresh, origin, ORIGINAL_SHA)
+        except SourceFailure as error:
+            raise RuntimeError("SOURCE GIT PROBE: fresh-" + str(error) + " FAIL") from None
+        print("SOURCE GIT PROBE: FRESH PINNED REPOSITORY FULL FSCK PASS", flush=True)
+        # The real restore swaps the incomplete local checkout only inside a
+        # newly created disposable bench, retaining the prior clone safely.
+        bench.rename(prior)
+        fresh.rename(bench)
         git_integrity(bench)
-        print("SOURCE GIT PROBE: DIRECT AUTHENTICATED ORIGIN TRANSFER PASS", flush=True)
+        print("SOURCE GIT PROBE: FRESH SOURCE BENCH SWAP PASS", flush=True)
 
 
 if __name__ == "__main__":
