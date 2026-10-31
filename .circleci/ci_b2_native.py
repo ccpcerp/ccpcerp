@@ -27,7 +27,8 @@ S3_ENDPOINT = "https://" + guard.B2_HOST
 ALLOWED_READ_CAPABILITIES = frozenset({
     "readFiles", "listFiles", "shareFiles", "readBuckets", "listBuckets",
     "readBucketEncryption", "readBucketRetentions", "readFileRetentions",
-    "readFileLegalHolds",
+    "readFileLegalHolds", "readBucketReplications",
+    "readBucketNotifications", "readBucketLogging",
 })
 MAX_AUTH_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 20
