@@ -21,6 +21,14 @@ BUCKET, OBJECT = guard.B2_OBJECT_PATH.lstrip("/").split("/", 1)
 BUCKET_ID = "00e7494466f980a0a8120e16"  # Owner-verified private bucket ID
 PREFIX = "integration2-restore-20261030/"
 S3_ENDPOINT = "https://" + guard.B2_HOST
+# The B2 Web UI "Read Only" key may include shareFiles: permits creation of
+# download authorization tokens, not writes or deletes. Keep the bucket and
+# object-prefix restrictions strict; deny ANY write/admin capability.
+ALLOWED_READ_CAPABILITIES = frozenset({
+    "readFiles", "listFiles", "shareFiles", "readBuckets", "listBuckets",
+    "readBucketEncryption", "readBucketRetentions", "readFileRetentions",
+    "readFileLegalHolds",
+})
 MAX_AUTH_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 20
 
@@ -74,10 +82,8 @@ def _restricted_authorization(response: dict) -> tuple[str, str]:
         or buckets[0].get("name") not in (None, BUCKET)
         or allowed.get("namePrefix") != PREFIX
         or not isinstance(capabilities, list) or "readFiles" not in capabilities
-        or set(capabilities).intersection({
-            "writeFiles", "deleteFiles", "writeKeys", "deleteKeys",
-            "writeBuckets", "deleteBuckets", "shareFiles",
-        })
+        or len(set(capabilities)) != len(capabilities)
+        or not set(capabilities).issubset(ALLOWED_READ_CAPABILITIES)
     ):
         raise RuntimeError("B2 key restriction mismatch")
     expiry = response.get("applicationKeyExpirationTimestamp")
