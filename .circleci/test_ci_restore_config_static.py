@@ -28,25 +28,30 @@ class RestoreCIStaticTests(unittest.TestCase):
     def test_restricted_context_required(self):
         self.assertIn("context: " + CONTEXT, self.config)
         self.assertIn("CCPC_ALLOW_INTEGRATION2_RESTORE: approved-only", self.config)
-        self.assertIn("CCPC_RESTORE_OBJECT_GET_URL", self.config)
+        self.assertIn("CCPC_RESTORE_B2_KEY_ID", self.config)
+        self.assertIn("CCPC_RESTORE_B2_APP_KEY", self.config)
+        self.assertNotIn("CCPC_RESTORE_OBJECT_GET_URL", self.config)
         self.assertIn("CCPC_RESTORE_AGE_IDENTITY", self.config)
 
     def test_no_secrets_during_dependency_install(self):
         self.assertGreaterEqual(
-            self.config.count("env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY"), 3
+            self.config.count("env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY"), 7
         )
 
-    def test_short_lived_b2_get_occurs_before_slow_dependency_install(self):
+    def test_scoped_b2_prefetch_occurs_before_slow_dependency_install(self):
         restore_job = self.config.split(
             "  integration2-backup-restore-isolated:", 1
         )[1].split("\n  pr32-restore-source-preflight:", 1)[0]
-        signed_get = restore_job.find("python .circleci/ci_restore_runtime.py --prefetch")
+        encrypted_get = restore_job.find("python .circleci/ci_restore_runtime.py --prefetch")
         slow_install = restore_job.find("bash .circleci/pr32_restore_stage.sh prerequisites")
         bench_setup = restore_job.find("bash .circleci/pr32_restore_stage.sh bench")
         final_restore = restore_job.find("python .circleci/ci_restore_runtime.py --restore")
-        self.assertTrue(0 <= signed_get < slow_install < bench_setup < final_restore)
+        self.assertTrue(0 <= encrypted_get < slow_install < bench_setup < final_restore)
         self.assertIn("umask 077", restore_job)
-        self.assertIn("CCPC_RESTORE_OBJECT_GET_URL", self.config)
+        self.assertIn("CCPC_RESTORE_B2_KEY_ID", self.config)
+        self.assertIn("CCPC_RESTORE_B2_APP_KEY", self.config)
+        self.assertIn("test_ci_b2_native.py", self.config)
+        self.assertNotIn("CCPC_RESTORE_OBJECT_GET_URL", restore_job)
         self.assertNotIn("store_artifacts:", restore_job)
         self.assertNotIn("save_cache:", restore_job)
 
