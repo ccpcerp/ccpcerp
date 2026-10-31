@@ -36,10 +36,17 @@ def _open(request: Request):
 
 
 def _credentials_ok(key_id: str, app_key: str) -> bool:
-    return all(
-        isinstance(s, str) and 10 <= len(s) <= 256
-        and re.fullmatch(r"[A-Za-z0-9_-]+", s)
-        for s in (key_id, app_key)
+    """Bound and validate real B2 key strings without excluding + or /.
+
+    Backblaze application key secrets may contain base64 characters + / and =;
+    IDs have a narrower alphabet. Reject whitespace, controls, Unicode and
+    colon-delimiters before constructing Basic id:secret authorization.
+    """
+    return (
+        isinstance(key_id, str) and 10 <= len(key_id) <= 256
+        and re.fullmatch(r"[A-Za-z0-9_-]+", key_id) is not None
+        and isinstance(app_key, str) and 10 <= len(app_key) <= 256
+        and re.fullmatch(r"[A-Za-z0-9_+/=-]+", app_key) is not None
     )
 
 
