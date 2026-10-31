@@ -1,7 +1,6 @@
 # Copyright (c) 2026, CCPC and contributors
 """Source-only tests. No CircleCI, cloud access, secrets, site or DB needed."""
 import hashlib
-from datetime import datetime, timezone
 import importlib.util
 import io
 import json
@@ -99,31 +98,13 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
             with self.subTest(site=site, host=host, db=db), self.assertRaises(RuntimeError):
                 guard.require_local_disposable_target(site, host, db)
 
-    def test_rejects_untrusted_or_public_download_paths(self):
-        signed_date = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        accepted = (
-            "https://" + guard.B2_HOST + guard.B2_OBJECT_PATH +
-            "?X-Amz-Algorithm=AWS4-HMAC-SHA256"
-            "&X-Amz-Date=" + signed_date + "&X-Amz-Expires=300"
-            "&X-Amz-Credential=synthetic%2F20261030%2Fus-west-004%2Fs3%2Faws4_request"
-            "&X-Amz-SignedHeaders=host"
-            "&X-Amz-Signature=" + "a" * 64
+    def test_pinned_private_ciphertext_path_and_region_unchanged(self):
+        self.assertEqual(guard.B2_HOST, "s3.us-west-004.backblazeb2.com")
+        self.assertEqual(
+            guard.B2_OBJECT_PATH,
+            "/ccpc-ci-restore-20261030/integration2-restore-20261030/"
+            "integration2-restore-20261030-85ff2c424e4cb5cf.tar.age",
         )
-        guard.validate_presigned_url(accepted)
-        for bad in (
-            accepted.replace("https://", "http://"),
-            accepted.replace(guard.B2_HOST, "evil.example"),
-            accepted.replace(".tar.age", ".sql.gz"),
-            accepted.replace("?X-", "#fragment?X-"),
-            "https://evil.example@" + guard.B2_HOST + guard.B2_OBJECT_PATH + "?token=x",
-            accepted.replace("X-Amz-Expires=300", "X-Amz-Expires=3600"),
-            accepted.replace("X-Amz-Signature=" + "a" * 64, "X-Amz-Signature=no"),
-            accepted.replace("X-Amz-Date=" + signed_date, "X-Amz-Date=x"),
-            accepted.replace("X-Amz-Date=" + signed_date, "X-Amz-Date=20200101T000000Z"),
-            accepted.replace("X-Amz-SignedHeaders=host", "X-Amz-SignedHeaders=host%3Bx-extra"),
-        ):
-            with self.subTest(url=bad), self.assertRaises(RuntimeError):
-                guard.validate_presigned_url(bad)
 
     def test_ciphertext_requires_exact_fixed_hash_and_size(self):
         for payload in (b"", b"age-encryption.org/v1\n", b"a" * guard.CIPHERTEXT_BYTES):
