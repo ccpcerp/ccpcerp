@@ -27,6 +27,15 @@ MAX_ARCHIVE = 32 * 1024 * 1024
 MAX_FILE = 16 * 1024 * 1024
 MAX_FILES_BYTES = 64 * 1024 * 1024
 
+# Only these fixed non-sensitive phase labels may appear in CI stderr.
+# Never emit exception messages, subprocess output, paths or backup metadata.
+RESTORE_PHASES = frozenset((
+    "ENTRY", "CI_POLICY", "BENCH_ATTEST", "DB_BASELINE",
+    "CIPHERTEXT_READ", "AGE_DECRYPT", "ATTACHMENT_VALIDATE",
+    "SQL_PREPARE", "SITE_CREATE", "SITE_ATTEST", "DB_RESTORE",
+    "COMPANY_VERIFY", "FILES_COPY", "COMPLETE",
+))
+
 
 def _run(command: list[str], *, cwd: Path | None = None, input_data: bytes | None = None,
          seconds: int = 60) -> bytes:
@@ -266,13 +275,23 @@ def _set_local_site_crypto(bench: Path, old_key: str) -> None:
     dbguard._same_isolated_site(bench)
 
 
-def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path) -> None:
+def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path,
+                 *, diagnostic_phase: list[str] | None = None) -> None:
+    def mark_phase(code: str) -> None:
+        if code not in RESTORE_PHASES:
+            raise RuntimeError("Unapproved restore diagnostic phase")
+        if diagnostic_phase is not None:
+            diagnostic_phase[0] = code
+
+    mark_phase("CI_POLICY")
     guard.require_ci_identity(env, checkout_sha)
     if env.get("CI_DB_ROOT_PASSWORD") != "ccpc-restore-disposable-db-only":
         raise RuntimeError("Disposable CI sidecar credential mismatch")
     if not env.get("CCPC_RESTORE_AGE_IDENTITY"):
         raise RuntimeError("Restricted CI age identity missing")
+    mark_phase("BENCH_ATTEST")
     benchguard.attest_pinned_bench(home, bench, site_created=False)
+    mark_phase("DB_BASELINE")
     option_file = _setup_db_client(home, env["CI_DB_ROOT_PASSWORD"])
     proof = dbguard.attest_before_new_site(env, checkout_sha, option_file=option_file)
 
@@ -280,9 +299,11 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
     # first potentially destructive DB/site operation.
     # The B2 scoped key is needed only during early prefetch. Read ciphertext
     # in THIS same isolated CircleCI job; never perform a second network GET.
+    mark_phase("CIPHERTEXT_READ")
     payload = read_prefetched_ciphertext(home)
     scratch = home / ".ccpc-restore-payload"
     _new_private_dir(scratch)
+    mark_phase("AGE_DECRYPT")
     try:
         verified, key = decrypt_and_validate(
             payload, env["CCPC_RESTORE_AGE_IDENTITY"], scratch
@@ -298,8 +319,10 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
             env.pop(secret_name, None)
         # The sealed object is no longer needed after decrypt validation.
         (home / ".ccpc-restore-ciphertext" / "payload.age").unlink(missing_ok=True)
+    mark_phase("ATTACHMENT_VALIDATE")
     public = _safe_tar_entries(_file_component(verified, "-files.tar"), "public")
     private = _safe_tar_entries(_file_component(verified, "-private-files.tar"), "private")
+    mark_phase("SQL_PREPARE")
     sql = scratch / "verified.sql.gz"
     _write_secret(sql, _file_component(verified, "-database.sql.gz"))
 
@@ -312,11 +335,13 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
         "--db-password", secrets.token_urlsafe(24),
         "--admin-password", secrets.token_urlsafe(24),
     ]
+    mark_phase("SITE_CREATE")
     _run(new_site, cwd=bench, seconds=900)
     conf = bench / "sites" / guard.SITE / "site_config.json"
     if conf.is_symlink() or not conf.is_file() or conf.stat().st_uid != os.geteuid():
         raise RuntimeError("Disposable restored-site config not proven")
     conf.chmod(0o600)
+    mark_phase("SITE_ATTEST")
     benchguard.attest_pinned_bench(home, bench, site_created=True)
     dbguard.attest_before_restore(env, checkout_sha, proof,
                                   option_file=option_file, bench=bench)
@@ -324,6 +349,7 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
 
     # Pinned Frappe restore force-recreates only this pre-attested disposable
     # destination DB. Shell stdout and stderr are not allowed into CI logs.
+    mark_phase("DB_RESTORE")
     _run([
         "bench", "--site", guard.SITE, "restore", str(sql),
         "--db-root-username", "root",
@@ -331,12 +357,15 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
         "--admin-password", secrets.token_urlsafe(24),
     ], cwd=bench, seconds=1200)
 
+    mark_phase("COMPANY_VERIFY")
     dbguard._same_isolated_site(bench)
     _check_companies(option_file)
     site_path = bench / "sites" / guard.SITE
+    mark_phase("FILES_COPY")
     pub_count = _install_files(site_path, "public", public)
     priv_count = _install_files(site_path, "private", private)
 
+    mark_phase("COMPLETE")
     # Only sanitized aggregate outcomes, never a restored row, password, path,
     # original attachment name, original config, or presigned URL.
     print("ENCRYPTED INTEGRATION2 BACKUP: EXACT CIPHERTEXT SHA PASS")
@@ -349,6 +378,8 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
 
 
 def main() -> int:
+    diagnostic_phase = ["ENTRY"]
+    selected_restore = len(sys.argv) == 2 and sys.argv[1] == "--restore"
     try:
         if len(sys.argv) != 2 or sys.argv[1] not in ("--prefetch", "--restore"):
             raise RuntimeError("Explicit isolated stage invocation required")
@@ -357,10 +388,21 @@ def main() -> int:
         if sys.argv[1] == "--prefetch":
             prefetch_ciphertext(dict(os.environ), head, home)
         else:
-            restore_once(dict(os.environ), head, home, home / benchguard.BENCH_NAME)
+            restore_once(
+                dict(os.environ), head, home, home / benchguard.BENCH_NAME,
+                diagnostic_phase=diagnostic_phase,
+            )
         return 0
     except Exception:
         print("INTEGRATION2 DISPOSABLE RESTORE: FAIL (sanitized)", file=sys.stderr)
+        if selected_restore:
+            # A strict allowlist blocks arbitrary exception- or input-derived output.
+            code = diagnostic_phase[0]
+            print(
+                "INTEGRATION2 RESTORE FAILURE PHASE: "
+                + (code if code in RESTORE_PHASES else "UNKNOWN"),
+                file=sys.stderr,
+            )
         return 1
 
 
