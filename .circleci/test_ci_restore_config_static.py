@@ -62,6 +62,24 @@ class RestoreCIStaticTests(unittest.TestCase):
                     "docker run", "docker cp", "checkout: production"):
             self.assertNotIn(bad, restore_job)
 
+    def test_pinned_original_fetch_uses_existing_https_checkout_noninteractive(self):
+        # GitHub App checkout has HTTPS auth, no SSH deploy key. Fetch the
+        # original ancestor through that credential helper, then copy locally.
+        self.assertIn('git -C "$APP_CHECKOUT" remote get-url origin', self.stage)
+        self.assertIn("https://github.com/ccpcerp/ccpcerp.git", self.stage)
+        self.assertIn("GIT_TERMINAL_PROMPT=0", self.stage)
+        self.assertIn("GCM_INTERACTIVE=Never", self.stage)
+        self.assertIn("timeout --signal=TERM --kill-after=5s 120", self.stage)
+        self.assertIn("timeout --signal=TERM --kill-after=5s 60", self.stage)
+        self.assertIn("fetch --no-tags --depth 1 origin", self.stage)
+        self.assertIn('"$APP_CHECKOUT" "$ORIGINAL_APP_SHA"', self.stage)
+        self.assertIn(">/dev/null 2>&1", self.stage)
+        self.assertNotIn("git@github.com:", self.stage)
+        self.assertNotIn("StrictHostKeyChecking=no", self.stage)
+        self.assertNotIn("ssh-keyscan", self.stage)
+        self.assertNotIn("credential.helper store", self.stage)
+        self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
+
     def test_exact_original_sha_source_and_git_fsck(self):
         self.assertIn("ORIGINAL_APP_SHA=0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41", self.stage)
         self.assertIn("git -C apps/ccpcerp fsck --full --strict --no-reflogs", self.stage)
