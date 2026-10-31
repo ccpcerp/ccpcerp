@@ -192,10 +192,11 @@ def no_encrypted_auth_entries(sql_gz: bytes) -> bool:
                     elif match := re.match(rb"`([a-zA-Z_]+)`\s+", clean):
                         columns.append(match.group(1))
                     continue
-                if clean.startswith((b"INSERT INTO `__Auth`",
-                                     b"REPLACE INTO `__Auth`",
-                                     b"UPDATE `__Auth`",
-                                     b"LOAD DATA")):
+                action_prefix = clean[:160].upper()
+                if (action_prefix.startswith((b"INSERT ", b"REPLACE ", b"UPDATE ",
+                                              b"LOAD DATA"))
+                        and (b"__AUTH" in action_prefix
+                             or action_prefix.startswith(b"LOAD DATA"))):
                     prefix = b"INSERT INTO `__Auth` VALUES "
                     if (not schema_complete or columns != [
                         b"doctype", b"name", b"fieldname", b"password", b"encrypted"
