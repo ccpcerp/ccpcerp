@@ -48,10 +48,10 @@ case "${1:-}" in
     # GitHub App CircleCI checkout uses an HTTPS credential helper, NOT an
     # SSH deploy key. Fetch the pinned ancestor through that exact authenticated
     # checkout; then transfer it into the disposable bench from the local path.
-    # The CircleCI checkout is blobless: plain fetch can retrieve the commit
-    # while leaving its tracked blobs promised, causing the following local
-    # fetch's upload-pack to fail. --no-filter hydrates the pinned snapshot
-    # in the authenticated checkout before copying it to the disposable bench.
+    # The CircleCI checkout is blobless: even --no-filter can retrieve the
+    # original commit while leaving historical tracked blobs promised (Build
+    #82: eight missing). A separate bounded promisor hydration now fills
+    # those objects before any local copy into the disposable bench.
     # No new token, SSH trust-on-first-use, credential files, or interactive
     # prompts. If access is unavailable, stop with a sanitized fixed message.
     SOURCE_REMOTE="$(git -C "$APP_CHECKOUT" remote get-url origin 2>/dev/null || true)"
