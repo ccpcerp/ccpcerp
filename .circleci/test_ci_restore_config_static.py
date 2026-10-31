@@ -4,8 +4,10 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 from ci_original_source_probe import classify
+from ci_fresh_pinned_source import SourceFailure, prepare_fresh_source
 from ci_source_hydration import missing_object_ids
 
 
@@ -68,28 +70,35 @@ class RestoreCIStaticTests(unittest.TestCase):
                     "docker run", "docker cp", "checkout: production"):
             self.assertNotIn(bad, restore_job)
 
-    def test_pinned_original_fetch_uses_existing_https_checkout_noninteractive(self):
-        # GitHub App checkout has HTTPS auth, no SSH deploy key. Fetch the
-        # original ancestor through that credential helper, then copy locally.
-        self.assertIn('git -C "$APP_CHECKOUT" remote get-url origin', self.stage)
-        self.assertIn("https://github.com/ccpcerp/ccpcerp.git", self.stage)
-        self.assertIn("GIT_TERMINAL_PROMPT=0", self.stage)
-        self.assertIn("GCM_INTERACTIVE=Never", self.stage)
-        self.assertIn("timeout --signal=TERM --kill-after=5s 180", self.stage)
-        self.assertIn("fetch --no-tags --no-filter --depth 1", self.stage)
-        self.assertIn('"$SOURCE_REMOTE" "$ORIGINAL_APP_SHA"', self.stage)
+    def test_pinned_original_fetch_uses_fresh_scratch_and_strict_checks(self):
+        helper = (self.root / "ci_fresh_pinned_source.py").read_text(encoding="utf8")
+        # The inherited blobless checkout is never used as a Git fetch source
+        # OR destination for historical content; only a disposable scratch
+        # repository is used and fully checked before its bench swap.
+        self.assertIn('FRESH_SOURCE_DIR="$(mktemp -d', self.stage)
+        self.assertIn("ci_fresh_pinned_source.py", self.stage)
+        self.assertIn('mv "$BENCH_DIR/apps/ccpcerp" "$BENCH_DIR/.ccpc-inherited-app-clone"', self.stage)
+        self.assertIn('mv "$FRESH_SOURCE_DIR" "$BENCH_DIR/apps/ccpcerp"', self.stage)
+        self.assertIn("timeout --signal=TERM --kill-after=5s 420", self.stage)
+        self.assertIn("https://github.com/ccpcerp/ccpcerp.git", helper)
+        self.assertIn('env["GIT_TERMINAL_PROMPT"] = "0"', helper)
+        self.assertIn('env["GCM_INTERACTIVE"] = "Never"', helper)
+        self.assertIn('"fetch.fsckObjects=true"', helper)
+        self.assertIn('"--no-filter", "--depth", "1"', helper)
+        self.assertIn('"--full", "--strict", "--no-reflogs"', helper)
+        self.assertIn('"--missing=print"', helper)
+        self.assertIn('"--untracked-files=no"', helper)
+        self.assertIn('env.get("CIRCLE_JOB") != "integration2-backup-restore-isolated"', helper)
         self.assertNotIn('"$APP_CHECKOUT" "$ORIGINAL_APP_SHA"', self.stage)
-        self.assertNotIn("ci_source_hydration.py", self.stage)
-        self.assertIn(">/dev/null 2>&1", self.stage)
         self.assertNotIn("git@github.com:", self.stage)
         self.assertNotIn("StrictHostKeyChecking=no", self.stage)
         self.assertNotIn("ssh-keyscan", self.stage)
         self.assertNotIn("credential.helper store", self.stage)
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
 
-    def test_direct_origin_fetch_bypasses_partial_clone_missing_blobs(self):
-        # Synthetic file:// Git transfer reproduces missing historical blobs
-        # and proves the pinned direct-origin fetch succeeds without hydration.
+    def test_fresh_repo_bypasses_inherited_partial_clone_missing_blobs(self):
+        # Synthetic file:// test reproduces eight historical missing blobs,
+        # then validates fresh repository fetch + bench swap (not remote CI).
         # No external network, CI credentials, Frappe, or DB operations.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -145,11 +154,14 @@ class RestoreCIStaticTests(unittest.TestCase):
                 text=True, timeout=15,
             )
             self.assertNotEqual(blocked.returncode, 0)
-            # Fetch directly into the bench from the authoritative remote,
-            # bypassing the partial-clone checkout as a Git upload-pack server.
-            git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
-                "--quiet", "--no-tags", "--no-filter", "--depth", "1",
-                original.as_uri(), old_sha)
+            # Fresh repo has no inherited partial-clone/promisor state.
+            fresh = root / "fresh"
+            prior = root / "inherited-partial-clone"
+            fresh.mkdir()
+            with mock.patch.dict(os.environ, env):
+                prepare_fresh_source(fresh, original.as_uri(), old_sha)
+            bench.rename(prior)
+            fresh.rename(bench)
             git("-C", bench, "checkout", "--quiet", "--detach", old_sha)
             # Build #76 demonstrated a Git-version-specific full-fsck exit 1.
             # This fixture contains only generated data and file:// remotes;
@@ -183,6 +195,16 @@ class RestoreCIStaticTests(unittest.TestCase):
             self.assertEqual(git("-C", bench, "rev-parse", "HEAD"), old_sha)
             self.assertEqual((bench / "tracked7.txt").read_text(), "original-7\n")
 
+    def test_fresh_source_refuses_nonempty_scratch(self):
+        # No preexisting directory may be overwritten, even in a fixture.
+        with tempfile.TemporaryDirectory() as directory:
+            scratch = Path(directory) / "reserved"
+            scratch.mkdir()
+            (scratch / "keep.txt").write_text("must survive")
+            with self.assertRaises(SourceFailure):
+                prepare_fresh_source(scratch, "file:///not-contacted")
+            self.assertEqual((scratch / "keep.txt").read_text(), "must survive")
+
     def test_github_source_probe_is_default_off_held_without_secret_context(self):
         self.assertIn(
             "run_integration2_git_source_probe:\n    type: boolean\n    default: false",
@@ -200,8 +222,9 @@ class RestoreCIStaticTests(unittest.TestCase):
             self.assertNotIn(unsafe, job)
         self.assertIn("python .circleci/ci_original_source_probe.py", job)
         probe = (self.root / "ci_original_source_probe.py").read_text(encoding="utf8")
-        self.assertIn('"fetch", "--quiet", "--no-tags", "--no-filter"', probe)
-        self.assertIn("origin, ORIGINAL_SHA, timeout=180", probe)
+        self.assertIn("prepare_fresh_source(fresh, origin, ORIGINAL_SHA)", probe)
+        self.assertIn("bench.rename(prior)", probe)
+        self.assertIn("fresh.rename(bench)", probe)
         self.assertNotIn("hydrate_missing(checkout, ORIGINAL_SHA)", probe)
 
     def test_github_source_probe_failure_classifiers_never_reflect_credentials(self):
