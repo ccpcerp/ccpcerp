@@ -177,6 +177,9 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
                 b"REPLACE INTO `__Auth` VALUES ('a','b','c','d',0);"
             ),
             synthetic_auth_sql(
+                b"INSERT INTO __Auth VALUES ('a','b','c','d',0);"
+            ),
+            synthetic_auth_sql(
                 b"INSERT INTO `__Auth` VALUES ('a','b','c','d',0),;"
             ),
             synthetic_auth_sql(
