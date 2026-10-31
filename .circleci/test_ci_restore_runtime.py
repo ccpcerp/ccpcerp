@@ -44,6 +44,134 @@ class RestoreRuntimeTests(unittest.TestCase):
         self.assertIn("INTEGRATION2 RESTORE FAILURE PHASE: SITE_CREATE", output)
         self.assertNotIn("SENSITIVE_EXCEPTION_SENTINEL", output)
 
+    def test_decrypt_rejects_identity_format_before_disk_or_age(self):
+        phases = []
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r, "_run") as child, \
+             patch.object(r.guard, "verify_ciphertext") as recheck:
+            with self.assertRaises(RuntimeError):
+                r.decrypt_and_validate(
+                    b"synthetic-ciphertext", "not-an-age-identity", Path(t),
+                    report_phase=phases.append,
+                )
+            self.assertFalse((Path(t) / "age-identity").exists())
+            child.assert_not_called()
+            recheck.assert_not_called()
+        self.assertEqual(phases, ["AGE_IDENTITY"])
+
+    def test_decrypt_identity_file_error_before_age(self):
+        phases = []
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r, "_write_secret", side_effect=PermissionError("secret")) as write, \
+             patch.object(r, "_run") as child:
+            with self.assertRaises(PermissionError):
+                r.decrypt_and_validate(
+                    b"synthetic", "AGE-SECRET-KEY-1SYNTHETIC", Path(t),
+                    report_phase=phases.append,
+                )
+            write.assert_called_once()
+            child.assert_not_called()
+        self.assertEqual(phases, ["AGE_IDENTITY"])
+
+    def test_decrypt_ciphertext_recheck_fails_closed_and_removes_identity(self):
+        phases = []
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r.guard, "verify_ciphertext",
+                          side_effect=RuntimeError("synthetic-hash-reject")), \
+             patch.object(r, "_run") as child:
+            with self.assertRaises(RuntimeError):
+                r.decrypt_and_validate(
+                    b"synthetic", "AGE-SECRET-KEY-1SYNTHETIC", Path(t),
+                    report_phase=phases.append,
+                )
+            self.assertFalse((Path(t) / "age-identity").exists())
+            child.assert_not_called()
+        self.assertEqual(phases, ["AGE_IDENTITY", "CIPHERTEXT_RECHECK"])
+
+    def test_decrypt_age_tool_failure_removes_identity_without_archive_validation(self):
+        phases = []
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r.guard, "verify_ciphertext"), \
+             patch.object(r, "_run", side_effect=RuntimeError("synthetic-age-error")) as child, \
+             patch.object(r.guard, "validate_decrypted_tar") as validator:
+            with self.assertRaises(RuntimeError):
+                r.decrypt_and_validate(
+                    b"synthetic", "AGE-SECRET-KEY-1SYNTHETIC", Path(t),
+                    report_phase=phases.append,
+                )
+            self.assertFalse((Path(t) / "age-identity").exists())
+            child.assert_called_once()
+            validator.assert_not_called()
+        self.assertEqual(
+            phases, ["AGE_IDENTITY", "CIPHERTEXT_RECHECK", "AGE_TOOL_DECRYPT"]
+        )
+
+    def test_decrypt_archive_validation_failure_is_distinguished_from_age(self):
+        phases = []
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r.guard, "verify_ciphertext"), \
+             patch.object(r, "_run", return_value=b"synthetic-not-a-tar"), \
+             patch.object(r.guard, "validate_decrypted_tar",
+                          side_effect=RuntimeError("synthetic-manifest-reject")) as validator:
+            with self.assertRaises(RuntimeError):
+                r.decrypt_and_validate(
+                    b"synthetic", "AGE-SECRET-KEY-1SYNTHETIC", Path(t),
+                    report_phase=phases.append,
+                )
+            self.assertFalse((Path(t) / "age-identity").exists())
+            validator.assert_called_once_with(b"synthetic-not-a-tar")
+        self.assertEqual(
+            phases, ["AGE_IDENTITY", "CIPHERTEXT_RECHECK",
+                     "AGE_TOOL_DECRYPT", "ARCHIVE_VALIDATE"]
+        )
+
+    def test_decrypt_synthetic_success_preserves_return_and_erases_identity(self):
+        phases = []
+        expected = ({"synthetic-sql": b"synthetic-content"}, "synthetic-crypto-key")
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r.guard, "verify_ciphertext"), \
+             patch.object(r, "_run", return_value=b"synthetic-tar-bytes") as child, \
+             patch.object(r.guard, "validate_decrypted_tar", return_value=expected):
+            result = r.decrypt_and_validate(
+                b"synthetic", "AGE-SECRET-KEY-1SYNTHETIC", Path(t),
+                report_phase=phases.append,
+            )
+            self.assertFalse((Path(t) / "age-identity").exists())
+            self.assertEqual(result, expected)
+            child.assert_called_once()
+        self.assertEqual(
+            phases, ["AGE_IDENTITY", "CIPHERTEXT_RECHECK",
+                     "AGE_TOOL_DECRYPT", "ARCHIVE_VALIDATE"]
+        )
+
+    def test_restore_forwards_allowlisted_decrypt_phase_and_does_no_site_create(self):
+        phases = ["ENTRY"]
+        env = {
+            "CI_DB_ROOT_PASSWORD": "ccpc-restore-disposable-db-only",
+            "CCPC_RESTORE_AGE_IDENTITY": "AGE-SECRET-KEY-1SYNTHETIC",
+        }
+
+        def synthetic_failure(payload, identity, scratch, *, report_phase):
+            report_phase("ARCHIVE_VALIDATE")
+            raise RuntimeError("synthetic-archive-reject")
+
+        with tempfile.TemporaryDirectory() as t, \
+             patch.object(r.guard, "require_ci_identity"), \
+             patch.object(r.benchguard, "attest_pinned_bench"), \
+             patch.object(r, "_setup_db_client", return_value=Path(t) / "client"), \
+             patch.object(r.dbguard, "attest_before_new_site"), \
+             patch.object(r, "read_prefetched_ciphertext", return_value=b"synthetic"), \
+             patch.object(r, "_new_private_dir"), \
+             patch.object(r, "decrypt_and_validate", side_effect=synthetic_failure), \
+             patch.object(r, "_run") as child:
+            with self.assertRaises(RuntimeError):
+                r.restore_once(
+                    env, "f" * 40, Path(t), Path(t) / "bench",
+                    diagnostic_phase=phases,
+                )
+            child.assert_not_called()
+        self.assertEqual(phases, ["ARCHIVE_VALIDATE"])
+
     def test_restore_phase_rejects_unlisted_label_to_prevent_secret_leak(self):
         from contextlib import redirect_stderr
 
