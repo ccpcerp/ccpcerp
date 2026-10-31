@@ -4,10 +4,9 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from unittest import mock
 
 from ci_original_source_probe import classify
-from ci_source_hydration import hydrate_missing, missing_object_ids
+from ci_source_hydration import missing_object_ids
 
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
@@ -76,11 +75,11 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertIn("https://github.com/ccpcerp/ccpcerp.git", self.stage)
         self.assertIn("GIT_TERMINAL_PROMPT=0", self.stage)
         self.assertIn("GCM_INTERACTIVE=Never", self.stage)
-        self.assertIn("timeout --signal=TERM --kill-after=5s 120", self.stage)
-        self.assertIn("timeout --signal=TERM --kill-after=5s 60", self.stage)
-        self.assertIn("fetch --no-tags --no-filter --depth 1 origin", self.stage)
-        self.assertIn("ci_source_hydration.py", self.stage)
-        self.assertIn('"$APP_CHECKOUT" "$ORIGINAL_APP_SHA"', self.stage)
+        self.assertIn("timeout --signal=TERM --kill-after=5s 180", self.stage)
+        self.assertIn("fetch --no-tags --no-filter --depth 1", self.stage)
+        self.assertIn('"$SOURCE_REMOTE" "$ORIGINAL_APP_SHA"', self.stage)
+        self.assertNotIn('"$APP_CHECKOUT" "$ORIGINAL_APP_SHA"', self.stage)
+        self.assertNotIn("ci_source_hydration.py", self.stage)
         self.assertIn(">/dev/null 2>&1", self.stage)
         self.assertNotIn("git@github.com:", self.stage)
         self.assertNotIn("StrictHostKeyChecking=no", self.stage)
@@ -88,10 +87,10 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertNotIn("credential.helper store", self.stage)
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
 
-    def test_blobless_checkout_hydrates_original_commit_before_local_copy(self):
-        # Synthetic file:// Git transfer reproduces Build #82's eight missing
-        # historical blobs even after fetching the old commit. No external
-        # network, CI credentials, Frappe, or databases are accessed.
+    def test_direct_origin_fetch_bypasses_partial_clone_missing_blobs(self):
+        # Synthetic file:// Git transfer reproduces missing historical blobs
+        # and proves the pinned direct-origin fetch succeeds without hydration.
+        # No external network, CI credentials, Frappe, or DB operations.
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             original = root / "original"
@@ -146,13 +145,11 @@ class RestoreCIStaticTests(unittest.TestCase):
                 text=True, timeout=15,
             )
             self.assertNotEqual(blocked.returncode, 0)
-            # The helper must explicitly enable Git promisor lazy fetching,
-            # unlike the no-network object scan, then close the missing set.
-            with mock.patch.dict(os.environ, env):
-                self.assertEqual(hydrate_missing(checkout, old_sha), 8)
-            self.assertEqual(len(missing_object_ids(checkout, old_sha)), 0)
+            # Fetch directly into the bench from the authoritative remote,
+            # bypassing the partial-clone checkout as a Git upload-pack server.
             git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
-                "--quiet", "--no-tags", "--depth", "1", checkout, old_sha)
+                "--quiet", "--no-tags", "--no-filter", "--depth", "1",
+                original.as_uri(), old_sha)
             git("-C", bench, "checkout", "--quiet", "--detach", old_sha)
             # Build #76 demonstrated a Git-version-specific full-fsck exit 1.
             # This fixture contains only generated data and file:// remotes;
@@ -202,9 +199,10 @@ class RestoreCIStaticTests(unittest.TestCase):
                        "store_artifacts:", "persist_to_workspace:"):
             self.assertNotIn(unsafe, job)
         self.assertIn("python .circleci/ci_original_source_probe.py", job)
-        self.assertIn("ci_source_hydration.py", self.stage)
-        self.assertIn("hydrate_missing(checkout, ORIGINAL_SHA)",
-                      (self.root / "ci_original_source_probe.py").read_text(encoding="utf8"))
+        probe = (self.root / "ci_original_source_probe.py").read_text(encoding="utf8")
+        self.assertIn('"fetch", "--quiet", "--no-tags", "--no-filter"', probe)
+        self.assertIn("origin, ORIGINAL_SHA, timeout=180", probe)
+        self.assertNotIn("hydrate_missing(checkout, ORIGINAL_SHA)", probe)
 
     def test_github_source_probe_failure_classifiers_never_reflect_credentials(self):
         cases = (
