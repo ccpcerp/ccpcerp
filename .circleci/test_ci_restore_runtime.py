@@ -26,6 +26,30 @@ def fixture(scope="public", name="example.txt", body=b"synthetic"):
 
 
 class RestoreRuntimeTests(unittest.TestCase):
+    def test_subprocess_drops_secret_environment_without_removing_from_python(self):
+        # Build #92 correction: the restore Python process needs the temporary
+        # age identity, but no spawned child command may inherit it or B2 keys.
+        import subprocess
+        sentinel = {
+            "CCPC_RESTORE_B2_KEY_ID": "synthetic-readonly-key",
+            "CCPC_RESTORE_B2_APP_KEY": "synthetic-app-secret",
+            "CCPC_RESTORE_AGE_IDENTITY": "synthetic-age-identity",
+            "CCPC_TEST_KEEP": "expected",
+        }
+        with patch.dict(os.environ, sentinel), patch.object(
+            r.subprocess, "run",
+            return_value=subprocess.CompletedProcess(["git"], 0, b"ok"),
+        ) as child:
+            self.assertEqual(r._run(["git", "--version"]), b"ok")
+            passed = child.call_args.kwargs["env"]
+            for secret in (
+                "CCPC_RESTORE_B2_KEY_ID", "CCPC_RESTORE_B2_APP_KEY",
+                "CCPC_RESTORE_AGE_IDENTITY",
+            ):
+                self.assertNotIn(secret, passed)
+                self.assertEqual(os.environ[secret], sentinel[secret])
+            self.assertEqual(passed["CCPC_TEST_KEEP"], "expected")
+
     def test_four_part_selector_distinguishes_public_and_private(self):
         parts = {
             "prefix-files.tar": b"public",
