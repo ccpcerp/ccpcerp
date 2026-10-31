@@ -68,6 +68,26 @@ class BackblazeNativeTests(unittest.TestCase):
         self.assertEqual(file_req.get_header("Authorization"), "synthetic-token")
         self.assertNotIn("appkey1234567890", file_req.full_url)
 
+    def test_backblaze_base64_punctuation_accepted_without_exposing_keys(self):
+        # Backblaze publishes read-only sample app keys containing + and /.
+        key_id = "synthetic1234567890"
+        for secret in (
+            "Synthetic+Secret/WithChars=0123456789",
+            "Synthetic_Secret-WithChars0123456789",
+        ):
+            with self.subTest(secret_suffix=secret[-4:]):
+                self.assertTrue(b._credentials_ok(key_id, secret))
+        for bad_id, bad_secret in (
+            ("id:forbidden123", "Synthetic+Secret/WithChars=0123456789"),
+            ("synthetic1234567890", "Secret has spaces"),
+            ("synthetic1234567890", "Secret\\nWithNewline"),
+            ("synthetic1234567890", "Secret:WithColon"),
+            ("synthetic1234567890", "SecretÜUnicode"),
+            ("synthetic1234567890", "x"),
+        ):
+            with self.subTest(invalid=True):
+                self.assertFalse(b._credentials_ok(bad_id, bad_secret))
+
     def test_missing_or_malformed_keys_denied_before_network(self):
         with patch.object(b, "_open") as opener:
             for a, c in (("", "b" * 18), ("a" * 18, ""), ("a b" * 6, "b" * 18),
