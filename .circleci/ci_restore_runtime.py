@@ -17,6 +17,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+from typing import Callable
 import ci_b2_native as b2
 
 import ci_bench_preflight as benchguard
@@ -31,7 +32,8 @@ MAX_FILES_BYTES = 64 * 1024 * 1024
 # Never emit exception messages, subprocess output, paths or backup metadata.
 RESTORE_PHASES = frozenset((
     "ENTRY", "CI_POLICY", "BENCH_ATTEST", "DB_BASELINE",
-    "CIPHERTEXT_READ", "AGE_DECRYPT", "ATTACHMENT_VALIDATE",
+    "CIPHERTEXT_READ", "AGE_IDENTITY", "CIPHERTEXT_RECHECK",
+    "AGE_TOOL_DECRYPT", "ARCHIVE_VALIDATE", "ATTACHMENT_VALIDATE",
     "SQL_PREPARE", "SITE_CREATE", "SITE_ATTEST", "DB_RESTORE",
     "COMPANY_VERIFY", "FILES_COPY", "COMPLETE",
 ))
@@ -107,21 +109,36 @@ def read_prefetched_ciphertext(home: Path) -> bytes:
     return data
 
 
-def decrypt_and_validate(payload: bytes, identity: str, scratch: Path) -> tuple[dict[str, bytes], str]:
+def decrypt_and_validate(
+    payload: bytes, identity: str, scratch: Path,
+    *, report_phase: Callable[[str], None] | None = None,
+) -> tuple[dict[str, bytes], str]:
+    # Each callback input is a hardcoded allowlisted label. Never propagate
+    # exception details, paths, subprocess output or decrypted data to CI logs.
+    if report_phase is not None:
+        report_phase("AGE_IDENTITY")
     if not identity.startswith("AGE-SECRET-KEY-1") or "\n" in identity.strip():
         raise RuntimeError("Invalid ephemeral age identity delivery")
-    _write_secret(scratch / "age-identity", (identity.strip() + "\n").encode("ascii"))
-    # Ciphertext is verified BEFORE handing it to age; never print age output.
-    guard.verify_ciphertext(payload)
+    identity_path = scratch / "age-identity"
+    _write_secret(identity_path, (identity.strip() + "\n").encode("ascii"))
     try:
+        # Recheck the hash-pinned ciphertext BEFORE invoking age.
+        # Keep identity material private and remove it even on recheck failure.
+        if report_phase is not None:
+            report_phase("CIPHERTEXT_RECHECK")
+        guard.verify_ciphertext(payload)
+        if report_phase is not None:
+            report_phase("AGE_TOOL_DECRYPT")
         plaintext = _run(
-            ["/usr/bin/age", "--decrypt", "--identity", str(scratch / "age-identity")],
+            ["/usr/bin/age", "--decrypt", "--identity", str(identity_path)],
             input_data=payload, seconds=30
         )
     finally:
-        (scratch / "age-identity").unlink(missing_ok=True)
+        identity_path.unlink(missing_ok=True)
     if len(plaintext) > MAX_ARCHIVE:
         raise RuntimeError("Oversized decrypted payload")
+    if report_phase is not None:
+        report_phase("ARCHIVE_VALIDATE")
     return guard.validate_decrypted_tar(plaintext)
 
 
@@ -303,10 +320,11 @@ def restore_once(env: dict[str, str], checkout_sha: str, home: Path, bench: Path
     payload = read_prefetched_ciphertext(home)
     scratch = home / ".ccpc-restore-payload"
     _new_private_dir(scratch)
-    mark_phase("AGE_DECRYPT")
+    mark_phase("AGE_IDENTITY")
     try:
         verified, key = decrypt_and_validate(
-            payload, env["CCPC_RESTORE_AGE_IDENTITY"], scratch
+            payload, env["CCPC_RESTORE_AGE_IDENTITY"], scratch,
+            report_phase=mark_phase,
         )
     finally:
         # Prevent any credential/identity exposure to later Frappe/bench commands.
