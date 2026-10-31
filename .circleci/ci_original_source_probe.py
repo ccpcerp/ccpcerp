@@ -10,6 +10,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 
+from ci_source_hydration import HydrationFailure, hydrate_missing, missing_object_ids
+
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
 ORIGINAL_SHA = "0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41"
@@ -114,6 +116,17 @@ def main():
         require_ok(availability, "missing-object-scan")
         missing = sum(line.startswith("?") for line in availability.stdout.splitlines())
         print("SOURCE GIT PROBE: original-source-missing-objects=" + str(missing), flush=True)
+        # Build #82 proved eight promised blobs remain after --no-filter.
+        # Fetch each absent object through the existing authenticated promisor
+        # remote, then verify no pinned-history objects remain missing.
+        try:
+            hydrated = hydrate_missing(checkout, ORIGINAL_SHA)
+            remaining = len(missing_object_ids(checkout, ORIGINAL_SHA))
+        except HydrationFailure as error:
+            raise RuntimeError("SOURCE GIT PROBE: hydration-" + str(error) + " FAIL") from None
+        print("SOURCE GIT PROBE: hydrated-original-objects=" + str(hydrated), flush=True)
+        print("SOURCE GIT PROBE: original-source-missing-after=" + str(remaining), flush=True)
+        gate(remaining == 0, "hydration-incomplete")
         direct = run_git("-C", bench, "-c", "fetch.fsckObjects=true", "fetch",
                          "--quiet", "--no-tags", "--depth", "1",
                          checkout, ORIGINAL_SHA)
