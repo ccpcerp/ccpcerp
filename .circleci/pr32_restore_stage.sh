@@ -68,6 +68,14 @@ case "${1:-}" in
       echo "Pinned original commit unavailable from authenticated checkout" >&2
       exit 1
     fi
+    # Build #82 confirmed eight promised Git objects remain absent after a
+    # successful --no-filter fetch. Hydrate only that pinned revision through
+    # the existing checkout's authenticated promisor remote; never relax fsck.
+    if ! timeout --signal=TERM --kill-after=5s 420 \
+      python "$APP_CHECKOUT/.circleci/ci_source_hydration.py" "$APP_CHECKOUT"; then
+      echo "Pinned original commit objects could not be hydrated" >&2
+      exit 1
+    fi
     if ! timeout --signal=TERM --kill-after=5s 60 git -C apps/ccpcerp \
       -c fetch.fsckObjects=true fetch --no-tags --depth 1 \
       "$APP_CHECKOUT" "$ORIGINAL_APP_SHA" >/dev/null 2>&1; then
