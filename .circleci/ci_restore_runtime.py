@@ -31,10 +31,19 @@ MAX_FILES_BYTES = 64 * 1024 * 1024
 def _run(command: list[str], *, cwd: Path | None = None, input_data: bytes | None = None,
          seconds: int = 60) -> bytes:
     try:
+        # The Python restore process needs the age identity only to create a
+        # protected, ephemeral identity file. No spawned Git, age, MariaDB or
+        # bench command may inherit B2 credentials or the age identity in env.
+        child_env = os.environ.copy()
+        for secret_name in (
+            "CCPC_RESTORE_B2_KEY_ID", "CCPC_RESTORE_B2_APP_KEY",
+            "CCPC_RESTORE_AGE_IDENTITY",
+        ):
+            child_env.pop(secret_name, None)
         p = subprocess.run(command, cwd=cwd, input=input_data,
                            stdin=subprocess.DEVNULL if input_data is None else None,
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                           check=True, timeout=seconds, env=os.environ.copy())
+                           check=True, timeout=seconds, env=child_env)
         if len(p.stdout) > MAX_ARCHIVE:
             raise ValueError("Oversized tool output")
         return p.stdout
