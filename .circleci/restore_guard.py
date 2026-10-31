@@ -7,6 +7,7 @@ CircleCI Context must still be restricted by repo, branch and no-SSH policy.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import io
 import json
@@ -15,6 +16,7 @@ from pathlib import Path
 import re
 import subprocess
 import tarfile
+import zlib
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
 JOB = "integration2-backup-restore-isolated"
@@ -87,7 +89,129 @@ def verify_ciphertext(payload: bytes) -> None:
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
-def validate_decrypted_tar(data: bytes) -> tuple[dict[str, bytes], str]:
+def _auth_encrypted_flags(values: bytes) -> bool:
+    """Parse only the fifth column of each standard MariaDB __Auth tuple.
+
+    Do not decode or emit any password field. Any unknown grammar fails closed.
+    """
+    values = values.strip()
+    if not values.endswith(b";"):
+        raise ValueError("Unrecognized auth rows")
+    values = values[:-1].strip()
+    if not values:
+        raise ValueError("Empty auth insert")
+    i = 0
+    encrypted = False
+    while i < len(values):
+        if values[i:i + 1] != b"(":
+            raise ValueError("Unrecognized auth tuple")
+        i += 1
+        commas = 0
+        last_field = i
+        quote = 0
+        closed = False
+        while i < len(values):
+            c = values[i]
+            if quote:
+                if c == 92:  # MySQL backslash-escaped character inside a string.
+                    i += 2
+                    if i > len(values):
+                        raise ValueError("Invalid SQL escape")
+                    continue
+                if c == quote:
+                    if i + 1 < len(values) and values[i + 1] == quote:
+                        i += 2
+                        continue
+                    quote = 0
+            elif c in (34, 39):
+                quote = c
+            elif c == 44:
+                commas += 1
+                if commas > 4:
+                    raise ValueError("Too many Auth columns")
+                if commas == 4:
+                    last_field = i + 1
+            elif c == 41:
+                if commas != 4:
+                    raise ValueError("Unexpected Auth column count")
+                flag = values[last_field:i].strip()
+                if flag not in (b"0", b"1"):
+                    raise ValueError("Invalid encrypted Auth flag")
+                encrypted |= flag == b"1"
+                i += 1
+                closed = True
+                break
+            elif c == 40:
+                raise ValueError("Unquoted Auth parenthesis")
+            i += 1
+        if not closed:
+            raise ValueError("Unclosed Auth tuple")
+        while i < len(values) and values[i] in b" \t\r\n":
+            i += 1
+        if i < len(values):
+            if values[i:i + 1] != b",":
+                raise ValueError("Unrecognized Auth separator")
+            i += 1
+            while i < len(values) and values[i] in b" \t\r\n":
+                i += 1
+            if i >= len(values):
+                raise ValueError("Trailing Auth separator")
+    return encrypted
+
+
+def no_encrypted_auth_entries(sql_gz: bytes) -> bool:
+    """Fail closed unless the complete original SQL proves no encrypted __Auth.
+
+    Used only for the original, manifest-verified backup with no site key.
+    It does NOT attest arbitrary third-party/custom encryption.
+    The SQL is read in bounded memory, never written or logged.
+    """
+    total = 0
+    seen_schema = False
+    schema_complete = False
+    collecting = False
+    columns = []
+    encrypted = False
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(sql_gz)) as source:
+            while line := source.readline(32 * 1024 * 1024 + 1):
+                total += len(line)
+                if len(line) > 32 * 1024 * 1024 or total > 256 * 1024 * 1024:
+                    raise ValueError("Oversized SQL dump")
+                clean = line.lstrip()
+                if clean.startswith(b"CREATE TABLE `__Auth`"):
+                    if seen_schema or clean.rstrip() != b"CREATE TABLE `__Auth` (":
+                        raise ValueError("Unrecognized Auth schema")
+                    seen_schema = True
+                    collecting = True
+                    continue
+                if collecting:
+                    if clean.startswith(b")"):
+                        collecting = False
+                        schema_complete = True
+                    elif match := re.match(rb"`([a-zA-Z_]+)`\s+", clean):
+                        columns.append(match.group(1))
+                    continue
+                if clean.startswith((b"INSERT INTO `__Auth`",
+                                     b"REPLACE INTO `__Auth`",
+                                     b"UPDATE `__Auth`",
+                                     b"LOAD DATA")):
+                    prefix = b"INSERT INTO `__Auth` VALUES "
+                    if (not schema_complete or columns != [
+                        b"doctype", b"name", b"fieldname", b"password", b"encrypted"
+                    ] or not clean.startswith(prefix)):
+                        raise ValueError("Unrecognized Auth SQL")
+                    encrypted |= _auth_encrypted_flags(clean[len(prefix):])
+    except (OSError, EOFError, zlib.error):
+        raise ValueError("Invalid SQL gzip") from None
+    if not schema_complete or columns != [
+        b"doctype", b"name", b"fieldname", b"password", b"encrypted"
+    ]:
+        raise ValueError("Missing or unknown Auth schema")
+    return not encrypted
+
+
+def validate_decrypted_tar(data: bytes) -> tuple[dict[str, bytes], str | None]:
     """Validate 4 component bytes and embedded manifest; do not extract paths.
 
     Caller must decrypt into ephemeral protected memory first. Returned bytes
@@ -147,9 +271,17 @@ def validate_decrypted_tar(data: bytes) -> tuple[dict[str, bytes], str]:
             # site_config; do not install original DB/network configuration.
             config_name = stem + "-site_config_backup.json"
             config = json.loads(validated[config_name])
-            key = config.get("encryption_key")
-            if not isinstance(key, str) or not key:
-                raise ValueError("Required site encryption key unavailable")
+            if "encryption_key" in config:
+                key = config["encryption_key"]
+                if not isinstance(key, str) or not key:
+                    raise ValueError("Invalid original site encryption key")
+            else:
+                # No original key: only a standard, parseable SQL dump with
+                # zero encrypted Frappe __Auth rows can use the CI-local key.
+                db_name = stem + "-database.sql.gz"
+                if not no_encrypted_auth_entries(validated[db_name]):
+                    raise ValueError("Original encrypted credentials require original key")
+                key = None
             return validated, key
     except (OSError, KeyError, TypeError, ValueError, tarfile.TarError) as exc:
         # Never log manifest, SQL, site config, file names or secrets.
