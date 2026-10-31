@@ -136,6 +136,62 @@ class BackblazeNativeTests(unittest.TestCase):
                     "readFiles", "listFiles", "shareFiles", *extra, forbidden
                 ]))
 
+    def test_read_only_metadata_names_do_not_require_maintained_allowlist(self):
+        # A scoped B2 key can gain harmless read-only metadata names without
+        # breaking a legitimate encrypted-only GET.
+        auth = synthetic_auth(allowed_capabilities=[
+            "readFiles", "listFiles", "shareFiles",
+            "readFutureBucketMetadata", "listSafeMetadata",
+            "observeNewReadOnlyCapability",
+        ])
+        self.assertEqual(
+            b._restricted_authorization(auth),
+            ("https://f004.backblazeb2.com", "synthetic-token"),
+        )
+        fake_payload = b"synthetic-age-ciphertext"
+        with patch.object(b, "_open", side_effect=[
+            FakeResponse(json.dumps(auth).encode()),
+            FakeResponse(fake_payload, content_length=len(fake_payload)),
+        ]) as opener, patch.object(b.guard, "verify_ciphertext") as verifier, \
+             patch.object(b.guard, "CIPHERTEXT_BYTES", len(fake_payload)):
+            self.assertEqual(
+                b.fetch_exact_ciphertext("keyid1234567890", "appkey1234567890"),
+                fake_payload,
+            )
+        self.assertEqual(opener.call_count, 2)
+        verifier.assert_called_once_with(fake_payload)
+
+    def test_read_only_scope_rejects_write_admin_and_malformed_capabilities(self):
+        # Mutations, key enumeration and bucket-wide listing remain forbidden.
+        dangerous = (
+            "writeFiles", "deleteFiles", "writeKeys", "deleteKeys",
+            "writeBuckets", "deleteBuckets", "writeBucketLogging",
+            "writeBucketNotifications", "writeBucketReplications",
+            "writeBucketRetentions", "writeBucketEncryption",
+            "writeFileLegalHolds", "writeFileRetentions",
+            "bypassGovernance", "listKeys", "listAllBucketNames",
+            "createFutureKey", "updateRetention", "modifyPolicy",
+            "manageAccount", "adminAccess", "removeObjects",
+            "DELETEFutureFiles", "all", "*",
+        )
+        for capability in dangerous:
+            with self.subTest(dangerous_capability=capability):
+                with self.assertRaises(RuntimeError):
+                    b._restricted_authorization(synthetic_auth(allowed_capabilities=[
+                        "readFiles", "shareFiles", capability,
+                    ]))
+        for malformed in (
+            None, "", "readFiles", [], ["listFiles"],
+            ["readFiles", "readFiles"], ["readFiles", None],
+            ["readFiles", 123], ["readFiles", ""],
+            ["readFiles", "read Files"],
+        ):
+            with self.subTest(malformed_type=type(malformed).__name__):
+                with self.assertRaises((RuntimeError, TypeError)):
+                    b._restricted_authorization(synthetic_auth(
+                        allowed_capabilities=malformed,
+                    ))
+
     def test_fail_closed_on_broad_or_wrong_key_and_redirect_origins(self):
         bad = [
             {"allowed_namePrefix": ""},
