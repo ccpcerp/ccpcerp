@@ -9,10 +9,12 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import time
 
 
 ORIGINAL_SHA = "0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41"
-MAX_MISSING_OBJECTS = 128
+MAX_MISSING_OBJECTS = 64
+HYDRATION_BUDGET_SECONDS = 180
 
 
 class HydrationFailure(Exception):
@@ -67,10 +69,14 @@ def hydrate_missing(repo, sha=ORIGINAL_SHA):
     before = missing_object_ids(repo, sha)
     if len(before) > MAX_MISSING_OBJECTS:
         raise HydrationFailure("missing-object-limit-exceeded")
+    deadline = time.monotonic() + HYDRATION_BUDGET_SECONDS
     for oid in before:
         # Accessing a promised object asks Git's configured promisor remote to
         # supply it. Never use GIT_NO_LAZY_FETCH for this command.
-        _git(repo, ["cat-file", "-e", oid], timeout=45)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise HydrationFailure("hydration-budget-exhausted")
+        _git(repo, ["cat-file", "-e", oid], timeout=min(45, remaining))
     after = missing_object_ids(repo, sha)
     if after:
         raise HydrationFailure("promised-objects-still-missing")
