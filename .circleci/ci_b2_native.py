@@ -21,15 +21,33 @@ BUCKET, OBJECT = guard.B2_OBJECT_PATH.lstrip("/").split("/", 1)
 BUCKET_ID = "00e7494466f980a0a8120e16"  # Owner-verified private bucket ID
 PREFIX = "integration2-restore-20261030/"
 S3_ENDPOINT = "https://" + guard.B2_HOST
-# The B2 Web UI "Read Only" key may include shareFiles: permits creation of
-# download authorization tokens, not writes or deletes. Keep the bucket and
-# object-prefix restrictions strict; deny ANY write/admin capability.
-ALLOWED_READ_CAPABILITIES = frozenset({
-    "readFiles", "listFiles", "shareFiles", "readBuckets", "listBuckets",
-    "readBucketEncryption", "readBucketRetentions", "readFileRetentions",
-    "readFileLegalHolds", "readBucketReplications",
-    "readBucketNotifications", "readBucketLogging",
+# Trust B2's authoritative bucket/prefix scope and require readFiles; don't
+# try to enumerate every present/future harmless read-only metadata permission.
+# Still reject granted write/delete/admin powers and bucket/account-wide access.
+# This denies the dangerous known B2 grants and future verb-named mutations.
+FORBIDDEN_CAPABILITIES = frozenset({
+    "bypassGovernance", "listKeys", "listAllBucketNames", "all", "*",
 })
+MUTATING_CAPABILITY_PREFIXES = (
+    "write", "delete", "create", "update", "modify", "remove", "manage",
+    "admin", "bypass",
+)
+
+
+def _scoped_read_only(capabilities: object) -> bool:
+    if not isinstance(capabilities, list) or not capabilities:
+        return False
+    if any(not isinstance(cap, str) or not 1 <= len(cap) <= 128
+           or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*|\\*", cap)
+           for cap in capabilities):
+        return False
+    if "readFiles" not in capabilities or len(capabilities) != len(set(capabilities)):
+        return False
+    return not any(
+        cap in FORBIDDEN_CAPABILITIES
+        or cap.casefold().startswith(MUTATING_CAPABILITY_PREFIXES)
+        for cap in capabilities
+    )
 MAX_AUTH_BYTES = 64 * 1024
 TIMEOUT_SECONDS = 20
 
@@ -82,9 +100,7 @@ def _restricted_authorization(response: dict) -> tuple[str, str]:
         # B2 may return name=null for scoped keys without bucket-list access.
         or buckets[0].get("name") not in (None, BUCKET)
         or allowed.get("namePrefix") != PREFIX
-        or not isinstance(capabilities, list) or "readFiles" not in capabilities
-        or len(set(capabilities)) != len(capabilities)
-        or not set(capabilities).issubset(ALLOWED_READ_CAPABILITIES)
+        or not _scoped_read_only(capabilities)
     ):
         raise RuntimeError("B2 key restriction mismatch")
     expiry = response.get("applicationKeyExpirationTimestamp")
