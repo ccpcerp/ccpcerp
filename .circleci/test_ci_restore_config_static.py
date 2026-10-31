@@ -171,14 +171,14 @@ class RestoreCIStaticTests(unittest.TestCase):
 
     def test_github_source_probe_is_default_off_held_without_secret_context(self):
         self.assertIn(
-            "run_integration2_git_source_probe:\\n    type: boolean\\n    default: false",
+            "run_integration2_git_source_probe:\n    type: boolean\n    default: false",
             self.config,
         )
         self.assertIn("opt-in-integration2-git-source-probe:", self.config)
         self.assertIn("pr32-git-source-probe-manual-approval:", self.config)
-        self.assertIn("requires:\\n            - pr32-git-source-probe-manual-approval", self.config)
-        job = self.config.split("  pr32-git-source-probe:\\n", 1)[1].split(
-            "\\nworkflows:", 1
+        self.assertIn("requires:\n            - pr32-git-source-probe-manual-approval", self.config)
+        job = self.config.split("  pr32-git-source-probe:\n", 1)[1].split(
+            "\nworkflows:", 1
         )[0]
         for unsafe in ("context:", "mariadb:", "redis:", "ssh ", "setup_remote_docker:",
                        "CCPC_RESTORE_B2_APP_KEY", "CCPC_RESTORE_AGE_IDENTITY",
