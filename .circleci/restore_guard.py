@@ -8,7 +8,6 @@ Never supply real secrets until owner separately approves hosted decryption.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
@@ -16,7 +15,6 @@ from pathlib import Path
 import re
 import subprocess
 import tarfile
-from urllib.parse import parse_qs, urlsplit
 
 BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
 JOB = "integration2-backup-restore-isolated"
@@ -77,60 +75,6 @@ def require_local_disposable_target(site: str, db_host: str, db_name: str) -> No
     forbidden = ("development", "production", "ccpc-integration2")
     if any(word in db_name.lower() for word in forbidden):
         raise RuntimeError("CCPC existing database name forbidden")
-
-def validate_presigned_url(url: str) -> None:
-    """Require the exact single private object and short-lived AWS SigV4 GET.
-
-    URL is a bearer secret: do not print it or include it in exceptions.
-    """
-    try:
-        p = urlsplit(url)
-        valid_origin = (
-            p.scheme == "https"
-            and p.hostname == B2_HOST
-            and p.netloc == B2_HOST
-            and p.path == B2_OBJECT_PATH
-            and bool(p.query)
-            and not p.fragment
-            and not p.username
-            and not p.password
-            and p.port is None
-        )
-        q = parse_qs(p.query, keep_blank_values=True)
-        expiry = q.get("X-Amz-Expires", [])
-        algorithm = q.get("X-Amz-Algorithm", [])
-        signature = q.get("X-Amz-Signature", [])
-        date = q.get("X-Amz-Date", [])
-        credential = q.get("X-Amz-Credential", [])
-        headers = q.get("X-Amz-SignedHeaders", [])
-        allowed = {
-            "X-Amz-Algorithm", "X-Amz-Credential", "X-Amz-Date",
-            "X-Amz-Expires", "X-Amz-SignedHeaders", "X-Amz-Signature",
-            "X-Amz-Security-Token", "X-Amz-Content-Sha256",
-        }
-        timestamp = (datetime.strptime(date[0], "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc)
-                     if len(date) == 1 and re.fullmatch(r"\d{8}T\d{6}Z", date[0])
-                     else None)
-        now = datetime.now(timezone.utc)
-        ttl = int(expiry[0]) if len(expiry) == 1 and expiry[0].isdecimal() else -1
-        signed = (
-            valid_origin
-            and set(q).issubset(allowed)
-            and algorithm == ["AWS4-HMAC-SHA256"]
-            and 0 < ttl <= 900
-            and timestamp is not None
-            and now <= timestamp + timedelta(seconds=ttl)
-            and timestamp <= now + timedelta(seconds=30)
-            and len(signature) == 1
-            and bool(re.fullmatch(r"[0-9a-fA-F]{64}", signature[0]))
-            and len(credential) == 1
-            and bool(credential[0])
-            and headers == ["host"]
-        )
-    except (TypeError, ValueError, AttributeError):
-        signed = False
-    if not signed:
-        raise RuntimeError("Untrusted, unsigned or overlong encrypted-backup URL")
 
 def verify_ciphertext(payload: bytes) -> None:
     if len(payload) != CIPHERTEXT_BYTES:
