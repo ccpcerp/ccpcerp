@@ -114,6 +114,28 @@ class BackblazeNativeTests(unittest.TestCase):
                     "readFiles", "shareFiles", added,
                 ]))
 
+    def test_backblaze_documented_read_only_metadata_capabilities(self):
+        # Valid B2 Read Only UI keys may include metadata-reading capabilities.
+        # Their presence must not be mistaken for write/delete permission.
+        extra = ("readBucketReplications", "readBucketNotifications",
+                 "readBucketLogging")
+        auth = synthetic_auth(allowed_capabilities=[
+            "readFiles", "listFiles", "shareFiles", *extra
+        ])
+        self.assertEqual(
+            b._restricted_authorization(auth),
+            ("https://f004.backblazeb2.com", "synthetic-token"),
+        )
+        for forbidden in (
+            "listAllBucketNames", "listKeys", "writeFiles", "deleteFiles",
+            "writeBucketReplications", "writeBucketNotifications",
+            "writeBucketLogging", "writeBuckets",
+        ):
+            with self.subTest(forbidden=forbidden), self.assertRaises(RuntimeError):
+                b._restricted_authorization(synthetic_auth(allowed_capabilities=[
+                    "readFiles", "listFiles", "shareFiles", *extra, forbidden
+                ]))
+
     def test_fail_closed_on_broad_or_wrong_key_and_redirect_origins(self):
         bad = [
             {"allowed_namePrefix": ""},
