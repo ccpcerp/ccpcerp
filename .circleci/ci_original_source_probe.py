@@ -1,8 +1,9 @@
 """Opt-in no-Context GitHub App original-source transfer diagnostic.
 
 No B2 credentials, age keys, DB, Frappe bench, or deployments. A small CircleCI
-job uses its already-authenticated checkout to test precisely the source
-fetch / local clone / original SHA transfer that failed in Builds #74 and #80.
+job clones the checkout into a disposable directory and tests a direct HTTPS
+fetch of the pinned original SHA from the exact authenticated GitHub origin.
+This bypasses the partial-clone local Git transfer broken in Build #84.
 Raw Git command stderr, URLs and credential-helper output are never logged.
 """
 import os
@@ -16,7 +17,6 @@ BRANCH = "review/pr32-integration2-isolated-restore-2026-10-30"
 ORIGINAL_SHA = "0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41"
 ORIGIN = ("https://github.com/ccpcerp/ccpcerp",
           "https://github.com/ccpcerp/ccpcerp.git")
-LOCAL_REF = "refs/ccpc/ci-source-probe/original"
 
 
 def classify(stderr):
@@ -99,7 +99,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="ccpc-git-source-probe-") as scratch:
         bench = Path(scratch) / "bench-ccpcerp"
         # Match bench get-app local clone order: copy the CircleCI checkout
-        # BEFORE fetching its older pinned SHA from the authenticated origin.
+        # first, then fetch its pinned historical SHA directly from GitHub.
         require_ok(
             run_git("clone", "--quiet", "--branch", BRANCH, checkout, bench),
             "clone-disposable-bench-source",
