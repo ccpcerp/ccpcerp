@@ -1,9 +1,9 @@
 # Copyright (c) 2026, CCPC and contributors
-"""REVIEW-ONLY proposed CircleCI isolated Integration2 backup-restore preflight.
+"""Fail-closed CI identity, immutable backup and source archive guards.
 
-This file is staged in the *documentation repository*, not the executable app CI
-configuration. Import/test is safe; nothing performs data transfer or restore.
-Never supply real secrets until owner separately approves hosted decryption.
+Imported by the manually held disposable Integration2 restore; this module
+itself performs no downloads, decryption or database operations. The protected
+CircleCI Context must still be restricted by repo, branch and no-SSH policy.
 """
 from __future__ import annotations
 
