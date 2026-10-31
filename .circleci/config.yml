@@ -414,7 +414,7 @@ jobs:
           command: |
             set -euo pipefail
             umask 077
-            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 2400 python .circleci/ci_restore_runtime.py --restore
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY timeout --signal=TERM --kill-after=10s 2400 python .circleci/ci_restore_runtime.py --restore
 
   pr32-restore-source-preflight:
     # Cheap, no-secret unit + YAML parser job; never attach restore Context.
