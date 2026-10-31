@@ -342,10 +342,6 @@ class RestoreRuntimeTests(unittest.TestCase):
                     }), encoding="utf8")
                     with patch.object(r.dbguard, "_owner_file"), \
                          patch.object(r.dbguard, "_same_isolated_site") as isolate:
-                        if bad is None:
-                            # Explicit JSON null is not a usable CI site key.
-                            # Exercise strictly typed key branch below instead.
-                            continue
                         with self.assertRaises(RuntimeError):
                             r._set_local_site_crypto(bench, None)
                         isolate.assert_not_called()
