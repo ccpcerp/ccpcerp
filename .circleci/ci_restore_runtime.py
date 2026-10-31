@@ -291,12 +291,12 @@ def _set_local_site_crypto(bench: Path, old_key: str | None) -> None:
         # Guard has already proven the archived SQL has no encrypted __Auth
         # rows. Preserve any NEW CI-local site key; never invent or transplant
         # a substitute for an unknown original encryption key.
-        local_key = config.get("encryption_key")
-        if local_key is not None and (
-            not isinstance(local_key, str)
-            or not re.fullmatch(r"[A-Za-z0-9_=-]{16,256}", local_key)
-        ):
-            raise RuntimeError("Invalid disposable site encryption key")
+        if "encryption_key" in config:
+            local_key = config["encryption_key"]
+            if not isinstance(local_key, str) or not re.fullmatch(
+                r"[A-Za-z0-9_=-]{16,256}", local_key
+            ):
+                raise RuntimeError("Invalid disposable site encryption key")
     config["disable_scheduler"] = 1
     config["maintenance_mode"] = 1
     config["mute_emails"] = 1
