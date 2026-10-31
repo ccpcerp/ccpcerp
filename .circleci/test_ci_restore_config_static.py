@@ -46,6 +46,35 @@ class RestoreCIStaticTests(unittest.TestCase):
             self.config.count("env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY"), 7
         )
 
+    def test_final_restore_keeps_age_identity_only_in_python_and_not_children(self):
+        # Build #92 failed in the final restore step: CI command had removed
+        # the age identity that restore_once needs for decryption. The Python
+        # process must receive it, while all B2 credentials stay absent.
+        restore_lines = [
+            line.strip() for line in self.config.splitlines()
+            if "python .circleci/ci_restore_runtime.py --restore" in line
+        ]
+        self.assertEqual(len(restore_lines), 1)
+        command = restore_lines[0]
+        self.assertIn(
+            "env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY "
+            "timeout --signal=TERM --kill-after=10s 2400 "
+            "python .circleci/ci_restore_runtime.py --restore",
+            command,
+        )
+        self.assertNotIn("-u CCPC_RESTORE_AGE_IDENTITY", command)
+        # Other installed dependency / bench stages remain age-identity free.
+        self.assertGreaterEqual(
+            self.config.count(
+                "env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY "
+                "-u CCPC_RESTORE_AGE_IDENTITY"
+            ), 7,
+        )
+        runtime = (self.root / "ci_restore_runtime.py").read_text(encoding="utf8")
+        self.assertIn('if not env.get("CCPC_RESTORE_AGE_IDENTITY"):', runtime)
+        self.assertIn('payload, env["CCPC_RESTORE_AGE_IDENTITY"], scratch', runtime)
+        self.assertIn('child_env.pop(secret_name, None)', runtime)
+
     def test_scoped_b2_prefetch_occurs_before_slow_dependency_install(self):
         restore_job = self.config.split(
             "  integration2-backup-restore-isolated:", 1
