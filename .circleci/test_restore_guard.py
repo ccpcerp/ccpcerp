@@ -1,5 +1,6 @@
 # Copyright (c) 2026, CCPC and contributors
 """Source-only tests. No CircleCI, cloud access, secrets, site or DB needed."""
+import gzip
 import hashlib
 import importlib.util
 import io
@@ -33,11 +34,30 @@ def good_env():
         "CI_DB_NAME": "ci_pr32_restore_20261030",
     }
 
-def synthetic_tar(tamper=False):
+def synthetic_auth_sql(*inserts: bytes) -> bytes:
+    """Synthetic MariaDB/Frappe __Auth dump only; no actual credentials."""
+    schema = (
+        b"CREATE TABLE `__Auth` (\n"
+        b"  `doctype` varchar(140) NOT NULL,\n"
+        b"  `name` varchar(255) NOT NULL,\n"
+        b"  `fieldname` varchar(140) NOT NULL,\n"
+        b"  `password` text NOT NULL,\n"
+        b"  `encrypted` tinyint NOT NULL DEFAULT 0,\n"
+        b"  PRIMARY KEY (`doctype`,`name`,`fieldname`)\n"
+        b") ENGINE=InnoDB;\n"
+    )
+    return gzip.compress(schema + b"\n".join(inserts) + b"\n")
+
+
+def synthetic_tar(tamper=False, *, config=None, sql_backup=None):
     stem = "20260101_000000-ccpc-integration2_localhost"
     parts = {
-        stem + "-database.sql.gz": b"synthetic SQL bytes",
-        stem + "-site_config_backup.json": b'{"encryption_key":"synthetic-test-only"}',
+        stem + "-database.sql.gz": (
+            b"synthetic SQL bytes" if sql_backup is None else sql_backup
+        ),
+        stem + "-site_config_backup.json": (
+            b'{"encryption_key":"synthetic-test-only"}' if config is None else config
+        ),
         stem + "-files.tar": b"synthetic file TAR bytes",
         stem + "-private-files.tar": b"synthetic private TAR bytes",
     }
@@ -115,6 +135,79 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
         restored, key = guard.validate_decrypted_tar(synthetic_tar())
         self.assertEqual(len(restored), 4)
         self.assertEqual(key, "synthetic-test-only")
+
+    def test_missing_original_key_only_when_no_encrypted_auth_rows(self):
+        sql = synthetic_auth_sql(
+            b"INSERT INTO `__Auth` VALUES ('User','synthetic','password','hash',0);"
+        )
+        restored, key = guard.validate_decrypted_tar(
+            synthetic_tar(config=b"{}", sql_backup=sql)
+        )
+        self.assertEqual(len(restored), 4)
+        self.assertIsNone(key)
+
+    def test_missing_original_key_allows_empty_known_auth_table(self):
+        restored, key = guard.validate_decrypted_tar(
+            synthetic_tar(config=b"{}", sql_backup=synthetic_auth_sql())
+        )
+        self.assertEqual(len(restored), 4)
+        self.assertIsNone(key)
+
+    def test_missing_key_rejects_any_encrypted_auth_tuple(self):
+        inserts = [
+            b"INSERT INTO `__Auth` VALUES ('User','synthetic','password','cipher',1);",
+            b"INSERT INTO `__Auth` VALUES ('User','synthetic','password','hash',0),"
+            b"('Other','synthetic','password','cipher',1);",
+        ]
+        for statement in inserts:
+            with self.subTest(statement_index=inserts.index(statement)):
+                with self.assertRaisesRegex(RuntimeError, "Decrypted archive validation failed"):
+                    guard.validate_decrypted_tar(synthetic_tar(
+                        config=b"{}", sql_backup=synthetic_auth_sql(statement)
+                    ))
+
+    def test_missing_key_rejects_unparseable_or_incomplete_auth_sql(self):
+        cases = [
+            b"not gzip",
+            gzip.compress(b"INSERT INTO `__Auth` VALUES ('a','b','c','d',0);\n"),
+            synthetic_auth_sql(
+                b"INSERT INTO `__Auth` VALUES ('a','b','c','d',2);"
+            ),
+            synthetic_auth_sql(
+                b"REPLACE INTO `__Auth` VALUES ('a','b','c','d',0);"
+            ),
+            synthetic_auth_sql(
+                b"INSERT INTO `__Auth` VALUES ('a','b','c','d',0),;"
+            ),
+            synthetic_auth_sql(
+                b"INSERT INTO `__Auth` VALUES ('a','b','c','d',0);"
+            )[:-5],
+        ]
+        for n, case in enumerate(cases):
+            with self.subTest(case=n), self.assertRaisesRegex(
+                RuntimeError, "Decrypted archive validation failed"
+            ):
+                guard.validate_decrypted_tar(
+                    synthetic_tar(config=b"{}", sql_backup=case)
+                )
+
+    def test_missing_key_accepts_escaped_sql_without_confusing_credentials(self):
+        sql = synthetic_auth_sql(
+            b"INSERT INTO `__Auth` VALUES ('User','synthetic','password','a\\'b,\\)c',0);"
+        )
+        _, key = guard.validate_decrypted_tar(
+            synthetic_tar(config=b"{}", sql_backup=sql)
+        )
+        self.assertIsNone(key)
+
+    def test_present_but_invalid_original_keys_still_fail_closed(self):
+        sql = synthetic_auth_sql()
+        for bad in (b'{"encryption_key":null}', b'{"encryption_key":""}',
+                    b'{"encryption_key":42}', b'{"encryption_key":false}'):
+            with self.subTest(config_kind=bad[:17]), self.assertRaisesRegex(
+                RuntimeError, "Decrypted archive validation failed"
+            ):
+                guard.validate_decrypted_tar(synthetic_tar(config=bad, sql_backup=sql))
 
     def test_rejects_component_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Decrypted archive validation failed"):
