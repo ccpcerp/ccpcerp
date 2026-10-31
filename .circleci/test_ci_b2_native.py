@@ -26,7 +26,7 @@ def synthetic_auth(**overrides):
             "s3ApiUrl": b.S3_ENDPOINT,
             "downloadUrl": "https://f004.backblazeb2.com",
             "allowed": {
-                "buckets": [{"id": "synthetic-bucket-id", "name": b.BUCKET}],
+                "buckets": [{"id": b.BUCKET_ID, "name": b.BUCKET}],
                 "capabilities": ["readFiles", "listFiles"],
                 "namePrefix": b.PREFIX,
             },
@@ -81,7 +81,8 @@ class BackblazeNativeTests(unittest.TestCase):
             {"allowed_namePrefix": ""},
             {"allowed_namePrefix": "other/"},
             {"allowed_buckets": []},
-            {"allowed_buckets": [{"name": "unrelated", "id": "other"}]},
+            {"allowed_buckets": [{"name": "unrelated", "id": b.BUCKET_ID}]},
+            {"allowed_buckets": [{"name": b.BUCKET, "id": "wrong-bucket"}]},
             {"allowed_buckets": [{"name": b.BUCKET, "id": "one"},
                                   {"name": "unrelated", "id": "two"}]},
             {"allowed_capabilities": ["readFiles", "writeFiles"]},
@@ -100,6 +101,13 @@ class BackblazeNativeTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 with self.assertRaises(RuntimeError):
                     b._restricted_authorization(synthetic_auth(**changes))
+
+    def test_restricted_key_can_hide_bucket_name_but_not_bucket_id(self):
+        auth = synthetic_auth(allowed_buckets=[{"id": b.BUCKET_ID, "name": None}])
+        self.assertEqual(
+            b._restricted_authorization(auth),
+            ("https://f004.backblazeb2.com", "synthetic-token"),
+        )
 
     def test_http_401_or_oversized_response_never_reaches_download(self):
         for first in (
