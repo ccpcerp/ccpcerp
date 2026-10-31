@@ -173,7 +173,7 @@ class ReviewOnlyRestoreGuardTests(unittest.TestCase):
             b"INSERT INTO `__Auth` VALUES\n('User','synthetic','password','hash',0);",
             b"INSERT INTO `__Auth` VALUES\r\n('User','synthetic','password','hash',0);",
             b"INSERT INTO `__Auth` VALUES\n"
-            b"('User','synthetic','password','a\\\\'b,\\\\)c;z',0),\n"
+            b"('User','synthetic','password','a\\'b,\\)c;z',0),\n"
             b"('User','synthetic2','password','hash',0);",
         )
         for n, statement in enumerate(statements):
