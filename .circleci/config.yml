@@ -379,12 +379,13 @@ jobs:
           name: Exact SHA and owner-approved confidential restore policy gate
           command: |
             set -euo pipefail
-            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python .circleci/restore_guard.py
-            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m compileall -q .circleci
-            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_runtime.py' -v
-            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_config_static.py' -v
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY python .circleci/restore_guard.py
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY python -m compileall -q .circleci
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_runtime.py' -v
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_b2_native.py' -v
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY python -m unittest discover -s .circleci -p 'test_ci_restore_config_static.py' -v
       - run:
-          name: Pre-fetch exact encrypted ciphertext while signed GET is fresh
+          name: Authenticate scoped B2 key and prefetch exact encrypted ciphertext
           command: |
             set -euo pipefail
             umask 077
@@ -395,20 +396,20 @@ jobs:
           no_output_timeout: 20m
           command: |
             set -euo pipefail
-            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 900 bash .circleci/pr32_restore_stage.sh prerequisites
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 900 bash .circleci/pr32_restore_stage.sh prerequisites
       - run:
           name: Verify clean original source SHA and construct disposable bench
           no_output_timeout: 20m
           command: |
             set -euo pipefail
-            env -u CCPC_RESTORE_OBJECT_GET_URL -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 3000 bash .circleci/pr32_restore_stage.sh bench
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 3000 bash .circleci/pr32_restore_stage.sh bench
       - run:
           name: Decrypt and restore exact four-part source to isolated scratch only
           no_output_timeout: 20m
           command: |
             set -euo pipefail
             umask 077
-            timeout --signal=TERM --kill-after=10s 2400 python .circleci/ci_restore_runtime.py --restore
+            env -u CCPC_RESTORE_B2_KEY_ID -u CCPC_RESTORE_B2_APP_KEY -u CCPC_RESTORE_AGE_IDENTITY timeout --signal=TERM --kill-after=10s 2400 python .circleci/ci_restore_runtime.py --restore
 
   pr32-restore-source-preflight:
     # Cheap, no-secret unit + YAML parser job; never attach restore Context.
@@ -431,7 +432,7 @@ jobs:
             test -n "${CIRCLE_BUILD_NUM:-}"
             test "$(git rev-parse HEAD)" = "${CIRCLE_SHA1:-}"
             python -m compileall -q .circleci
-            for test in test_restore_guard.py test_ci_restore_runtime.py test_ci_restore_config_static.py test_ci_db_attestation.py test_ci_bench_preflight.py; do
+            for test in test_restore_guard.py test_ci_b2_native.py test_ci_restore_runtime.py test_ci_restore_config_static.py test_ci_db_attestation.py test_ci_bench_preflight.py; do
               python -m unittest discover -s .circleci -p "$test" -v
             done
             echo "OFFLINE RESTORE SOURCE PREFLIGHT: PASS"
