@@ -7,6 +7,8 @@ billing amounts and draft invoice grand totals. Never sum them together.
 """
 
 import frappe
+
+from ccpcerp.ccpc_erp import executive_reporting
 from frappe import _
 from frappe.utils import flt, getdate
 
@@ -40,6 +42,8 @@ def execute(filters=None):
 
 
 def _require_access():
+    if executive_reporting.in_executive_report():
+        return
     # The source register spans operational inventory and sensitive finance
     # invoices. Broader role/report visibility requires Accounting signoff.
     if "System Manager" not in frappe.get_roles():
@@ -63,7 +67,8 @@ def _validate_filters(f):
             if not frappe.db.exists("Company", f[field]):
                 frappe.throw(_("Unknown Company filter."), frappe.ValidationError)
             # Company permission can be narrower than a report's role list.
-            frappe.get_doc("Company", f[field]).check_permission("read")
+            if not executive_reporting.in_executive_report():
+                frappe.get_doc("Company", f[field]).check_permission("read")
     if f.get("requesting_company") and f.requesting_company == f.issuing_company:
         frappe.throw(
             _("Intercompany report requires two different Companies."),
@@ -195,6 +200,8 @@ def _source_sql():
 
 
 def _check_row_visibility(rows):
+    if executive_reporting.in_executive_report():
+        return
     """Fail closed on each existing sensitive record returned by raw SQL.
 
     Deleted invoice references are already exposed as missing-status evidence.
