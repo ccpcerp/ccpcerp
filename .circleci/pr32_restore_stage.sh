@@ -33,9 +33,12 @@ case "${1:-}" in
     ERPNEXT_SHA=4048fb70e14d1843956fcdabb7c3cca75a1cbcdd
     ORIGINAL_APP_SHA=0c223d7cbe8b27c2392d8b2303c45a99dd4d8b41
     # This is a new disposable bench; unlike a restore, no site/DB exists yet.
-    bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+    # Clone the exact Frappe release at initialization, not moving version-16.
+    # GitHub v16.33.1 tag resolves to the immutable FRAPPE_SHA below.
+    bench init --frappe-branch v16.33.1 --skip-assets --skip-redis-config-generation \
       --python "$(command -v python)" "$BENCH_DIR"
     cd "$BENCH_DIR"
+    [[ "$(git -C apps/frappe rev-parse HEAD)" == "$FRAPPE_SHA" ]]
     git -C apps/frappe fetch --depth 1 upstream "$FRAPPE_SHA"
     git -C apps/frappe checkout --detach "$FRAPPE_SHA"
     bench set-config -g redis_cache redis://127.0.0.1:13000
