@@ -125,6 +125,41 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertNotIn("credential.helper store", self.stage)
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
 
+    def test_frappe_init_uses_exact_release_tag_before_dependency_install(self):
+        # The Frappe v16.33.1 tag is confirmed upstream at FRAPPE_SHA;
+        # never temporarily install a moving newer version-16 revision.
+        self.assertIn(
+            "FRAPPE_SHA=988e54f3c4c291e2077a83809663f123731abe76",
+            self.stage,
+        )
+        self.assertIn(
+            "bench init --frappe-branch v16.33.1 --skip-assets",
+            self.stage,
+        )
+        self.assertNotIn(
+            "bench init --frappe-branch version-16",
+            self.stage,
+        )
+        init_at = self.stage.index("bench init --frappe-branch v16.33.1")
+        tag_check_at = self.stage.index(
+            '[[ "$(git -C apps/frappe rev-parse HEAD)" == "$FRAPPE_SHA" ]]'
+        )
+        fetch_at = self.stage.index(
+            'git -C apps/frappe fetch --depth 1 upstream "$FRAPPE_SHA"'
+        )
+        checkout_at = self.stage.index(
+            'git -C apps/frappe checkout --detach "$FRAPPE_SHA"'
+        )
+        final_verify_at = self.stage.index(
+            '[[ "$(git -C apps/frappe rev-parse HEAD)" == "$FRAPPE_SHA" ]]',
+            checkout_at,
+        )
+        self.assertLess(init_at, tag_check_at)
+        self.assertLess(tag_check_at, fetch_at)
+        self.assertLess(fetch_at, checkout_at)
+        self.assertLess(checkout_at, final_verify_at)
+        self.assertLess(final_verify_at, self.stage.index("bench setup requirements --dev"))
+
     def test_erpnext_installs_exact_compatible_tag_before_dependency_check(self):
         # Build #108 succeeded, but the initial floating version-16 get-app
         # temporarily read a newer ERPNext requirement (Frappe >=16.50.0).
