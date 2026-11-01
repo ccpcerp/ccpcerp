@@ -13,8 +13,14 @@ frappe.pages["ccpc-group-executive-reporting"].on_page_load = function (wrapper)
   const add = (label, fieldname, fieldtype, options, value) =>
     page.add_field({ label: __(label), fieldname, fieldtype, options,
       default: value, reqd: 1, change: () => {} });
+  const reportKeys = {
+    "Department Material Consumption": "department",
+    "Equipment / Job Activity": "equipment",
+    "Intercompany Billing Status": "intercompany",
+    "Stock / P&L GL Reconciliation": "stock_gl",
+  };
   const report = add("Report", "group_report", "Select",
-    "department\nequipment\nintercompany\nstock_gl", "department");
+    Object.keys(reportKeys).join("\n"), "Department Material Consumption");
   const company = add("Issuing Company", "issuer", "Select", choices.join("\n"), choices[0]);
   const requester = add("Requesting Company (intercompany only)", "requester", "Select",
     choices.join("\n"), choices[1]);
@@ -25,7 +31,7 @@ frappe.pages["ccpc-group-executive-reporting"].on_page_load = function (wrapper)
 
   page.set_primary_action(__("Run read-only report"), async function () {
     result.empty();
-    const key = report.get_value();
+    const key = reportKeys[report.get_value()];
     const filters = { from_date: from_date.get_value(), to_date: to_date.get_value() };
     if (key === "intercompany") {
       filters.issuing_company = company.get_value();
