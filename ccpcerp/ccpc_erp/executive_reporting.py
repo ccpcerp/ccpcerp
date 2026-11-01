@@ -87,8 +87,8 @@ def _filters(report_key, filters):
     return filters, issuer, requester
 
 
-def _assert_returned_companies(rows, issuer, requester):
-    # Defense in depth against query drift and accidental foreign-company joins.
+def _assert_returned_companies(report_key, rows, issuer, requester):
+    """Verify returned rows and linked master provenance before any response."""
     for row in rows:
         if not isinstance(row, dict):
             _deny()
@@ -96,6 +96,32 @@ def _assert_returned_companies(rows, issuer, requester):
             _deny()
         if requester is not None and row.get("requesting_company") != requester:
             _deny()
+        if report_key == "intercompany":
+            # Never reveal even a foreign invoice/billing reference when an
+            # inconsistent legacy claim points outside the authorized pair.
+            flags = set((row.get("source_quality") or "").split(", "))
+            if flags.intersection({
+                "BILLING_COMPANY_MISMATCH",
+                "SALES_COMPANY_OR_LINK_INVALID",
+                "PURCHASE_COMPANY_OR_LINK_INVALID",
+            }):
+                _deny()
+        if report_key == "department":
+            # The source report intentionally preserves imperfect legacy
+            # Department links. Existing foreign-company masters must not
+            # have their names exposed through this executive report.
+            for field in ("detail_department", "header_department"):
+                name = row.get(field)
+                if name:
+                    actual = frappe.db.get_value("Department", name, "company")
+                    if actual and actual != issuer:
+                        _deny()
+        if report_key == "equipment":
+            name = row.get("source_equipment")
+            if name:
+                actual = frappe.db.get_value("Equipment Registry", name, "company")
+                if actual and actual != issuer:
+                    _deny()
 
 
 @frappe.whitelist(methods=["POST"])
@@ -114,7 +140,7 @@ def run_group_report(report_key=None, filters=None):
     token = _CONTEXT.set((report_key, issuer, requester))
     try:
         columns, rows = module.execute(filters)
-        _assert_returned_companies(rows, issuer, requester)
+        _assert_returned_companies(report_key, rows, issuer, requester)
         return {"columns": columns, "rows": rows}
     finally:
         _CONTEXT.reset(token)
