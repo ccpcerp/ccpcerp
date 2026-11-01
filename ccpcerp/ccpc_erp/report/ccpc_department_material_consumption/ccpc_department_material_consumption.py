@@ -11,6 +11,8 @@ from the currently editable Withdrawal Slip or billing refresh snapshots.
 """
 
 import frappe
+
+from ccpcerp.ccpc_erp import executive_reporting
 from frappe import _
 from frappe.utils import flt, getdate
 
@@ -43,6 +45,8 @@ def execute(filters=None):
 
 
 def _require_access():
+    if executive_reporting.in_executive_report():
+        return
     # This report can expose Stock Ledger valuation and department-specific
     # financial mapping evidence. Do not widen reporting roles implicitly.
     if "System Manager" not in frappe.get_roles():
@@ -63,7 +67,8 @@ def _validate_filters(f):
         frappe.throw(_("A valid Company is required."), frappe.ValidationError)
     # Record-level permission is not implied by System Manager, particularly
     # when User Permission restricts specific Companies.
-    frappe.get_doc("Company", f.company).check_permission("read")
+    if not executive_reporting.in_executive_report():
+        frappe.get_doc("Company", f.company).check_permission("read")
 
     if f.get("department"):
         if not frappe.db.exists("Department", f.department):
@@ -165,6 +170,8 @@ def _source_sql(department_filter=False):
 
 
 def _assert_department_visibility(rows):
+    if executive_reporting.in_executive_report():
+        return
     # Raw SQL bypasses Frappe's automatic per-row User Permission filtering.
     # Check every existing source document, not only Company and Department.
     # Missing legacy Department/Item masters remain quality evidence;
