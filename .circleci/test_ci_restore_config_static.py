@@ -125,6 +125,50 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertNotIn("credential.helper store", self.stage)
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
 
+    def test_erpnext_installs_exact_compatible_tag_before_dependency_check(self):
+        # Build #108 succeeded, but the initial floating version-16 get-app
+        # temporarily read a newer ERPNext requirement (Frappe >=16.50.0).
+        # GitHub verifies ERPNext v16.34.2 is exactly the pinned ERPNEXT_SHA
+        # and its pyproject.toml requires Frappe >=16.21.0,<17.0.0.
+        # Keep the original Frappe 16.33.1 / ERPNext 16.34.2 pair.
+        self.assertIn(
+            "FRAPPE_SHA=988e54f3c4c291e2077a83809663f123731abe76",
+            self.stage,
+        )
+        self.assertIn(
+            "ERPNEXT_SHA=4048fb70e14d1843956fcdabb7c3cca75a1cbcdd",
+            self.stage,
+        )
+        self.assertIn(
+            "bench get-app --branch v16.34.2 erpnext https://github.com/frappe/erpnext",
+            self.stage,
+        )
+        self.assertNotIn(
+            "bench get-app --branch version-16 erpnext",
+            self.stage,
+        )
+        # Reject retargeted upstream tag, rather than hiding incompatibility
+        # by resetting it to the expected pinned SHA after dependency install.
+        clone_at = self.stage.index("bench get-app --branch v16.34.2 erpnext")
+        tag_check_at = self.stage.index(
+            '[[ "$(git -C apps/erpnext rev-parse HEAD)" == "$ERPNEXT_SHA" ]]'
+        )
+        fetch_at = self.stage.index(
+            'git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"'
+        )
+        checkout_at = self.stage.index(
+            'git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"'
+        )
+        final_verify_at = self.stage.index(
+            '[[ "$(git -C apps/erpnext rev-parse HEAD)" == "$ERPNEXT_SHA" ]]',
+            checkout_at,
+        )
+        self.assertLess(clone_at, tag_check_at)
+        self.assertLess(tag_check_at, fetch_at)
+        self.assertLess(fetch_at, checkout_at)
+        self.assertLess(checkout_at, final_verify_at)
+        self.assertLess(final_verify_at, self.stage.index("bench setup requirements --dev"))
+
     def test_fresh_repo_bypasses_inherited_partial_clone_missing_blobs(self):
         # Synthetic file:// test reproduces eight historical missing blobs,
         # then validates fresh repository fetch + bench swap (not remote CI).
