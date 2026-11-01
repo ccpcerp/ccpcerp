@@ -9,6 +9,8 @@ Account, Item or intercompany elimination. GL can aggregate lines per voucher.
 from collections import defaultdict
 
 import frappe
+
+from ccpcerp.ccpc_erp import executive_reporting
 from frappe import _
 from frappe.utils import flt, getdate
 
@@ -38,6 +40,8 @@ def execute(filters=None):
 
 
 def _require_access():
+    if executive_reporting.in_executive_report():
+        return
     if "System Manager" not in frappe.get_roles():
         frappe.throw(_("Company Stock/P&L GL review requires System Manager."), frappe.PermissionError)
     for name in SOURCE_DOCTYPES:
@@ -48,7 +52,8 @@ def _require_access():
 def _validate_filters(f):
     if not f.get("company") or not frappe.db.exists("Company", f.company):
         frappe.throw(_("An existing issuing Company is required."), frappe.ValidationError)
-    frappe.get_doc("Company", f.company).check_permission("read")
+    if not executive_reporting.in_executive_report():
+        frappe.get_doc("Company", f.company).check_permission("read")
     if not f.get("from_date") or not f.get("to_date"):
         frappe.throw(_("Both posting dates are required."), frappe.ValidationError)
     try:
@@ -137,6 +142,8 @@ def _pnl_sql():
 
 
 def _check_row_visibility(sources, pnl):
+    if executive_reporting.in_executive_report():
+        return
     # SQL Company predicates are not substitutes for per-document read rights.
     seen = set()
     for s in sources:
