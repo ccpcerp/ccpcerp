@@ -14,11 +14,7 @@ frappe.pages["ccpc-group-executive-reporting"].on_page_load = function (wrapper)
     page.add_field({ label: __(label), fieldname, fieldtype, options,
       default: value, reqd: 1, change: () => {} });
   const report = add("Report", "group_report", "Select",
-    "department\nEquipment / Job Activity\nIntercompany Billing\nStock versus P&L GL",
-    "department");
-  // Use exact gateway report keys; captions can change without changing scope.
-  report.df.options = "department\nequipment\nintercompany\nstock_gl";
-  report.refresh();
+    "department\\nequipment\\nintercompany\\nstock_gl", "department");
   const company = add("Issuing Company", "issuer", "Select", choices.join("\n"), choices[0]);
   const requester = add("Requesting Company (intercompany only)", "requester", "Select",
     choices.join("\n"), choices[1]);
