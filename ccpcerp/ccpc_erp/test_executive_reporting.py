@@ -146,3 +146,31 @@ class TestCCPCGroupExecutiveReporting(TestCase):
             self.assertRaisesRegex(PermissionError, "native report denied"),
         ):
             department._require_access()
+
+    def test_reject_foreign_linked_masters_and_billing_claims(self):
+        with (
+            patch.object(gateway, "_deny", side_effect=PermissionError("denied")),
+            patch.object(gateway.frappe.db, "get_value", return_value=self.other),
+        ):
+            with self.assertRaisesRegex(PermissionError, "denied"):
+                gateway._assert_returned_companies(
+                    "department",
+                    [{"issuing_company": self.company,
+                      "detail_department": "Foreign master"}],
+                    self.company, None,
+                )
+            with self.assertRaisesRegex(PermissionError, "denied"):
+                gateway._assert_returned_companies(
+                    "equipment",
+                    [{"issuing_company": self.company,
+                      "source_equipment": "Foreign equipment"}],
+                    self.company, None,
+                )
+            with self.assertRaisesRegex(PermissionError, "denied"):
+                gateway._assert_returned_companies(
+                    "intercompany",
+                    [{"issuing_company": self.company,
+                      "requesting_company": self.other,
+                      "source_quality": "BILLING_COMPANY_MISMATCH"}],
+                    self.company, self.other,
+                )
