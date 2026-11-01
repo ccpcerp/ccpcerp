@@ -41,7 +41,14 @@ case "${1:-}" in
     bench set-config -g redis_cache redis://127.0.0.1:13000
     bench set-config -g redis_queue redis://127.0.0.1:11000
     bench set-config -g redis_socketio redis://127.0.0.1:11000
-    bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+    # Pin the initial get-app clone to the same verified release as the
+    # immutable source checkout. The moving version-16 branch can require
+    # a newer Frappe than this historical, intentionally pinned CI bench.
+    # Upstream tag v16.34.2 resolves to ERPNEXT_SHA as verified on GitHub.
+    bench get-app --branch v16.34.2 erpnext https://github.com/frappe/erpnext
+    # Fail closed if the upstream release tag is ever retargeted. Do not
+    # silently install arbitrary tag contents and later reset to a pinned SHA.
+    [[ "$(git -C apps/erpnext rev-parse HEAD)" == "$ERPNEXT_SHA" ]]
     git -C apps/erpnext fetch --depth 1 upstream "$ERPNEXT_SHA"
     git -C apps/erpnext checkout --detach "$ERPNEXT_SHA"
     bench get-app ccpcerp "$APP_CHECKOUT"
