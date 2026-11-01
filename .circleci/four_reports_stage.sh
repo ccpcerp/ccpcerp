@@ -92,7 +92,8 @@ case "${1:-}" in
       ccpcerp.ccpc_erp.report.ccpc_intercompany_withdrawal_billing_status.test_ccpc_intercompany_withdrawal_billing_status \
       ccpcerp.ccpc_erp.report.ccpc_department_material_consumption.test_ccpc_department_material_consumption \
       ccpcerp.ccpc_erp.report.ccpc_equipment_job_material_activity.test_ccpc_equipment_job_material_activity \
-      ccpcerp.ccpc_erp.report.ccpc_company_stock_pnl_gl_reconciliation.test_ccpc_company_stock_pnl_gl_reconciliation \\\n      ccpcerp.ccpc_erp.test_executive_reporting
+      ccpcerp.ccpc_erp.report.ccpc_company_stock_pnl_gl_reconciliation.test_ccpc_company_stock_pnl_gl_reconciliation \
+      ccpcerp.ccpc_erp.test_executive_reporting
     do
       bench --site "$TEST_SITE" run-tests --module "$module"
     done
