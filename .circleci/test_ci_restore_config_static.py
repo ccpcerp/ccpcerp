@@ -21,6 +21,7 @@ class RestoreCIStaticTests(unittest.TestCase):
         cls.root = Path(__file__).resolve().parent
         cls.config = (cls.root / "config.yml").read_text(encoding="utf8")
         cls.stage = (cls.root / "pr32_restore_stage.sh").read_text(encoding="utf8")
+        cls.bench_smoke = (cls.root / "pr32_bench_version_smoke.sh").read_text(encoding="utf8")
 
     def test_default_off_and_manual_hold(self):
         self.assertIn("run_integration2_backup_restore:\n    type: boolean\n    default: false", self.config)
@@ -124,6 +125,91 @@ class RestoreCIStaticTests(unittest.TestCase):
         self.assertNotIn("ssh-keyscan", self.stage)
         self.assertNotIn("credential.helper store", self.stage)
         self.assertNotIn("git -C apps/ccpcerp fetch --unshallow", self.stage)
+
+    def test_bench_version_smoke_is_opt_in_held_and_no_secret_context(self):
+        self.assertIn(
+            "run_integration2_bench_version_smoke:\n    type: boolean\n    default: false",
+            self.config,
+        )
+        workflow = self.config.split(
+            "  opt-in-integration2-bench-version-smoke:\n", 1
+        )[1].split("\n  # Hosted Git source-copy probe:", 1)[0]
+        self.assertIn("when: << pipeline.parameters.run_integration2_bench_version_smoke >>", workflow)
+        self.assertIn("pr32-bench-smoke-manual-approval:\n          type: approval", workflow)
+        self.assertIn("requires:\n            - pr32-bench-smoke-manual-approval", workflow)
+        self.assertEqual(
+            workflow.count("only: " + BRANCH), 2,
+            "Both approval and Bench job must be restricted to the review branch",
+        )
+        job = self.config.split("  pr32-bench-version-smoke:\n", 1)[1].split(
+            "\n  pr32-git-source-probe:\n", 1
+        )[0]
+        self.assertIn("image: cimg/python:3.14-node", job)
+        self.assertIn("resource_class: large", job)
+        self.assertIn(
+            "timeout --signal=TERM --kill-after=10s 1800 bash "
+            ".circleci/pr32_bench_version_smoke.sh", job,
+        )
+        for forbidden in (
+            "context:", "mariadb:", "redis:", "store_artifacts:",
+            "store_test_results:", "persist_to_workspace:", "save_cache:",
+            "setup_remote_docker:", "docker run", "ssh ", "CCPC_RESTORE_AGE_IDENTITY",
+            "CCPC_RESTORE_B2_APP_KEY", "CCPC_RESTORE_B2_KEY_ID",
+        ):
+            self.assertNotIn(forbidden, job)
+
+    def test_bench_version_smoke_pins_original_pair_and_never_uses_backup(self):
+        script = self.bench_smoke
+        for marker in (
+            'CIRCLECI:-', 'CIRCLE_PROJECT_USERNAME:-', 'CIRCLE_PROJECT_REPONAME:-',
+            'CIRCLE_BRANCH:-', 'CIRCLE_JOB:-', 'CIRCLE_SHA1:-',
+            'CIRCLE_PIPELINE_ID:-', 'CIRCLE_WORKFLOW_ID:-', 'CIRCLE_BUILD_NUM:-',
+            'CCPC_RESTORE_AGE_IDENTITY', 'CCPC_RESTORE_B2_KEY_ID',
+            'CCPC_RESTORE_B2_APP_KEY', 'CCPC_ALLOW_INTEGRATION2_RESTORE',
+            'TEST_SITE:-', 'CI_DB_ROOT_PASSWORD:-',
+            'BENCH_DIR="$HOME/ccpc-pr32-version-smoke-bench"',
+            '[[ ! -e "$BENCH_DIR" && ! -L "$BENCH_DIR" ]]',
+            'umask 077', 'GIT_TERMINAL_PROMPT=0',
+            'bench validate-dependencies',
+            'grep -Fq "does not satisfy required version"',
+            'NO TRANSIENT VERSION WARNING PASS',
+            'CI-ONLY NO SITE NO BACKUP NO PROD/DEV',
+        ):
+            self.assertIn(marker, script)
+        self.assertIn(
+            'FRAPPE_SHA=988e54f3c4c291e2077a83809663f123731abe76', script
+        )
+        self.assertIn(
+            'ERPNEXT_SHA=4048fb70e14d1843956fcdabb7c3cca75a1cbcdd', script
+        )
+        self.assertIn(
+            "bench init --frappe-branch v16.33.1 --skip-assets", script
+        )
+        self.assertIn(
+            "bench get-app --branch v16.34.2 --skip-assets erpnext", script
+        )
+        self.assertIn(
+            '[[ "$(git -C "$BENCH_DIR/apps/frappe" rev-parse HEAD 2>/dev/null)" == "$FRAPPE_SHA" ]]',
+            script,
+        )
+        self.assertIn(
+            '[[ "$(git -C "$BENCH_DIR/apps/erpnext" rev-parse HEAD 2>/dev/null)" == "$ERPNEXT_SHA" ]]',
+            script,
+        )
+        for forbidden in (
+            "bench new-site", "bench restore", "bench migrate",
+            "install-app ccpcerp", "mysql ", "mariadb ", "age --decrypt",
+            "b2_authorize", "curl ", "wget ", "ssh ", "sudo docker",
+        ):
+            self.assertNotIn(forbidden, script)
+        # The smoke must exercise the SAME pinned release tags as the actual
+        # isolated restore Bench install, not another moving upstream branch.
+        self.assertIn(
+            "bench init --frappe-branch v16.33.1", self.stage
+        )
+        self.assertIn(
+            "bench get-app --branch v16.34.2 erpnext", self.stage
+        )
 
     def test_frappe_init_uses_exact_release_tag_before_dependency_install(self):
         # The Frappe v16.33.1 tag is confirmed upstream at FRAPPE_SHA;
