@@ -455,6 +455,13 @@ jobs:
     steps:
       - checkout
       - run:
+          name: Pre-check Bash syntax and no-secret Bench smoke policy
+          command: |
+            set -euo pipefail
+            bash -n .circleci/pr32_bench_version_smoke.sh
+            python -m compileall -q .circleci
+            python -m unittest discover -s .circleci -p 'test_ci_restore_config_static.py' -v
+      - run:
           name: Check actual pinned Frappe and ERPNext Bench dependency installation
           no_output_timeout: 20m
           command: |
