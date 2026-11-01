@@ -8,6 +8,8 @@ unpriced operational events. Gross outbound SLE valuation is not booked
 expense GL, net returns, outside service, labor cost, or downtime.
 """
 import frappe
+
+from ccpcerp.ccpc_erp import executive_reporting
 from frappe import _
 from frappe.utils import flt, getdate
 
@@ -39,6 +41,8 @@ def execute(filters=None):
 
 
 def _require_access():
+    if executive_reporting.in_executive_report():
+        return
     if "System Manager" not in frappe.get_roles():
         frappe.throw(_("Equipment costing source register requires System Manager."), frappe.PermissionError)
     for doctype in REQUIRED_SOURCES:
@@ -49,7 +53,8 @@ def _require_access():
 def _validate_filters(f):
     if not f.get("company") or not frappe.db.exists("Company", f.company):
         frappe.throw(_("Valid issuing Company is required."), frappe.ValidationError)
-    frappe.get_doc("Company", f.company).check_permission("read")
+    if not executive_reporting.in_executive_report():
+        frappe.get_doc("Company", f.company).check_permission("read")
     if f.get("equipment"):
         if not frappe.db.exists("Equipment Registry", f.equipment):
             frappe.throw(_("Unknown Equipment Registry record."), frappe.ValidationError)
@@ -156,6 +161,8 @@ def _job_sql(filtered=False):
 
 
 def _check_row_permissions(materials, jobs):
+    if executive_reporting.in_executive_report():
+        return
     checked = set()
     def check(doctype, name):
         if not name or (doctype, name) in checked:
