@@ -337,7 +337,7 @@ class TestIntercompanyReport28Disposable(bridge.TestFinanceWithdrawalBillingBrid
         self.assertIsNone(source["frozen_billing_amount"])
         self.assertIsNotNone(company[0]["voucher_pnl_expense_gl_value"])
 
-def test_report_g_real_executive_role_gateway(self):
+    def test_report_g_real_executive_role_gateway(self):
         """Actual disposable System User + Role reaches real report SQL.
 
         Only the allowlist's canonical names are substituted with the fixture
