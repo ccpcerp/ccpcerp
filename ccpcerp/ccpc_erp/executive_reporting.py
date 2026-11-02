@@ -21,8 +21,11 @@ COMPANIES = {
 }
 # Fixed source-module mapping: never evaluate a user-provided Python module path.
 REPORTS = {
-    "department": ("ccpc_department_material_consumption", {"company", "department", "from_date", "to_date"}),
-    "equipment": ("ccpc_equipment_job_material_activity", {"company", "equipment", "from_date", "to_date"}),
+    # Executive Page exposes Company/date only. Native Department/Equipment
+    # filters require their own master-record read permissions; reject them
+    # at this gateway rather than silently granting new DocType rights.
+    "department": ("ccpc_department_material_consumption", {"company", "from_date", "to_date"}),
+    "equipment": ("ccpc_equipment_job_material_activity", {"company", "from_date", "to_date"}),
     "intercompany": ("ccpc_intercompany_withdrawal_billing_status", {"issuing_company", "requesting_company", "from_date", "to_date"}),
     "stock_gl": ("ccpc_company_stock_pnl_gl_reconciliation", {"company", "from_date", "to_date"}),
 }
