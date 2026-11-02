@@ -336,3 +336,138 @@ class TestIntercompanyReport28Disposable(bridge.TestFinanceWithdrawalBillingBrid
         self.assertIsNone(equip[0]["job_order"])
         self.assertIsNone(source["frozen_billing_amount"])
         self.assertIsNotNone(company[0]["voucher_pnl_expense_gl_value"])
+
+def test_report_g_real_executive_role_gateway(self):
+        """Actual disposable System User + Role reaches real report SQL.
+
+        Only the allowlist's canonical names are substituted with the fixture
+        Companies in this test. Role, User, SQL and per-row Company checks are
+        genuine Frappe/MariaDB operations, with no persistent-site writes.
+        """
+        from unittest.mock import patch
+
+        from ccpcerp.ccpc_erp import executive_reporting as gateway
+
+        stock, detail = self._issue_only()
+        user = (
+            "ci-report-executive-"
+            + frappe.generate_hash(length=10)
+            + "@example.test"
+        )
+        self._actor(user, gateway.EXECUTIVE_ROLE)
+
+        issuer_abbr = frappe.db.get_value("Company", bridge.COMPANY, "abbr")
+        buyer_abbr = frappe.db.get_value("Company", bridge.BUYER, "abbr")
+        self.assertTrue(issuer_abbr)
+        self.assertTrue(buyer_abbr)
+        self.assertNotEqual(issuer_abbr, buyer_abbr)
+
+        common = {
+            "company": bridge.COMPANY,
+            "from_date": nowdate(),
+            "to_date": nowdate(),
+        }
+        scenarios = (
+            ("department", common, "stock_entry_detail", detail.name),
+            ("equipment", common, "stock_entry_detail", detail.name),
+            (
+                "intercompany",
+                self._filters(),
+                "stock_entry_detail",
+                detail.name,
+            ),
+            ("stock_gl", common, "voucher_no", stock.name),
+        )
+
+        frappe.set_user(user)
+        try:
+            roles = set(frappe.get_roles(user))
+            self.assertIn(gateway.EXECUTIVE_ROLE, roles)
+            self.assertNotIn("System Manager", roles)
+            self.assertFalse(gateway.in_executive_report())
+            with self.assertRaises(frappe.PermissionError):
+                report.execute(self._filters())
+
+            # The synthetic CI Companies are NOT the actual four production
+            # Company IDs. Never change the real gateway allowlist in app
+            # code or claim this substitutes for a live four-Company test.
+            with patch.dict(
+                gateway.COMPANIES,
+                {bridge.COMPANY: issuer_abbr, bridge.BUYER: buyer_abbr},
+                clear=True,
+            ):
+                for key, filters, identity, expected in scenarios:
+                    result = gateway.run_group_report(key, dict(filters))
+                    self.assertTrue(result["columns"])
+                    self.assertTrue(result["rows"])
+                    self.assertTrue(
+                        any(row.get(identity) == expected
+                            for row in result["rows"]),
+                        key,
+                    )
+                    for row in result["rows"]:
+                        self.assertEqual(
+                            row.get("issuing_company", row.get("company")),
+                            bridge.COMPANY,
+                        )
+                        if key == "intercompany":
+                            self.assertEqual(
+                                row["requesting_company"], bridge.BUYER
+                            )
+                    self.assertFalse(gateway.in_executive_report())
+
+                with self.assertRaises(frappe.PermissionError):
+                    gateway.run_group_report(
+                        "department",
+                        {**common, "company": "CI-UNLISTED-COMPANY"},
+                    )
+                with self.assertRaises(frappe.PermissionError):
+                    gateway.run_group_report(
+                        "intercompany",
+                        self._filters(requesting_company=bridge.COMPANY),
+                    )
+        finally:
+            frappe.set_user("Administrator")
+        self.assertFalse(gateway.in_executive_report())
+
+    def test_report_h_approved_invoice_pair_replay_does_not_duplicate(self):
+        """One real paired draft creation; a second approval must fail closed."""
+        batch, stock, detail = self._issue_signed_source_for_real_pair()
+        self._prepare_disposable_invoice_masters()
+        module, after_month_end, next_day = self._finalize_real_month_end(batch)
+        approved = self._approve_real_pair_at_month_end(
+            batch, module, after_month_end, next_day,
+        )
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
+        self._assert_drafts_are_real_and_unposted(
+            approved, stock, detail, batch
+        )
+
+        original = (approved["sales_invoice"], approved["purchase_invoice"])
+        before_sales = frappe.db.count(
+            "Sales Invoice", {"company": bridge.COMPANY}
+        )
+        before_purchase = frappe.db.count(
+            "Purchase Invoice", {"company": bridge.BUYER}
+        )
+        with self.assertRaises(frappe.ValidationError):
+            self._approve_real_pair_at_month_end(
+                batch, module, after_month_end, next_day,
+            )
+        batch.reload()
+        self.assertEqual(
+            (batch.sales_invoice, batch.purchase_invoice), original
+        )
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual(
+            frappe.db.count("Sales Invoice", {"company": bridge.COMPANY}),
+            before_sales,
+        )
+        self.assertEqual(
+            frappe.db.count("Purchase Invoice", {"company": bridge.BUYER}),
+            before_purchase,
+        )
+        self._assert_drafts_are_real_and_unposted(
+            approved, stock, detail, batch
+        )
