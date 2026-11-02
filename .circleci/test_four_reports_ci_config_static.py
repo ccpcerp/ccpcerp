@@ -81,7 +81,7 @@ class TestCombinedFourReportCI(TestCase):
         self.assertNotIn("docker.sock", STAGE)
 
     def test_c_four_report_native_test_modules_are_guarded(self):
-        expected = [6, 6, 5, 5]
+        expected = [8, 6, 5, 5]
         actual = []
         for fname in FIXTURES:
             source = (FIXTURE_DIR / fname).read_text(encoding="utf8")
