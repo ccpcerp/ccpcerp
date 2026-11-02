@@ -60,6 +60,18 @@ class TestCCPCGroupExecutiveReporting(TestCase):
                 with self.assertRaisesRegex(PermissionError, "denied"):
                     gateway._filters("department", {**self.filters, extra: "1"})
 
+    def test_optional_master_filters_not_exposed_by_executive_gateway(self):
+        # Native System Manager reports retain Department/Equipment filters,
+        # but this executive-only endpoint grants no master-record DocPerm.
+        with patch.object(gateway, "_deny", side_effect=PermissionError("denied")):
+            for report_key, optional in (
+                ("department", {"department": "Sensitive Department"}),
+                ("equipment", {"equipment": "Sensitive Equipment"}),
+            ):
+                with self.subTest(report=report_key):
+                    with self.assertRaisesRegex(PermissionError, "denied"):
+                        gateway._filters(report_key, {**self.filters, **optional})
+
     def test_intercompany_needs_two_distinct_approved_companies(self):
         with (
             patch.object(gateway.frappe.db, "get_value",
