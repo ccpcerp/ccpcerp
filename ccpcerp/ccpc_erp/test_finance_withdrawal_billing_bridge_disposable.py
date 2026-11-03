@@ -700,3 +700,184 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertEqual(frappe.db.count(
             "Purchase Invoice", {"remarks": marker}
         ), 1)
+
+    # Post-approval acceptance: use the SAME signed-issue/real-ledger source
+    # fixture exercised by Build #122. These additional cases deliberately
+    # invoke ERPNext's real submit/cancel methods and MariaDB GL, not mocks.
+    # Only the existing billing-controller month-end clock is simulated.
+    # IMPORTANT: no automatic posting of invoices in the production service.
+    # They remain Draft until a separately authorized accounting actor posts.
+    def _draft_pair_for_posting(self):
+        batch, stock, detail = self._issue_signed_source_for_real_pair()
+        self._prepare_disposable_invoice_masters()
+        module, clock, next_day = self._finalize_real_month_end(batch)
+        result = self._approve_real_pair_at_month_end(
+            batch, module, clock, next_day
+        )
+        batch.reload()
+        sales, purchase = self._assert_drafts_are_real_and_unposted(
+            result, stock, detail, batch
+        )
+        return batch, stock, sales, purchase
+
+    def _invoice_gl(self, invoice, active_only=True):
+        filters = {
+            "voucher_type": invoice.doctype,
+            "voucher_no": invoice.name,
+        }
+        if active_only:
+            filters["is_cancelled"] = 0
+        return frappe.get_all(
+            "GL Entry", filters=filters,
+            fields=["company", "account", "debit", "credit", "is_cancelled"],
+        )
+
+    def _assert_posted_invoice_gl(self, invoice, debit_account, credit_account):
+        rows = self._invoice_gl(invoice)
+        self.assertTrue(rows, invoice.doctype + " did not create actual GL")
+        self.assertTrue(all(row.company == invoice.company for row in rows))
+        debits = sum(flt(row.debit) for row in rows)
+        credits = sum(flt(row.credit) for row in rows)
+        self.assertAlmostEqual(debits, credits, places=2)
+        self.assertAlmostEqual(debits, flt(invoice.grand_total), places=2)
+        by_account = {}
+        for row in rows:
+            by_account[row.account] = by_account.get(row.account, 0) + (
+                flt(row.debit) - flt(row.credit)
+            )
+        self.assertAlmostEqual(
+            by_account.get(debit_account, 0), flt(invoice.grand_total),
+            places=2,
+        )
+        self.assertAlmostEqual(
+            by_account.get(credit_account, 0), -flt(invoice.grand_total),
+            places=2,
+        )
+
+    def _submit_real_pair(self):
+        batch, stock, sales, purchase = self._draft_pair_for_posting()
+        original_sle = frappe.db.count(
+            "Stock Ledger Entry",
+            {"voucher_type": "Stock Entry", "voucher_no": stock.name},
+        )
+        original_gl = frappe.db.count(
+            "GL Entry", {"voucher_type": "Stock Entry", "voucher_no": stock.name},
+        )
+        # ERPNext (not the custom billing service) performs actual posting.
+        # Both invoices must post without touching original Material Issue.
+        sales.submit()
+        purchase.submit()
+        sales.reload()
+        purchase.reload()
+        self.assertEqual((sales.docstatus, purchase.docstatus), (1, 1))
+        self.assertEqual(sales.inter_company_invoice_reference, purchase.name)
+        self.assertEqual(purchase.inter_company_invoice_reference, sales.name)
+        self.assertFalse(sales.update_stock or purchase.update_stock)
+        self.assertEqual(
+            frappe.db.count(
+                "Stock Ledger Entry",
+                {"voucher_type": "Stock Entry", "voucher_no": stock.name},
+            ),
+            original_sle,
+        )
+        self.assertEqual(
+            frappe.db.count(
+                "GL Entry",
+                {"voucher_type": "Stock Entry", "voucher_no": stock.name},
+            ),
+            original_gl,
+        )
+        self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
+        seller_abbr = frappe.db.get_value("Company", COMPANY, "abbr")
+        buyer_abbr = frappe.db.get_value("Company", BUYER, "abbr")
+        self._assert_posted_invoice_gl(
+            sales,
+            f"1312 - Intercompany Receivable - {seller_abbr}",
+            f"6050 - Intercompany Material Charges - {seller_abbr}",
+        )
+        self._assert_posted_invoice_gl(
+            purchase,
+            f"5150 - Intercompany Materials Expense - {buyer_abbr}",
+            f"2121 - Intercompany Payable - {buyer_abbr}",
+        )
+        return batch, stock, sales, purchase, original_sle, original_gl
+
+    def test_e_real_submitted_pair_posts_company_gl(self):
+        """Real ERPNext submit creates balanced, separate Company ledgers."""
+        batch, stock, sales, purchase, _, _ = self._submit_real_pair()
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual(batch.sales_invoice, sales.name)
+        self.assertEqual(batch.purchase_invoice, purchase.name)
+
+    def test_f_real_invoice_cancellation_reverses_gl_not_source(self):
+        """Cancel buyer then seller: no active invoice GL or source reversal."""
+        batch, stock, sales, purchase, original_sle, original_gl = (
+            self._submit_real_pair()
+        )
+        # Native ERPNext cancellation order must be valid without bypassing
+        # controller validation; failure is a real release-review blocker.
+        purchase.cancel()
+        sales.cancel()
+        purchase.reload()
+        sales.reload()
+        self.assertEqual((sales.docstatus, purchase.docstatus), (2, 2))
+        for invoice in (sales, purchase):
+            # ERPNext may cancel old GL rows or create reversing rows.
+            # What matters is no surviving active account balance.
+            by_account = {}
+            for row in self._invoice_gl(invoice):
+                by_account[row.account] = by_account.get(row.account, 0) + (
+                    flt(row.debit) - flt(row.credit)
+                )
+            for net in by_account.values():
+                self.assertAlmostEqual(net, 0, places=2)
+        self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
+        self.assertEqual(
+            frappe.db.count(
+                "Stock Ledger Entry",
+                {"voucher_type": "Stock Entry", "voucher_no": stock.name},
+            ), original_sle,
+        )
+        self.assertEqual(
+            frappe.db.count(
+                "GL Entry",
+                {"voucher_type": "Stock Entry", "voucher_no": stock.name},
+            ), original_gl,
+        )
+        # Do not silently clear approved billing links or allow rebilling:
+        # a separate Accounting policy is needed for cancelled paired invoices.
+        batch.reload()
+        self.assertEqual(batch.sales_invoice, sales.name)
+        self.assertEqual(batch.purchase_invoice, purchase.name)
+
+    def test_g_unprivileged_actor_cannot_submit_invoice(self):
+        """Synthetic non-Accounts user cannot post either approved invoice."""
+        batch, stock, sales, purchase = self._draft_pair_for_posting()
+        self._actor(
+            "ci-bridge-no-invoice-permission@invalid.test",
+            "CCPC CI No Invoice Access",
+        )
+        frappe.set_user("ci-bridge-no-invoice-permission@invalid.test")
+        try:
+            for doctype, name in (
+                ("Sales Invoice", sales.name),
+                ("Purchase Invoice", purchase.name),
+            ):
+                doc = frappe.get_doc(doctype, name)
+                self.assertFalse(
+                    frappe.has_permission(doctype, ptype="submit", doc=doc),
+                    doctype + " incorrectly allowed unprivileged submit",
+                )
+                with self.assertRaises(frappe.PermissionError):
+                    doc.submit()
+        finally:
+            frappe.set_user("Administrator")
+        sales.reload()
+        purchase.reload()
+        self.assertEqual((sales.docstatus, purchase.docstatus), (0, 0))
+        for invoice in (sales, purchase):
+            self.assertFalse(self._invoice_gl(invoice))
+        self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
