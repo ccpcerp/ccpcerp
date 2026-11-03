@@ -188,6 +188,71 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
                 "user": email, "allow": "Company", "for_value": BUYER,
                 "apply_to_all_doctypes": 1,
             }).insert(ignore_permissions=True)
+        if email == BILLING_APPROVER and role == "Finance Controller":
+            self._grant_disposable_account_read_to_checker()
+
+    def _grant_disposable_account_read_to_checker(self):
+        """Model native Account read without assigning a posting-capable role.
+
+        Build #134 proved ERPNext validates Account access while inserting
+        a Sales Invoice, even with insert(ignore_permissions=True). Grant only
+        a CI-only reader role to the synthetic checker, never Accounts User/
+        Accounts Manager, and never relax the controller's authorization.
+        The caller's setUp has already asserted the exact disposable site.
+        """
+        from frappe.permissions import add_permission
+
+        read_role = "CCPC CI Account Read Only"
+        frappe.set_user("Administrator")
+        if not frappe.db.exists("Role", read_role):
+            frappe.get_doc({
+                "doctype": "Role", "role_name": read_role,
+            }).insert(ignore_permissions=True)
+        if not frappe.db.exists("Custom DocPerm", {
+            "parent": "Account", "role": read_role, "permlevel": 0,
+        }):
+            # Frappe's permission API preserves the other standard Account
+            # permissions when customizing and creates a read-only rule.
+            add_permission("Account", read_role, 0)
+
+        rights = frappe.db.get_value(
+            "Custom DocPerm",
+            {"parent": "Account", "role": read_role, "permlevel": 0},
+            ["read", "write", "create", "delete", "submit", "cancel"],
+            as_dict=True,
+        )
+        self.assertTrue(rights and rights.read)
+        self.assertFalse(any(int(rights[field]) for field in (
+            "write", "create", "delete", "submit", "cancel",
+        )), "Synthetic Account role must be read-only.")
+
+        user = frappe.get_doc("User", BILLING_APPROVER)
+        self.assertFalse(any(row.role in (
+            "Accounts User", "Accounts Manager", "System Manager",
+        ) for row in user.roles))
+        if not any(row.role == read_role for row in user.roles):
+            user.append("roles", {"role": read_role})
+            user.save(ignore_permissions=True)
+        frappe.clear_cache(doctype="Account")
+        frappe.clear_cache(user=BILLING_APPROVER)
+
+        # Prove the native read gate works for the real synthetic Company
+        # account, but cannot grant native Sales/Purchase invoice posting.
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            account = frappe.db.get_value(
+                "Company", COMPANY, "default_receivable_account",
+            )
+            self.assertTrue(account)
+            self.assertTrue(frappe.has_permission(
+                "Account", ptype="read", doc=account,
+            ))
+            for doctype in ("Sales Invoice", "Purchase Invoice"):
+                self.assertFalse(frappe.has_permission(
+                    doctype, ptype="submit",
+                ), "The CI billing checker must not have invoice submit rights.")
+        finally:
+            frappe.set_user("Administrator")
 
     def _approve_signed(self, kind, source, value):
         frappe.set_user(MAKER)
