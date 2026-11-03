@@ -95,8 +95,12 @@ class TestBridgeCiStatic(TestCase):
         # The new real invoice-pair probe must use the production Approval
         # service, but never submit the resulting draft invoices.
         self.assertIn("batch.approve_and_create_invoices()", BRIDGE)
-        self.assertNotIn("sales.submit(", BRIDGE)
-        self.assertNotIn("purchase.submit(", BRIDGE)
+        # Draft-pair creation itself must remain non-posting, even though
+        # subsequent isolated acceptance tests explicitly exercise ERPNext's
+        # native submit/cancel lifecycle on the approved draft pair.
+        pre_posting_suite = BRIDGE.split("    # Post-approval acceptance:", 1)[0]
+        self.assertNotIn("sales.submit(", pre_posting_suite)
+        self.assertNotIn("purchase.submit(", pre_posting_suite)
         self.assertIn(
             "self.assertEqual((sales.docstatus, purchase.docstatus), (0, 0))",
             BRIDGE,
