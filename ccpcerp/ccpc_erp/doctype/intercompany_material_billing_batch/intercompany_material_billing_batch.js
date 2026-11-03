@@ -163,8 +163,9 @@ frappe.ui.form.on("Intercompany Material Billing Batch", {
                 frm.add_custom_button(__("Request Correction Review"),
                     () => request_cancelled_invoice_correction(frm), __("Actions"));
             }
-            if (can_approve_intercompany_billing() &&
-                frm.doc.finalized_by !== frappe.session.user) {
+            if (can_approve_intercompany_billing() && frm.doc.finalized_by &&
+                frm.doc.finalized_by.toLowerCase() !==
+                frappe.session.user.toLowerCase()) {
                 frm.add_custom_button(__("Record Correction Decision"),
                     () => review_cancelled_invoice_correction(frm), __("Actions"));
             }
