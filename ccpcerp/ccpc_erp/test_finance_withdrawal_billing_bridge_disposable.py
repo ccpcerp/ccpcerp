@@ -3,13 +3,16 @@
 
 DISPOSABLE-CI-ONLY suite. Real Frappe/ERPNext tables, authenticated
 signed Finance mapping decisions, submitted stock/ledger records, true billing
-preview and REAL paired Sales/Purchase *draft* invoice inserts. No invoice is
-submitted; no production data or live site is accessed.
+preview and REAL paired Sales/Purchase invoice draft inserts.
 
-The new month-end invoice tests simulate only the billing Controller clock,
-and inject a second-invoice failure to probe actual MariaDB savepoint rollback.
+The initial draft approval stays unposted. Additional tests deliberately
+exercise native ERPNext invoice submission, Company GL, cancellation/reversal,
+and permission denial on those disposable synthetic drafts; the custom billing
+service must NEVER auto-submit. Only the billing Controller clock is simulated,
+and a second-invoice failure probes actual MariaDB savepoint rollback.
 Runs only via the default-off, manually held exact-SHA Finance bridge workflow;
 every test requires its established disposable CI identity/site guard.
+No production data or persistent DEVELOPMENT site is accessed.
 """
 from datetime import datetime, timedelta
 from unittest.mock import patch
