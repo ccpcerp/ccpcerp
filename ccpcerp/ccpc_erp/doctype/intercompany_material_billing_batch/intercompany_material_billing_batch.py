@@ -13,6 +13,9 @@ from ccpcerp.ccpc_erp.intercompany_billing_authority import (
     PREPARER_ROLE, CHECKER_ROLE, require_billing_actor,
     require_distinct_billing_review,
 )
+from ccpcerp.ccpc_erp.doctype.ccpc_intercompany_billing_correction.ccpc_intercompany_billing_correction import (
+    create_correction_case, decide_correction_case,
+)
 
 
 EPSILON = 0.000001
@@ -1546,6 +1549,109 @@ class IntercompanyMaterialBillingBatch(Document):
             "approved_on": self.approved_on,
             "posting_date": self.period_end,
             "total_amount": self.total_amount,
+        }
+
+    def _require_cancelled_invoice_pair(self):
+        """A correction case is allowed only for the original fully cancelled pair.
+
+        The original batch and source claims are NEVER altered by this gate.
+        A partially cancelled pair must be resolved through Accounting first.
+        """
+        if self.status != "Approved" or not self.sales_invoice or not self.purchase_invoice:
+            frappe.throw(_("Only an Approved batch with its original paired invoices can request correction."))
+        for doctype, name, company in (
+            ("Sales Invoice", self.sales_invoice, self.issuing_company),
+            ("Purchase Invoice", self.purchase_invoice, self.requesting_company),
+        ):
+            state = frappe.db.get_value(
+                doctype, name, ["company", "docstatus"], as_dict=True
+            )
+            if not state or state.company != company or int(state.docstatus) != 2:
+                frappe.throw(
+                    _("Both original intercompany invoices must be cancelled in their correct Companies before review.")
+                )
+
+    def _locked_correction_case_name(self):
+        rows = frappe.db.sql(
+            """SELECT name FROM `tabCCPC Intercompany Billing Correction`
+            WHERE billing_batch=%s ORDER BY creation FOR UPDATE""",
+            (self.name,), as_dict=True,
+        )
+        if len(rows) > 1:
+            frappe.throw(_("Multiple correction reviews exist for this billing batch; manual investigation required."))
+        return rows[0].name if rows else None
+
+    @frappe.whitelist()
+    def request_cancelled_invoice_correction(self, reason):
+        """Audit a correction request; NEVER recreate invoices or release stock."""
+        self._lock_and_reload_for_mutation()
+        actor = self._require_billing_preparer()
+        self._require_cancelled_invoice_pair()
+        if not isinstance(reason, str) or not 12 <= len(reason.strip()) <= 1000:
+            frappe.throw(_("Correction request requires a reason of 12–1000 characters."))
+        if self._locked_correction_case_name():
+            frappe.throw(
+                _("This billing batch already has a correction review; duplicate requests are forbidden.")
+            )
+        case = create_correction_case(self, reason.strip(), actor)
+        return {"case": case.name, "status": case.status,
+                "sales_invoice": self.sales_invoice,
+                "purchase_invoice": self.purchase_invoice,
+                "automatic_rebilling": False}
+
+    @frappe.whitelist()
+    def review_cancelled_invoice_correction(self, action, note):
+        """Independent Finance decision; still NO automatic invoice actions."""
+        self._lock_and_reload_for_mutation()
+        actor = self._require_finance_approver()
+        self._require_cancelled_invoice_pair()
+        if action not in ("Approve", "Decline"):
+            frappe.throw(_("Finance review action must be Approve or Decline."))
+        if not isinstance(note, str) or not 12 <= len(note.strip()) <= 1000:
+            frappe.throw(_("Finance decision requires a note of 12–1000 characters."))
+        name = self._locked_correction_case_name()
+        if not name:
+            frappe.throw(_("No correction request exists for this batch."))
+        case = frappe.get_doc("CCPC Intercompany Billing Correction", name)
+        if case.status != "Requested":
+            frappe.throw(_("Correction review already has a final decision."))
+        if (
+            case.billing_batch != self.name
+            or case.sales_invoice != self.sales_invoice
+            or case.purchase_invoice != self.purchase_invoice
+            or case.issuing_company != self.issuing_company
+            or case.requesting_company != self.requesting_company
+        ):
+            frappe.throw(_("Correction source evidence does not match the locked billing batch."))
+        require_distinct_billing_review(case.requested_by, actor)
+        case = decide_correction_case(case, action, note.strip(), actor)
+        return {"case": case.name, "status": case.status,
+                "reviewed_by": actor, "automatic_rebilling": False}
+
+    @frappe.whitelist()
+    def get_cancelled_invoice_correction_review(self):
+        """Read only for a named, explicitly Company-scoped billing actor."""
+        self.check_permission("read")
+        role = (
+            CHECKER_ROLE if frappe.db.exists("Has Role", {
+                "parenttype": "User", "parent": frappe.session.user,
+                "role": CHECKER_ROLE,
+            }) else PREPARER_ROLE
+        )
+        require_billing_actor(role, self.issuing_company, self.requesting_company)
+        name = frappe.db.get_value(
+            "CCPC Intercompany Billing Correction",
+            {"billing_batch": self.name}, "name",
+        )
+        if not name:
+            return {"status": "No Correction Request"}
+        case = frappe.get_doc("CCPC Intercompany Billing Correction", name)
+        return {
+            "case": case.name, "status": case.status,
+            "reason": case.reason, "requested_by": case.requested_by,
+            "requested_on": case.requested_on, "reviewed_by": case.reviewed_by,
+            "reviewed_on": case.reviewed_on, "review_note": case.review_note,
+            "automatic_rebilling": False,
         }
 
     def _validate_nonempty_finalized_batch(self):
