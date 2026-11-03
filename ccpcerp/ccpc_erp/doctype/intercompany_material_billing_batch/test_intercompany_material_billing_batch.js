@@ -32,6 +32,15 @@ global.frappe = {
         confirmMessage = message;
         return yes();
     },
+    prompt(fields, submit) {
+        if (fields.some((field) => field.fieldname === "reason")) {
+            return submit({reason: "Cancelled linked invoice pair needs Finance review."});
+        }
+        return submit({
+            action: "Approve",
+            note: "Independent checker recorded manual correction approval.",
+        });
+    },
 };
 
 const {
@@ -158,6 +167,43 @@ async function run() {
     handlers.refresh(approvedForPrep);
     assert.deepEqual(approvedForPrep.buttons.map((b) => b.label),
         ["Request Correction Review"]);
+
+    // Controlled correction buttons call the guarded backend methods.
+    const requestForm = form({
+        status: "Approved",
+        callResults: {
+            request_cancelled_invoice_correction: {
+                case: "ICCR-CI-1", status: "Requested",
+            },
+        },
+    });
+    approvedForPrep.buttons[0].action = () =>
+        require("./intercompany_material_billing_batch.js")
+            .request_cancelled_invoice_correction(requestForm);
+    await approvedForPrep.buttons[0].action();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requestForm.calls,
+        ["request_cancelled_invoice_correction"]);
+    assert.equal(requestForm.reloaded, 1);
+
+    frappe.session.user = "finance@example.com";
+    frappe.user_roles = ["Finance Controller"];
+    const reviewForm = form({
+        status: "Approved",
+        callResults: {
+            review_cancelled_invoice_correction: {
+                status: "Approved for Manual Correction",
+            },
+        },
+    });
+    handlers.refresh(reviewForm);
+    assert.deepEqual(reviewForm.buttons.map((b) => b.label),
+        ["Record Correction Decision"]);
+    await reviewForm.buttons[0].action();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(reviewForm.calls,
+        ["review_cancelled_invoice_correction"]);
+    assert.equal(reviewForm.reloaded, 1);
 
     // Non-finance users should not see actions.
     frappe.user_roles = [];
