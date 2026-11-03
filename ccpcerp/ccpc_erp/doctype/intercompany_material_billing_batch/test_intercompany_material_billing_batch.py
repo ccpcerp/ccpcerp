@@ -708,7 +708,7 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         ):
             result = IntercompanyMaterialBillingBatch.refresh_preview(doc)
 
-        doc.check_permission.assert_called_once_with("write")
+        doc._require_billing_preparer.assert_called_once_with()
         doc._require_draft_refresh.assert_called_once_with()
         doc._set_billing_period.assert_called_once_with()
         doc._rebuild_items_from_sources.assert_called_once_with()
@@ -1293,49 +1293,32 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         doc._build_purchase_invoice.assert_not_called()
         doc.save.assert_not_called()
 
-    def test_finance_approver_roles_are_allowed(self):
-        cases = [
-            ("Administrator", []),
-            ("finance@example.com", ["Finance Controller"]),
-            ("manager@example.com", ["System Manager"]),
-        ]
-
-        for user, roles in cases:
-            with self.subTest(user=user):
-                doc = batch()
-
-                with (
-                    patch(
-                        f"{MODULE}.frappe.session",
-                        frappe._dict(user=user),
-                    ),
-                    patch(
-                        f"{MODULE}.frappe.get_roles",
-                        return_value=roles,
-                    ),
-                ):
-                    IntercompanyMaterialBillingBatch._require_finance_approver(
-                        doc
-                    )
-
-                doc.check_permission.assert_called_once_with("write")
+    def test_finance_approver_requires_named_company_scoped_checker(self):
+        doc = batch(status="Under Review")
+        doc.finalized_by = "billing-preparer@example.com"
+        with (
+            patch(f"{MODULE}.frappe.session", frappe._dict(user="checker@example.com")),
+            patch(f"{MODULE}.require_billing_actor", return_value="checker@example.com") as actor,
+            patch(f"{MODULE}.require_distinct_billing_review") as independent,
+        ):
+            result = IntercompanyMaterialBillingBatch._require_finance_approver(doc)
+        self.assertEqual(result, "checker@example.com")
+        doc.check_permission.assert_called_once_with("write")
+        actor.assert_called_once_with(
+            "Finance Controller", doc.issuing_company, doc.requesting_company,
+        )
+        independent.assert_called_once_with(
+            "billing-preparer@example.com", "checker@example.com",
+        )
 
     def test_non_finance_user_cannot_approve(self):
-        doc = batch()
-
+        doc = batch(status="Under Review")
         with (
-            patch(
-                f"{MODULE}.frappe.session",
-                frappe._dict(user="ordinary@example.com"),
-            ),
-            patch(
-                f"{MODULE}.frappe.get_roles",
-                return_value=["Accounts User"],
-            ),
+            patch(f"{MODULE}.require_billing_actor",
+                  side_effect=frappe.PermissionError("explicit Finance checker role required")),
             self.assertRaises(frappe.PermissionError),
         ):
             IntercompanyMaterialBillingBatch._require_finance_approver(doc)
-
         doc.check_permission.assert_called_once_with("write")
 
     def test_approval_requires_under_review_status(self):
