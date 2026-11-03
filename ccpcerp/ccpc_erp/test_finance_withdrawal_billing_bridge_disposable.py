@@ -1038,6 +1038,17 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertEqual(case.status, "Approved for Manual Correction")
         self.assertEqual(case.reviewed_by, BILLING_APPROVER)
         self.assertTrue(case.reviewed_on and case.review_note)
+        self.assertTrue(frappe.db.exists("Version", {
+            "ref_doctype": "CCPC Intercompany Billing Correction",
+            "docname": case.name,
+        }), "The approved correction must have native Frappe Version audit evidence.")
+        # Even an ignore_permissions save from code cannot rewrite the audit
+        # record without the private, controlled Finance action token.
+        case.reason = "Tampered retrospective reason"
+        with self.assertRaises(frappe.PermissionError):
+            case.save(ignore_permissions=True)
+        case.reload()
+        self.assertIn("Both linked original invoices", case.reason)
         batch.reload()
         self.assertEqual(batch.status, "Approved")
         self.assertEqual((batch.sales_invoice, batch.purchase_invoice),
