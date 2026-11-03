@@ -189,42 +189,43 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
                 "apply_to_all_doctypes": 1,
             }).insert(ignore_permissions=True)
         if email == BILLING_APPROVER and role == "Finance Controller":
-            self._grant_disposable_account_read_to_checker()
+            self._grant_disposable_invoice_master_read_to_checker()
 
-    def _grant_disposable_account_read_to_checker(self):
-        """Model native Account read without assigning a posting-capable role.
+    def _grant_disposable_invoice_master_read_to_checker(self):
+        """Model only native invoice-validation master reads, never posting.
 
-        Build #134 proved ERPNext validates Account access while inserting
-        a Sales Invoice, even with insert(ignore_permissions=True). Grant only
-        a CI-only reader role to the synthetic checker, never Accounts User/
-        Accounts Manager, and never relax the controller's authorization.
-        The caller's setUp has already asserted the exact disposable site.
+        Build #134 reached ERPNext's Account-read gate; Build #137 then
+        reached Item.check_permission() in get_item_details. The disposable
+        checker needs read access to the invoice's Account, Item and internal
+        party masters, even though the two Invoice inserts ignore DocPerm.
+        Do not assign Accounts User/Manager or relax billing authorization.
+        The caller's setUp has already asserted the exact disposable CI site.
         """
         from frappe.permissions import add_permission
 
-        read_role = "CCPC CI Account Read Only"
+        read_role = "CCPC CI Billing Master Read Only"
+        readable_masters = ("Account", "Item", "Customer", "Supplier")
         frappe.set_user("Administrator")
         if not frappe.db.exists("Role", read_role):
             frappe.get_doc({
                 "doctype": "Role", "role_name": read_role,
             }).insert(ignore_permissions=True)
-        if not frappe.db.exists("Custom DocPerm", {
-            "parent": "Account", "role": read_role, "permlevel": 0,
-        }):
-            # Frappe's permission API preserves the other standard Account
-            # permissions when customizing and creates a read-only rule.
-            add_permission("Account", read_role, 0)
-
-        rights = frappe.db.get_value(
-            "Custom DocPerm",
-            {"parent": "Account", "role": read_role, "permlevel": 0},
-            ["read", "write", "create", "delete", "submit", "cancel"],
-            as_dict=True,
-        )
-        self.assertTrue(rights and rights.read)
-        self.assertFalse(any(int(rights[field]) for field in (
-            "write", "create", "delete", "submit", "cancel",
-        )), "Synthetic Account role must be read-only.")
+        for master in readable_masters:
+            if not frappe.db.exists("Custom DocPerm", {
+                "parent": master, "role": read_role, "permlevel": 0,
+            }):
+                # Only a CI-only role receives the standard read rule.
+                add_permission(master, read_role, 0)
+            rights = frappe.db.get_value(
+                "Custom DocPerm",
+                {"parent": master, "role": read_role, "permlevel": 0},
+                ["read", "write", "create", "delete", "submit", "cancel"],
+                as_dict=True,
+            )
+            self.assertTrue(rights and rights.read, master + " read missing")
+            self.assertFalse(any(int(rights[field]) for field in (
+                "write", "create", "delete", "submit", "cancel",
+            )), master + " CI permission must be read-only")
 
         user = frappe.get_doc("User", BILLING_APPROVER)
         self.assertFalse(any(row.role in (
@@ -233,11 +234,12 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         if not any(row.role == read_role for row in user.roles):
             user.append("roles", {"role": read_role})
             user.save(ignore_permissions=True)
-        frappe.clear_cache(doctype="Account")
+        for master in readable_masters:
+            frappe.clear_cache(doctype=master)
         frappe.clear_cache(user=BILLING_APPROVER)
 
-        # Prove the native read gate works for the real synthetic Company
-        # account, but cannot grant native Sales/Purchase invoice posting.
+        # Exercise the precise ERPNext Item permission gate that failed in
+        # Build #137; confirm the earlier Account gate and no invoice submit.
         frappe.set_user(BILLING_APPROVER)
         try:
             account = frappe.db.get_value(
@@ -247,6 +249,10 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
             self.assertTrue(frappe.has_permission(
                 "Account", ptype="read", doc=account,
             ))
+            self.assertTrue(frappe.has_permission(
+                "Item", ptype="read", doc=self.item.name,
+            ))
+            frappe.get_doc("Item", self.item.name).check_permission("read")
             for doctype in ("Sales Invoice", "Purchase Invoice"):
                 self.assertFalse(frappe.has_permission(
                     doctype, ptype="submit",
@@ -555,6 +561,16 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.load_test_records("Sales Invoice")
         self.customer = self._create_internal_party("Customer", BUYER, COMPANY)
         self.supplier = self._create_internal_party("Supplier", COMPANY, BUYER)
+        # Native invoice validation can read the linked internal parties.
+        # Confirm the named checker can read ONLY the test-created parties.
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            for party_type, party_name in (
+                ("Customer", self.customer), ("Supplier", self.supplier),
+            ):
+                frappe.get_doc(party_type, party_name).check_permission("read")
+        finally:
+            frappe.set_user("Administrator")
         specs = (
             ("1312", "Intercompany Receivable", "Asset", "Receivable"),
             ("2121", "Intercompany Payable", "Liability", "Payable"),
