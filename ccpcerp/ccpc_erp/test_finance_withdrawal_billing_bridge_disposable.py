@@ -10,8 +10,8 @@ exercise native ERPNext invoice submission, Company GL, cancellation/reversal,
 and permission denial on those disposable synthetic drafts; the custom billing
 service must NEVER auto-submit. Only the billing Controller clock is simulated,
 and a second-invoice failure probes actual MariaDB savepoint rollback.
-Runs only via the default-off, manually held exact-SHA Finance bridge workflow;
-every test requires its established disposable CI identity/site guard.
+Runs only under either the old Finance Bridge identity or the separate
+manually held, exact-SHA Billing Controls identity; all tests fail closed.
 No production data or persistent DEVELOPMENT site is accessed.
 """
 from datetime import datetime, timedelta
@@ -35,6 +35,10 @@ from ccpcerp.ccpc_erp.bc_mapping_workflow import (
 )
 from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import (
     assert_finance_disposable_site,
+)
+from ccpcerp.ccpc_erp.ci_billing_controls_site_guard import (
+    assert_billing_controls_disposable_site,
+    is_reviewed_billing_controls_disposable_site,
 )
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip import (
     test_withdrawal_real_ledger_integration as base_ledger,
@@ -61,7 +65,13 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
 
     def setUp(self):
         # This MUST precede all fixture loading, SQL queries and user writes.
-        assert_finance_disposable_site(getattr(frappe.local, "site", None))
+        site = getattr(frappe.local, "site", None)
+        # The original Finance runner is unchanged; the new review runner
+        # has a separate project-approved SHA, job and ephemeral site.
+        if is_reviewed_billing_controls_disposable_site(site):
+            assert_billing_controls_disposable_site(site)
+        else:
+            assert_finance_disposable_site(site)
         super().setUp()
         base_ledger.TestWithdrawalRealLedgerIntegration.setUp(self)
         frappe.set_user("Administrator")
