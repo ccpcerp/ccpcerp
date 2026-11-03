@@ -35,6 +35,26 @@ class TestFinanceCiConfigStatic(TestCase):
         self.assertIn("FRAPPE_SHA=988e54f3c4c291e2077a83809663f123731abe76", stage)
         self.assertIn("ERPNEXT_SHA=4048fb70e14d1843956fcdabb7c3cca75a1cbcdd", stage)
 
+    def test_finance_identity_preflight_failure_is_identifiable_without_secrets(self):
+        finance_job = text.split(
+            "  finance-lifecycle-isolated-integration:", 1
+        )[1].split("\nworkflows:", 1)[0]
+        identity = finance_job.split(
+            "name: Reject wrong Finance CI identity before any bench, DB or package operation", 1
+        )[1].split("name: Confirm disposable database and Redis sidecars", 1)[0]
+        self.assertIn("trap 'status=$?;", identity)
+        self.assertIn("Finance CI identity preflight failed at script line", identity)
+        self.assertLess(
+            identity.index("trap 'status=$?;"),
+            identity.index('test "${CIRCLECI:-}" = "true"'),
+        )
+        self.assertIn(
+            'test "${CIRCLE_SHA1}" = "${CCPC_FINANCE_APPROVED_SHA}"',
+            identity,
+        )
+        for forbidden in ("set -x", "printenv", "env |", "echo ${CCPC_FINANCE_APPROVED_SHA}"):
+            self.assertNotIn(forbidden, identity)
+
     def test_finance_job_does_not_run_existing_posting_suites(self):
         self.assertIn("--module ccpcerp.ccpc_erp.test_finance_lifecycle_disposable_integration", stage)
         finance = text.split("  finance-lifecycle-isolated-integration:", 1)[1]
