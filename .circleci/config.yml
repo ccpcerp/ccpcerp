@@ -194,6 +194,8 @@ jobs:
           name: Reject wrong Finance CI identity before any bench, DB or package operation
           command: |
             set -euo pipefail
+            # No values or secrets in logs; pinpoint the failed silent test line.
+            trap 'status=$?; printf "Finance CI identity preflight failed at script line %s (exit %s); no variable values disclosed.\\n" "$LINENO" "$status" >&2' ERR
             test "${CIRCLECI:-}" = "true"
             test "${CIRCLE_PROJECT_USERNAME:-}" = "CCPCerp_2026"
             test "${CIRCLE_PROJECT_REPONAME:-}" = "ccpcerp"
