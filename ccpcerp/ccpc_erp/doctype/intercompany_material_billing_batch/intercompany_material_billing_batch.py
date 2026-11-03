@@ -9,6 +9,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, get_first_day, get_last_day, getdate, now_datetime, today
 
+from ccpcerp.ccpc_erp.intercompany_billing_authority import (
+    PREPARER_ROLE, CHECKER_ROLE, require_billing_actor,
+    require_distinct_billing_review,
+)
+
 
 EPSILON = 0.000001
 ER_CHECKREAD = 1020
@@ -1063,10 +1068,16 @@ class IntercompanyMaterialBillingBatch(Document):
         self._set_totals()
         return len(source_rows)
 
+    def _require_billing_preparer(self):
+        self.check_permission("write")
+        return require_billing_actor(
+            PREPARER_ROLE, self.issuing_company, self.requesting_company
+        )
+
     @frappe.whitelist()
     def refresh_preview(self):
-        self.check_permission("write")
         self._lock_and_reload_for_mutation()
+        self._require_billing_preparer()
         self._require_draft_refresh()
         self._set_billing_period()
 
@@ -1086,8 +1097,8 @@ class IntercompanyMaterialBillingBatch(Document):
 
     @frappe.whitelist()
     def finalize_month(self):
-        self.check_permission("write")
         self._lock_and_reload_for_mutation()
+        self._require_billing_preparer()
         self._require_draft_refresh()
         self._set_billing_period()
 
@@ -1127,16 +1138,11 @@ class IntercompanyMaterialBillingBatch(Document):
 
     def _require_finance_approver(self):
         self.check_permission("write")
-
-        if frappe.session.user == "Administrator":
-            return
-
-        roles = set(frappe.get_roles(frappe.session.user))
-        if not roles.intersection({"Finance Controller", "System Manager"}):
-            frappe.throw(
-                _("Only Finance Controller or System Manager can approve intercompany material billing."),
-                exc=frappe.PermissionError,
-            )
+        actor = require_billing_actor(
+            CHECKER_ROLE, self.issuing_company, self.requesting_company
+        )
+        require_distinct_billing_review(self.finalized_by, actor)
+        return actor
 
     def _require_under_review_for_approval(self):
         if self.status != "Under Review":
@@ -1442,8 +1448,10 @@ class IntercompanyMaterialBillingBatch(Document):
 
     @frappe.whitelist()
     def approve_and_create_invoices(self):
-        self._require_finance_approver()
         self._lock_and_reload_for_mutation()
+        # Evaluate the persisted finalizer, not a potentially stale browser
+        # document. No Administrator/System Manager role-only bypass.
+        self._require_finance_approver()
         self._require_under_review_for_approval()
 
         self._set_billing_period()
