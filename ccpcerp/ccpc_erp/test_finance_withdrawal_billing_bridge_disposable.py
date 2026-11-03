@@ -48,6 +48,8 @@ QTY_RECEIVED = base_ledger.QTY_RECEIVED
 UNIT_RATE = base_ledger.UNIT_RATE
 MAKER = "ci-bridge-finance-maker@invalid.test"
 CHECKER = "ci-bridge-finance-checker@invalid.test"
+BILLING_PREPARER = "ci-bridge-billing-preparer@invalid.test"
+BILLING_APPROVER = "ci-bridge-billing-approver@invalid.test"
 BUYER = "_Test Company 5"
 
 
@@ -163,6 +165,20 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
                 "apply_to_all_doctypes": 1,
             }).insert(ignore_permissions=True)
 
+    def _billing_actor(self, email, role):
+        # Only synthetic named users, assigned both Company grants on the
+        # guard-enforced disposable site. Never mirrors DEV/PROD user records.
+        self._actor(email, role)
+        if not frappe.db.exists("User Permission", {
+            "user": email, "allow": "Company", "for_value": BUYER,
+            "apply_to_all_doctypes": 1,
+        }):
+            frappe.get_doc({
+                "doctype": "User Permission",
+                "user": email, "allow": "Company", "for_value": BUYER,
+                "apply_to_all_doctypes": 1,
+            }).insert(ignore_permissions=True)
+
     def _approve_signed(self, kind, source, value):
         frappe.set_user(MAKER)
         draft = propose_mapping(kind, COMPANY, source, value)
@@ -188,14 +204,16 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         return draft["name"]
 
     def _billing_candidate(self):
-        frappe.set_user("Administrator")
+        self._billing_actor(BILLING_PREPARER, "CCPC Billing Preparer")
+        self._billing_actor(BILLING_APPROVER, "Finance Controller")
+        frappe.set_user(BILLING_PREPARER)
         batch = frappe.get_doc({
             "doctype": "Intercompany Material Billing Batch",
             "issuing_company": COMPANY,
             "requesting_company": BUYER,
             "billing_month": nowdate(),
             "status": "Draft",
-        }).insert(ignore_permissions=True)
+        }).insert()
         return batch
 
     def test_a_signed_issue_reaches_real_ledger_and_billing_source(self):
@@ -549,6 +567,7 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         This simulates elapsed wall-clock month-end for the CI fixture only.
         """
         period_end = getdate(get_last_day(nowdate()))
+        frappe.set_user(BILLING_PREPARER)
         # First prove the real Controller rejects premature finalization.
         # If CI runs on a boundary day when the period already ended, this
         # same-day request still correctly fails (<= period_end).
@@ -576,18 +595,22 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertEqual(batch.status, "Under Review")
         self.assertEqual(getdate(batch.finalized_on), simulated_next_day)
         self.assertEqual(getdate(batch.period_end), period_end)
-        self.assertEqual(batch.finalized_by, "Administrator")
+        self.assertEqual(batch.finalized_by, BILLING_PREPARER)
         self.assertEqual(len(batch.items), 1)
         return module, after_month_end, simulated_next_day
 
     def _approve_real_pair_at_month_end(
         self, batch, module, after_month_end, simulated_next_day
     ):
-        with (
-            patch(module + ".today", return_value=str(simulated_next_day)),
-            patch(module + ".now_datetime", return_value=after_month_end),
-        ):
-            return batch.approve_and_create_invoices()
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            with (
+                patch(module + ".today", return_value=str(simulated_next_day)),
+                patch(module + ".now_datetime", return_value=after_month_end),
+            ):
+                return batch.approve_and_create_invoices()
+        finally:
+            frappe.set_user("Administrator")
 
     def _assert_drafts_are_real_and_unposted(self, result, stock, item, batch):
         sales = frappe.get_doc("Sales Invoice", result["sales_invoice"])
@@ -646,7 +669,7 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self._assert_drafts_are_real_and_unposted(
             approved, stock, detail, batch
         )
-        self.assertEqual(batch.approved_by, "Administrator")
+        self.assertEqual(batch.approved_by, BILLING_APPROVER)
         self.assertTrue(batch.approved_on)
         with self.assertRaises(Exception):
             self._approve_real_pair_at_month_end(
