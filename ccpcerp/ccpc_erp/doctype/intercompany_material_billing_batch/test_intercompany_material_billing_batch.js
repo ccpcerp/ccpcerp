@@ -169,22 +169,11 @@ async function run() {
         ["Request Correction Review"]);
 
     // Controlled correction buttons call the guarded backend methods.
-    const requestForm = form({
-        status: "Approved",
-        callResults: {
-            request_cancelled_invoice_correction: {
-                case: "ICCR-CI-1", status: "Requested",
-            },
-        },
-    });
-    approvedForPrep.buttons[0].action = () =>
-        require("./intercompany_material_billing_batch.js")
-            .request_cancelled_invoice_correction(requestForm);
     await approvedForPrep.buttons[0].action();
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(requestForm.calls,
+    assert.deepEqual(approvedForPrep.calls,
         ["request_cancelled_invoice_correction"]);
-    assert.equal(requestForm.reloaded, 1);
+    assert.equal(approvedForPrep.reloaded, 1);
 
     frappe.session.user = "finance@example.com";
     frappe.user_roles = ["Finance Controller"];
