@@ -119,7 +119,7 @@ async function review_cancelled_invoice_correction(frm) {
     frappe.prompt(
         [
             { fieldname: "action", label: __("Finance Decision"),
-                fieldtype: "Select", options: "Approve\\nDecline", reqd: 1 },
+                fieldtype: "Select", options: "Approve\nDecline", reqd: 1 },
             { fieldname: "note", label: __("Decision Note"),
                 fieldtype: "Small Text", reqd: 1 },
         ],
