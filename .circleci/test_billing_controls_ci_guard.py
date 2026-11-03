@@ -92,6 +92,21 @@ class TestBillingControlsCiGuard(TestCase):
         self.assertEqual(CONFIG.count("python - " + "\\" + "<<'PY'"), 2)
         self.assertFalse(re.search(r"(?<!\\)<<['\\\"]?PY", CONFIG))
 
+    def test_synthetic_checker_has_only_native_account_read_not_posting(self):
+        # Real Build #134 failed on native ERPNext account_perm_check.
+        # Only the disposable named checker may receive this additional
+        # test-only Role/DocPerm; never alter Finance Controller globally.
+        self.assertIn('read_role = "CCPC CI Account Read Only"', BRIDGE)
+        self.assertIn('add_permission("Account", read_role, 0)', BRIDGE)
+        self.assertIn('"parent": "Account", "role": read_role', BRIDGE)
+        self.assertIn('frappe.clear_cache(doctype="Account")', BRIDGE)
+        self.assertIn('frappe.has_permission(\n                "Account", ptype="read"', BRIDGE)
+        self.assertIn('"Sales Invoice", "Purchase Invoice"', BRIDGE)
+        self.assertIn('ptype="submit"', BRIDGE)
+        self.assertIn('if email == BILLING_APPROVER and role == "Finance Controller":', BRIDGE)
+        self.assertNotIn('frappe.db.commit()', BRIDGE)
+        self.assertNotIn('frappe.set_user("Administrator")\n            sales_invoice.insert', BRIDGE)
+
     def test_new_workflow_is_opt_in_manual_and_branch_filtered(self):
         self.assertIn("run_billing_controls:\\n    type: boolean\\n    default: false".replace("\\n", "\n"), CONFIG)
         section = CONFIG.split("  opt-in-billing-controls:", 1)[1].split(
