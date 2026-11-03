@@ -1,0 +1,18 @@
+{
+  "content": null,
+  "doctype": "Page",
+  "icon": "fa fa-table",
+  "module": "CCPC ERP",
+  "name": "ccpc-group-executive-reporting",
+  "page_name": "ccpc-group-executive-reporting",
+  "roles": [
+    {
+      "role": "CCPC Group Executive Reporting"
+    }
+  ],
+  "standard": "Yes",
+  "system_page": 0,
+  "title": "CCPC Group Executive Reporting",
+  "owner": "Administrator",
+  "modified_by": "Administrator"
+}

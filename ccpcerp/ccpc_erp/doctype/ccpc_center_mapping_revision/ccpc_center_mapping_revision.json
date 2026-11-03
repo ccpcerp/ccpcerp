@@ -15,7 +15,11 @@
     "approved_at",
     "supersedes",
     "revocation_reason",
-    "revision_key"
+    "revision_key",
+    "rejected_by",
+    "rejected_at",
+    "rejection_reason",
+    "rejection_event"
   ],
   "fields": [
     {
@@ -44,7 +48,7 @@
       "fieldname": "approval_state",
       "fieldtype": "Select",
       "label": "Approval State — Inert Review",
-      "options": "Draft\nApproved\nSuperseded\nRevoked",
+      "options": "Draft\nApproved\nSuperseded\nRevoked\nRejected",
       "default": "Draft",
       "read_only": 1,
       "in_list_view": 1
@@ -104,6 +108,36 @@
       "hidden": 1,
       "no_copy": 1,
       "length": 64
+    },
+    {
+      "fieldname": "rejected_by",
+      "fieldtype": "Link",
+      "label": "Rejected By",
+      "options": "User",
+      "read_only": 1,
+      "no_copy": 1
+    },
+    {
+      "fieldname": "rejected_at",
+      "fieldtype": "Datetime",
+      "label": "Rejected At",
+      "read_only": 1,
+      "no_copy": 1
+    },
+    {
+      "fieldname": "rejection_reason",
+      "fieldtype": "Small Text",
+      "label": "Rejection Reason",
+      "read_only": 1,
+      "no_copy": 1
+    },
+    {
+      "fieldname": "rejection_event",
+      "fieldtype": "Link",
+      "label": "Rejection Event",
+      "options": "CCPC Mapping Rejection Event",
+      "read_only": 1,
+      "no_copy": 1
     }
   ],
   "istable": 0,

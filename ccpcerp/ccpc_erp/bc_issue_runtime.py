@@ -101,16 +101,40 @@ def _real_authority(user, role, company):
 
 
 def _assert_approval_provenance(revision, company):
-    """Defense-in-depth only; the approved-revision writer is not yet enabled."""
+    """Require event-time signed evidence; do not recheck former users' current roles."""
     maker = _canonical(revision.get("owner"), "Mapping preparer")
     checker = _canonical(revision.get("approved_by"), "Mapping approver")
-    _require(maker.casefold() != checker.casefold(), "A mapping approver cannot approve their own draft.")
-    _canonical(revision.get("approval_reference"), "Accounting approval reference")
-    _require(revision.get("approval_state") == "Approved",
-             "B/C revision is not approved.")
-    _require(bool(revision.get("approved_at")), "Missing server-owned approval timestamp.")
-    _real_authority(maker, "CCPC Mapping Preparer", company)
-    _real_authority(checker, "CCPC Accounting Mapping Approver", company)
+    _require(maker.casefold() != checker.casefold(), "Maker and Checker must differ.")
+    reference = _canonical(revision.get("approval_reference"), "Accounting decision")
+    _require(revision.get("approval_state") == "Approved" and revision.get("approved_at"),
+             "Mapping does not have a valid historical approval.")
+    kind = "Expense" if "expense_account" in revision else "Center"
+    # Explicitly scoped disposable CI fixture only; NEVER a real Finance signoff.
+    if reference == "CIRCLECI-SYNTHETIC-APPROVAL-NOT-FINANCE-AUTHORIZATION":
+        from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_circleci_disposable_site
+        _require(is_reviewed_circleci_disposable_site(getattr(frappe.local, "site", None)),
+                 "Synthetic test approvals are forbidden outside the disposable CI site.")
+        return
+    rows = frappe.db.sql(
+        "SELECT d.name, d.kind, d.action, d.revision, d.company, d.mapping_scope, "
+        "d.financial_value, d.maker, d.signed_by, d.signed_at, d.status, "
+        "u.revision AS used_revision, u.action AS used_action "
+        "FROM " + chr(96) + "tabCCPC Accounting Mapping Decision" + chr(96) + " d "
+        "INNER JOIN " + chr(96) + "tabCCPC Mapping Decision Use" + chr(96) + " u "
+        "ON d.name=u.decision WHERE d.name=%s FOR UPDATE",
+        (reference,), as_dict=True,
+    )
+    _require(len(rows) == 1, "Missing or duplicate signed Accounting decision evidence.")
+    d = rows[0]
+    value_field = "expense_account" if kind == "Expense" else "cost_center"
+    _require(d.status == "Signed" and d.kind == kind and d.action == "Approve"
+             and d.revision == revision.name and d.used_revision == revision.name
+             and d.used_action == "Approve"
+             and d.company == company and d.mapping_scope == revision.mapping_scope
+             and d.financial_value == revision[value_field]
+             and d.maker == maker and d.signed_by == checker
+             and d.signed_at and _utc(d.signed_at) <= _utc(revision.approved_at),
+             "Approved mapping provenance does not match its signed decision.")
 
 
 def _lock_scope(doctype, company, scope_field, scope_value, *, department_only=False):
@@ -144,6 +168,36 @@ def _lock_revisions(doctype, scope):
         "WHERE mapping_scope=%s ORDER BY name FOR UPDATE",
         (scope,), as_dict=True,
     )
+
+def _effective_mapping_end(kind, company, scope_id, row):
+    """Lock and apply append-only retirement cutoff without changing Approved history."""
+    rows = frappe.db.sql(
+        "SELECT name,mapping_scope,company,approved_at,cutoff_at,decision,"
+        "retirement_request FROM " +
+        chr(96) + "tabCCPC Mapping Retirement Event" + chr(96) +
+        " WHERE kind=%s AND revision=%s ORDER BY name FOR UPDATE",
+        (kind, row.name), as_dict=True,
+    )
+    _require(len(rows) <= 1, "Duplicate accepted mapping retirements.")
+    original = _utc(row.effective_until)
+    if not rows:
+        return original
+    e = rows[0]
+    _require(e.company == company and e.mapping_scope == scope_id and
+             e.approved_at and e.cutoff_at and e.decision and e.retirement_request,
+             "Retirement event does not match its Company and Scope.")
+    refs = frappe.db.sql(
+        "SELECT name FROM " + chr(96) + "tabCCPC Mapping Decision Use" + chr(96) +
+        " WHERE decision=%s AND revision=%s AND action='Retire' "
+        "AND event_ref=%s FOR UPDATE",
+        (e.decision, row.name, e.name), as_dict=True,
+    )
+    _require(len(refs) == 1, "Retirement event lacks signed one-use evidence.")
+    cutoff = _utc(e.cutoff_at)
+    _require(cutoff >= _utc(e.approved_at) and cutoff > _utc(row.effective_from),
+             "Invalid retrospective retirement cutoff.")
+    return min(original, cutoff) if original else cutoff
+
 
 def _master(doctype, record):
     _canonical(record, doctype)
@@ -235,8 +289,9 @@ def resolve_locked_original_issue(slip, entry):
                 continue
             # Historical Approved rows remain signed for audit, but must not
             # require still-active roles or enabled masters after their cutoff.
+            computed_end = _effective_mapping_end("Expense", slip.company, scope, row)
             if not is_effective_after_approval(
-                _utc(row.effective_from), _utc(row.effective_until),
+                _utc(row.effective_from), computed_end,
                 _utc(row.approved_at), posting,
             ):
                 continue
@@ -249,7 +304,7 @@ def resolve_locked_original_issue(slip, entry):
                 account_disabled=bool(account.disabled), item_group_is_group=False,
                 approval_state=row.approval_state, prepared_by=row.owner, approved_by=row.approved_by,
                 approved_at=_utc(row.approved_at), effective_from=_utc(row.effective_from),
-                effective_until=_utc(row.effective_until),
+                effective_until=computed_end,
             ))
     # Reject unsupported multi-center scope candidates rather than an arbitrary first match.
     all_center_scopes = frappe.db.sql(
@@ -267,8 +322,9 @@ def resolve_locked_original_issue(slip, entry):
         _require(row.mapping_scope == scope_row.name, "Center revision scope mismatch.")
         if row.approval_state != "Approved":
             continue
+        computed_end = _effective_mapping_end("Center", slip.company, scope_row.name, row)
         if not is_effective_after_approval(
-            _utc(row.effective_from), _utc(row.effective_until),
+            _utc(row.effective_from), computed_end,
             _utc(row.approved_at), posting,
         ):
             continue
@@ -280,7 +336,7 @@ def resolve_locked_original_issue(slip, entry):
             center_is_group=bool(center.is_group), center_disabled=bool(center.disabled),
             selector_mode="Department Only", approval_state=row.approval_state,
             prepared_by=row.owner, approved_by=row.approved_by, approved_at=_utc(row.approved_at),
-            effective_from=_utc(row.effective_from), effective_until=_utc(row.effective_until),
+            effective_from=_utc(row.effective_from), effective_until=computed_end,
         ))
     allocations = resolve_original_issue_allocation(
         company=slip.company, beneficiary_department=beneficiary, posting_at=posting,

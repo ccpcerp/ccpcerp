@@ -29,6 +29,10 @@ class CCPCExpenseMappingRevision(Document):
             frappe.throw(_("B mapping approval is not enabled; Finance controls remain pending."))
         if self.approved_by or self.approved_at or self.supersedes or self.revocation_reason:
             frappe.throw(_("Approval/revocation provenance cannot be supplied by draft users."))
+        if any(self.get(key) for key in (
+            "rejected_by", "rejected_at", "rejection_reason", "rejection_event"
+        )):
+            frappe.throw(_("Draft users may not supply rejection history."))
         scope = frappe.db.get_value(
             "CCPC Expense Mapping Scope", self.mapping_scope, "company"
         )

@@ -1,0 +1,93 @@
+{
+  "actions": [],
+  "autoname": "hash",
+  "doctype": "DocType",
+  "engine": "InnoDB",
+  "field_order": [
+    "kind",
+    "revision",
+    "mapping_scope",
+    "company",
+    "maker",
+    "checker",
+    "reason",
+    "rejected_at",
+    "target_key",
+    "event_hash"
+  ],
+  "fields": [
+    {
+      "fieldname": "kind",
+      "fieldtype": "Select",
+      "label": "Kind",
+      "options": "Expense\nCenter",
+      "reqd": 1
+    },
+    {
+      "fieldname": "revision",
+      "fieldtype": "Data",
+      "label": "Revision",
+      "reqd": 1
+    },
+    {
+      "fieldname": "mapping_scope",
+      "fieldtype": "Data",
+      "label": "Mapping Scope",
+      "reqd": 1
+    },
+    {
+      "fieldname": "company",
+      "fieldtype": "Link",
+      "label": "Company",
+      "options": "Company",
+      "reqd": 1
+    },
+    {
+      "fieldname": "maker",
+      "fieldtype": "Link",
+      "label": "Maker",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "checker",
+      "fieldtype": "Link",
+      "label": "Checker",
+      "options": "User",
+      "reqd": 1
+    },
+    {
+      "fieldname": "reason",
+      "fieldtype": "Small Text",
+      "label": "Reason",
+      "reqd": 1
+    },
+    {
+      "fieldname": "rejected_at",
+      "fieldtype": "Datetime",
+      "label": "Rejected At",
+      "reqd": 1
+    },
+    {
+      "fieldname": "target_key",
+      "fieldtype": "Data",
+      "label": "Target Key",
+      "reqd": 1,
+      "unique": 1,
+      "read_only": 1
+    },
+    {
+      "fieldname": "event_hash",
+      "fieldtype": "Data",
+      "label": "Event Hash",
+      "reqd": 1
+    }
+  ],
+  "istable": 0,
+  "module": "CCPC ERP",
+  "name": "CCPC Mapping Rejection Event",
+  "permissions": [],
+  "sort_field": "creation",
+  "sort_order": "DESC",
+  "track_changes": 1
+}

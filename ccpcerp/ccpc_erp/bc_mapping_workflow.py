@@ -115,8 +115,8 @@ def propose_mapping(kind, company, source, value, effective_from=None, effective
     source = _canonical(source, "Mapping source")
     value = _canonical(value, "Proposed finance account or center")
     preparer = _canonical(frappe.session.user, "Preparer")
-    _real_authority(preparer, "CCPC Mapping Preparer", company)
     _company_lock(company)
+    _real_authority(preparer, "CCPC Mapping Preparer", company)
     _scope_values(kind, company, source)
     _master_validated(master_dt, value, company)
     start = _utc(effective_from)
@@ -130,6 +130,8 @@ def propose_mapping(kind, company, source, value, effective_from=None, effective
         "WHERE mapping_scope=%s ORDER BY revision_no FOR UPDATE",
         (scope,), as_dict=True,
     )
+    drafts = frappe.db.sql("SELECT name FROM `tab" + rev_dt + "` WHERE mapping_scope=%s AND approval_state='Draft' ORDER BY name FOR UPDATE", (scope,), as_dict=True)
+    _require(not drafts, "One unresolved Draft per financial scope is permitted.")
     number = max([int(row.revision_no) for row in existing], default=0) + 1
     proposed = frappe.get_doc({
         "doctype": rev_dt, "mapping_scope": scope, "revision_no": number,
@@ -190,8 +192,8 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
     company = frappe.db.get_value(scope_dt, scope_id, "company")
     _require(bool(company), "Missing mapping Company.")
     checker = _canonical(frappe.session.user, "Mapping approver")
-    _real_authority(checker, "CCPC Accounting Mapping Approver", company)
     _company_lock(company)
+    _real_authority(checker, "CCPC Accounting Mapping Approver", company)
     scopes = frappe.db.sql(
         "SELECT name, company, " + source_field +
         " FROM `tab" + scope_dt + "` WHERE name=%s FOR UPDATE",
@@ -212,6 +214,9 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
     maker, checker = assert_independent_review(doc.owner, checker)
     _real_authority(maker, "CCPC Mapping Preparer", company)
     _master_validated(master_dt, doc[value_field], company)
+    from ccpcerp.ccpc_erp.bc_finance_evidence import verify_decision, consume_decision
+    signed = verify_decision(approval_reference, kind, "Approve", company, scope, doc, checker, value_field)
+    approval_reference = signed.name
     approved_at = now_datetime()
     # Store ERPNext site-local naive Datetime for Frappe. Comparison is UTC.
     proposed_from = _utc(doc.effective_from)
@@ -274,10 +279,11 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
         }),
     })
     audit.insert(ignore_permissions=True)
+    consumed = consume_decision(signed, kind, "Approve", revision, revision, checker)
     confirmed = _lock_revision(rev_dt, revision)
     _require(confirmed.approval_state == "Approved" and confirmed.approved_by == checker
              and confirmed.approval_reference == approval_reference,
              "Finance approval write was not persisted correctly.")
     return {"name": revision, "state": "Approved", "approved_by": checker,
             "approved_at": str(approved_at), "effective_from": str(effective_from),
-            "version": audit.name}
+            "version": audit.name, "decision_use": consumed}

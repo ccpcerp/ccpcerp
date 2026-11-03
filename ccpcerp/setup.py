@@ -545,6 +545,7 @@ def after_migrate():
 	ensure_purchase_order_approval_workflow()
 	ensure_withdrawal_slip_requestor_permissions()
 	ensure_bc_finance_mapping_roles()
+	ensure_ccpc_group_executive_reporting_role()
 	ensure_withdrawal_slip_stock_entry_fields()
 	ensure_withdrawal_slip_workflow()
 	backfill_withdrawal_slip_issue_qty()
@@ -1265,6 +1266,15 @@ def ensure_withdrawal_slip_requestor_permissions():
 	_ensure_role(WITHDRAWAL_SLIP_REQUESTOR_ROLE)
 	for doctype in WITHDRAWAL_SLIP_REQUESTOR_REFERENCE_DOCTYPES:
 		_ensure_custom_permission(doctype, WITHDRAWAL_SLIP_REQUESTOR_ROLE, {"read"})
+
+
+def ensure_ccpc_group_executive_reporting_role():
+	"""Define the report viewer Role without assigning it or source DocType rights.
+
+	Called during separately approved site migration only. User assignment,
+	Company-grant changes and PRODUCTION deployment remain separate decisions.
+	"""
+	_ensure_role("CCPC Group Executive Reporting")
 
 
 def ensure_bc_finance_mapping_roles():
