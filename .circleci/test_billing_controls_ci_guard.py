@@ -85,6 +85,13 @@ class TestBillingControlsCiGuard(TestCase):
             with self.assertRaises(RuntimeError):
                 guard.assert_billing_controls_disposable_site("ccpcerp.local")
 
+    def test_circleci_heredocs_are_escaped_for_config_v21(self):
+        # CircleCI interprets unescaped << as a template opening tag.
+        # Shell heredocs in config.yml must use backslash-escaped delimiters.
+        import re
+        self.assertEqual(CONFIG.count("python - " + "\\" + "<<'PY'"), 2)
+        self.assertFalse(re.search(r"(?<!\\)<<['\\\"]?PY", CONFIG))
+
     def test_new_workflow_is_opt_in_manual_and_branch_filtered(self):
         self.assertIn("run_billing_controls:\\n    type: boolean\\n    default: false".replace("\\n", "\n"), CONFIG)
         section = CONFIG.split("  opt-in-billing-controls:", 1)[1].split(
