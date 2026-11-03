@@ -325,7 +325,7 @@ jobs:
           name: Reject unapproved review branch, commit, runner and site before installing anything
           command: |
             set -euo pipefail
-            python - <<'PY'
+            python - \<<'PY'
             import os
             import subprocess
             from ccpcerp.ccpc_erp.ci_billing_controls_site_guard import assert_billing_controls_disposable_site
