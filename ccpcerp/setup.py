@@ -1289,6 +1289,15 @@ def ensure_bc_finance_mapping_roles():
 	_ensure_role("CCPC Accounting Mapping Approver")
 
 
+def ensure_ccpc_bootstrap_roles():
+	"""Ensure required role definitions before DocType permissions are synced.
+
+	Creates no User assignments, Company grants or posting rights.
+	"""
+	ensure_ccpc_group_executive_reporting_role()
+	ensure_intercompany_billing_preparer_role()
+
+
 def ensure_intercompany_billing_preparer_role():
 	"""Define a Billing Preparer role, but do not grant roles or Company rights to users.
 
