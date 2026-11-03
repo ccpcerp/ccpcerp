@@ -129,6 +129,8 @@ class TestBridgeCiStatic(TestCase):
         self.assertIn("purchase.cancel()", BRIDGE)
         self.assertIn("sales.cancel()", BRIDGE)
         self.assertIn("frappe.has_permission(doctype, ptype=\"submit\"", BRIDGE)
+        self.assertIn('ptype="cancel", doc=doc', BRIDGE)
+        self.assertNotIn("frappe.db.commit()", BRIDGE)
         self.assertIn('patch.object(Billing, "_build_purchase_invoice"', BRIDGE)
         self.assertIn("Failed purchase must not leave an orphan real Sales Invoice", BRIDGE)
         self.assertIn("preview = batch.refresh_preview()", BRIDGE)
