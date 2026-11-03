@@ -107,7 +107,7 @@ class TestBridgeCiStatic(TestCase):
         self.assertIn("assert_finance_disposable_site(", BRIDGE)
         self.assertIn("sign_mapping_decision(", BRIDGE)
 
-    def test_exact_four_disposable_source_and_invoice_methods(self):
+    def test_exact_seven_disposable_source_and_invoice_methods(self):
         module = ast.parse(BRIDGE)
         methods = {
             node.name for cls in module.body if isinstance(cls, ast.ClassDef)
@@ -119,8 +119,16 @@ class TestBridgeCiStatic(TestCase):
             "test_b_unsigned_issue_cannot_enter_billing_preview",
             "test_c_real_source_finalizes_to_actual_paired_invoice_drafts",
             "test_d_second_draft_insert_failure_rolls_back_real_first_invoice",
+            "test_e_real_submitted_pair_posts_company_gl",
+            "test_f_real_invoice_cancellation_reverses_gl_not_source",
+            "test_g_unprivileged_actor_cannot_submit_invoice",
         })
         self.assertIn("batch.finalize_month()", BRIDGE)
+        self.assertIn("sales.submit()", BRIDGE)
+        self.assertIn("purchase.submit()", BRIDGE)
+        self.assertIn("purchase.cancel()", BRIDGE)
+        self.assertIn("sales.cancel()", BRIDGE)
+        self.assertIn("frappe.has_permission(doctype, ptype=\"submit\"", BRIDGE)
         self.assertIn('patch.object(Billing, "_build_purchase_invoice"', BRIDGE)
         self.assertIn("Failed purchase must not leave an orphan real Sales Invoice", BRIDGE)
         self.assertIn("preview = batch.refresh_preview()", BRIDGE)
