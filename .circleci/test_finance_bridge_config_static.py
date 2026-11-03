@@ -112,7 +112,7 @@ class TestBridgeCiStatic(TestCase):
         self.assertIn("assert_finance_disposable_site(", BRIDGE)
         self.assertIn("sign_mapping_decision(", BRIDGE)
 
-    def test_exact_seven_disposable_source_and_invoice_methods(self):
+    def test_exact_ten_disposable_source_and_invoice_methods(self):
         module = ast.parse(BRIDGE)
         methods = {
             node.name for cls in module.body if isinstance(cls, ast.ClassDef)
@@ -127,12 +127,19 @@ class TestBridgeCiStatic(TestCase):
             "test_e_real_submitted_pair_posts_company_gl",
             "test_f_real_invoice_cancellation_reverses_gl_not_source",
             "test_g_unprivileged_actor_cannot_submit_invoice",
+            "test_h_billing_preparer_self_approval_and_wrong_company_denied",
+            "test_i_cancelled_pair_requires_independent_audited_manual_review",
+            "test_j_partially_cancelled_pair_cannot_enter_correction_review",
         })
         self.assertIn("batch.finalize_month()", BRIDGE)
         self.assertIn("sales.submit()", BRIDGE)
         self.assertIn("purchase.submit()", BRIDGE)
         self.assertIn("purchase.cancel()", BRIDGE)
         self.assertIn("sales.cancel()", BRIDGE)
+        self.assertIn("batch.request_cancelled_invoice_correction(", BRIDGE)
+        self.assertIn("batch.review_cancelled_invoice_correction(", BRIDGE)
+        self.assertIn("BILLING_PREPARER", BRIDGE)
+        self.assertIn("BILLING_APPROVER", BRIDGE)
         self.assertIn("frappe.has_permission(doctype, ptype=\"submit\"", BRIDGE)
         self.assertIn('ptype="cancel", doc=doc', BRIDGE)
         self.assertNotIn("frappe.db.commit()", BRIDGE)
