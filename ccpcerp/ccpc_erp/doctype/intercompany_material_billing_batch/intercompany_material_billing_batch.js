@@ -1,9 +1,16 @@
+function can_prepare_intercompany_billing() {
+    return frappe.session.user !== "Administrator" &&
+        frappe.user_roles.includes("CCPC Billing Preparer");
+}
+
+function can_approve_intercompany_billing() {
+    return frappe.session.user !== "Administrator" &&
+        frappe.user_roles.includes("Finance Controller");
+}
+
 function can_manage_intercompany_billing() {
-    return (
-        frappe.session.user === "Administrator" ||
-        frappe.user_roles.includes("System Manager") ||
-        frappe.user_roles.includes("Finance Controller")
-    );
+    return can_prepare_intercompany_billing() ||
+        can_approve_intercompany_billing();
 }
 
 async function refresh_preview(frm) {
@@ -86,38 +93,81 @@ async function approve_and_create_invoices(frm) {
     );
 }
 
+async function request_cancelled_invoice_correction(frm) {
+    frappe.prompt(
+        [{
+            fieldname: "reason", label: __("Reason for Manual Correction"),
+            fieldtype: "Small Text", reqd: 1,
+        }],
+        async ({ reason }) => {
+            const response = await frm.call(
+                "request_cancelled_invoice_correction", { reason }
+            );
+            frappe.show_alert({
+                message: __("Correction review requested: {0}. Original invoices remain linked.",
+                    [(response.message || {}).case || ""]),
+                indicator: "orange",
+            });
+            await frm.reload_doc();
+        },
+        __("Request Cancelled Invoice Correction"),
+        __("Request Review")
+    );
+}
+
+async function review_cancelled_invoice_correction(frm) {
+    frappe.prompt(
+        [
+            { fieldname: "action", label: __("Finance Decision"),
+                fieldtype: "Select", options: "Approve\\nDecline", reqd: 1 },
+            { fieldname: "note", label: __("Decision Note"),
+                fieldtype: "Small Text", reqd: 1 },
+        ],
+        async ({ action, note }) => {
+            const response = await frm.call(
+                "review_cancelled_invoice_correction", { action, note }
+            );
+            frappe.show_alert({
+                message: __("Correction review {0}. No replacement invoice was created.",
+                    [(response.message || {}).status || ""]),
+                indicator: "blue",
+            });
+            await frm.reload_doc();
+        },
+        __("Review Cancelled Invoice Correction"),
+        __("Record Decision")
+    );
+}
+
 frappe.ui.form.on("Intercompany Material Billing Batch", {
     refresh(frm) {
-        if (!can_manage_intercompany_billing()) {
-            return;
-        }
-
         if (frm.is_new()) {
             return;
         }
-
-        if (frm.doc.status === "Draft") {
-            frm.add_custom_button(
-                __("Refresh Preview"),
-                () => refresh_preview(frm),
-                __("Actions")
-            );
-
-            frm.add_custom_button(
-                __("Finalize Month"),
-                () => finalize_month(frm),
-                __("Actions")
-            );
-
-            return;
+        if (frm.doc.status === "Draft" && can_prepare_intercompany_billing()) {
+            frm.add_custom_button(__("Refresh Preview"),
+                () => refresh_preview(frm), __("Actions"));
+            frm.add_custom_button(__("Finalize Month"),
+                () => finalize_month(frm), __("Actions"));
         }
-
-        if (frm.doc.status === "Under Review") {
-            frm.add_custom_button(
-                __("Approve & Create Invoices"),
-                () => approve_and_create_invoices(frm),
-                __("Actions")
-            );
+        if (frm.doc.status === "Under Review" &&
+            can_approve_intercompany_billing() &&
+            frm.doc.finalized_by &&
+            frm.doc.finalized_by.toLowerCase() !== frappe.session.user.toLowerCase()) {
+            frm.add_custom_button(__("Approve & Create Invoices"),
+                () => approve_and_create_invoices(frm), __("Actions"));
+        }
+        if (frm.doc.status === "Approved" && frm.doc.sales_invoice &&
+            frm.doc.purchase_invoice) {
+            if (can_prepare_intercompany_billing()) {
+                frm.add_custom_button(__("Request Correction Review"),
+                    () => request_cancelled_invoice_correction(frm), __("Actions"));
+            }
+            if (can_approve_intercompany_billing() &&
+                frm.doc.finalized_by !== frappe.session.user) {
+                frm.add_custom_button(__("Record Correction Decision"),
+                    () => review_cancelled_invoice_correction(frm), __("Actions"));
+            }
         }
     },
 });
@@ -125,8 +175,12 @@ frappe.ui.form.on("Intercompany Material Billing Batch", {
 if (typeof module !== "undefined") {
     module.exports = {
         can_manage_intercompany_billing,
+        can_prepare_intercompany_billing,
+        can_approve_intercompany_billing,
         refresh_preview,
         finalize_month,
         approve_and_create_invoices,
+        request_cancelled_invoice_correction,
+        review_cancelled_invoice_correction,
     };
 }
