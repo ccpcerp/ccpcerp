@@ -140,6 +140,26 @@ class TestBridgeCiStatic(TestCase):
         self.assertIn("Failed purchase must not leave an orphan real Sales Invoice", BRIDGE)
         self.assertIn("preview = batch.refresh_preview()", BRIDGE)
 
+    def test_cancel_reloads_linked_sales_doc_after_buyer_cancel(self):
+        # Build #125 proved ERPNext can update the linked seller invoice's
+        # modified timestamp while cancelling the buyer invoice. Re-fetch
+        # before native cancellation instead of disabling Frappe's lock guard.
+        cancellation = BRIDGE.split(
+            "    def test_f_real_invoice_cancellation_reverses_gl_not_source",
+            1,
+        )[1].split("    def test_g_unprivileged_actor", 1)[0]
+        buyer_cancel = cancellation.index("purchase.cancel()")
+        fresh_seller = cancellation.index(
+            'sales = frappe.get_doc("Sales Invoice", sales.name)'
+        )
+        seller_cancel = cancellation.index("sales.cancel()")
+        self.assertLess(buyer_cancel, fresh_seller)
+        self.assertLess(fresh_seller, seller_cancel)
+        self.assertIn('self.assertEqual(purchase.docstatus, 2)', cancellation)
+        self.assertIn('sales.docstatus, 1', cancellation)
+        self.assertNotIn("ignore_version", cancellation)
+        self.assertNotIn("ignore_permissions=True", cancellation)
+
     def test_invoice_fixture_respects_native_root_company_account_hierarchy(self):
         # ERPNext v16 rejects child-Company Account creation before the same
         # account_name exists on the root Company. The CI fixture must create
