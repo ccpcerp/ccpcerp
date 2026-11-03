@@ -92,15 +92,23 @@ class TestBillingControlsCiGuard(TestCase):
         self.assertEqual(CONFIG.count("python - " + "\\" + "<<'PY'"), 2)
         self.assertFalse(re.search(r"(?<!\\)<<['\\\"]?PY", CONFIG))
 
-    def test_synthetic_checker_has_only_native_account_read_not_posting(self):
-        # Real Build #134 failed on native ERPNext account_perm_check.
-        # Only the disposable named checker may receive this additional
-        # test-only Role/DocPerm; never alter Finance Controller globally.
-        self.assertIn('read_role = "CCPC CI Account Read Only"', BRIDGE)
-        self.assertIn('add_permission("Account", read_role, 0)', BRIDGE)
-        self.assertIn('"parent": "Account", "role": read_role', BRIDGE)
-        self.assertIn('frappe.clear_cache(doctype="Account")', BRIDGE)
+    def test_disposable_checker_has_only_invoice_master_reads_not_posting(self):
+        # Build #134: Account read denied. Build #137: Item read denied.
+        # Only the synthetic checker on the exact CI site may get a
+        # read-only role; never widen real Finance Controller permissions.
+        self.assertIn('read_role = "CCPC CI Billing Master Read Only"', BRIDGE)
+        self.assertIn(
+            'readable_masters = ("Account", "Item", "Customer", "Supplier")',
+            BRIDGE,
+        )
+        self.assertIn('add_permission(master, read_role, 0)', BRIDGE)
+        self.assertIn('"parent": master, "role": read_role', BRIDGE)
+        self.assertIn('frappe.clear_cache(doctype=master)', BRIDGE)
         self.assertIn('frappe.has_permission(\n                "Account", ptype="read"', BRIDGE)
+        self.assertIn('frappe.has_permission(\n                "Item", ptype="read"', BRIDGE)
+        self.assertIn('frappe.get_doc("Item", self.item.name).check_permission("read")', BRIDGE)
+        self.assertIn('frappe.get_doc(party_type, party_name).check_permission("read")', BRIDGE)
+        self.assertIn('"write", "create", "delete", "submit", "cancel"', BRIDGE)
         self.assertIn('"Sales Invoice", "Purchase Invoice"', BRIDGE)
         self.assertIn('ptype="submit"', BRIDGE)
         self.assertIn('if email == BILLING_APPROVER and role == "Finance Controller":', BRIDGE)
