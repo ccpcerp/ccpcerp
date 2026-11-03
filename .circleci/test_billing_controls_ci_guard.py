@@ -17,6 +17,16 @@ BRIDGE = (
     ROOT / "ccpcerp" / "ccpc_erp" /
     "test_finance_withdrawal_billing_bridge_disposable.py"
 ).read_text(encoding="utf-8")
+CORRECTION = (
+    ROOT / "ccpcerp" / "ccpc_erp" / "doctype" /
+    "ccpc_intercompany_billing_correction" /
+    "ccpc_intercompany_billing_correction.py"
+).read_text(encoding="utf-8")
+CORRECTION_SCHEMA = (
+    ROOT / "ccpcerp" / "ccpc_erp" / "doctype" /
+    "ccpc_intercompany_billing_correction" /
+    "ccpc_intercompany_billing_correction.json"
+).read_text(encoding="utf-8")
 
 
 class TestBillingControlsCiGuard(TestCase):
@@ -114,6 +124,21 @@ class TestBillingControlsCiGuard(TestCase):
         self.assertIn('if email == BILLING_APPROVER and role == "Finance Controller":', BRIDGE)
         self.assertNotIn('frappe.db.commit()', BRIDGE)
         self.assertNotIn('frappe.set_user("Administrator")\n            sales_invoice.insert', BRIDGE)
+
+    def test_correction_decision_writes_native_version_in_disposable_ci(self):
+        # Pinned Frappe 16 Document._save suppresses Version by default when
+        # frappe.in_test. Build #140 reached a successful final decision but
+        # failed the native Version evidence assertion. Preserve that audit
+        # contract without changing the maker/checker gate or test setting.
+        self.assertIn(
+            "doc.save(ignore_permissions=True, ignore_version=False)",
+            CORRECTION,
+        )
+        self.assertIn('"track_changes": 1', CORRECTION_SCHEMA)
+        self.assertIn('frappe.db.exists("Version", {', BRIDGE)
+        self.assertIn('"docname": case.name', BRIDGE)
+        self.assertNotIn("frappe.db.commit()", CORRECTION)
+        self.assertNotIn("frappe.in_test = False", CORRECTION)
 
     def test_new_workflow_is_opt_in_manual_and_branch_filtered(self):
         self.assertIn("run_billing_controls:\\n    type: boolean\\n    default: false".replace("\\n", "\n"), CONFIG)
