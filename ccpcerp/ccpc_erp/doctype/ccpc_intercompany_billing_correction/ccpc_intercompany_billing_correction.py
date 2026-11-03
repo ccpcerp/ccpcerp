@@ -90,7 +90,11 @@ def decide_correction_case(doc, action, note, actor):
     doc.reviewed_on = now_datetime()
     doc.flags._ccpc_correction_action = _AUTHORIZED_EDIT
     try:
-        doc.save(ignore_permissions=True)
+        # Frappe defaults to ignore_version=True in automated tests.
+        # This decision is required to leave a native Version audit entry
+        # even in disposable CI; in real sites it enforces the same audit.
+        # It does not bypass private action validation or authorizations.
+        doc.save(ignore_permissions=True, ignore_version=False)
     finally:
         doc.flags.pop("_ccpc_correction_action", None)
     return doc
