@@ -92,8 +92,9 @@ class TestBridgeCiStatic(TestCase):
         self.assertNotIn("context:", bridge_workflow)
         self.assertNotIn("ssh-add", bridge_workflow)
         self.assertNotIn("docker.sock", bridge_workflow)
-        # The new real invoice-pair probe must use the production Approval
-        # service, but never submit the resulting draft invoices.
+        # Billing approval must create genuine Draft invoices. The
+        # separate, isolated posted-ledger tests invoke native ERPNext
+        # submit/cancel afterward, never auto-submit from Billing approval.
         self.assertIn("batch.approve_and_create_invoices()", BRIDGE)
         # Draft-pair creation itself must remain non-posting, even though
         # subsequent isolated acceptance tests explicitly exercise ERPNext's
