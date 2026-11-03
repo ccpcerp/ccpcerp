@@ -941,3 +941,140 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
         batch.reload()
         self.assertEqual(batch.status, "Approved")
+
+    def test_h_billing_preparer_self_approval_and_wrong_company_denied(self):
+        """Live SQL/roles: even dual-role preparer cannot approve own month."""
+        batch, stock, detail = self._issue_signed_source_for_real_pair()
+        self._prepare_disposable_invoice_masters()
+        module, clock, next_day = self._finalize_real_month_end(batch)
+        # This synthetic actor now holds both roles but is STILL the finalizer.
+        self._actor(BILLING_PREPARER, "Finance Controller")
+        frappe.set_user(BILLING_PREPARER)
+        try:
+            with (
+                patch(module + ".today", return_value=str(next_day)),
+                patch(module + ".now_datetime", return_value=clock),
+                self.assertRaises(frappe.PermissionError),
+            ):
+                batch.approve_and_create_invoices()
+        finally:
+            frappe.set_user("Administrator")
+        batch.reload()
+        self.assertEqual(batch.status, "Under Review")
+        self.assertFalse(batch.sales_invoice or batch.purchase_invoice)
+
+        # Distinct checker but with a grant for ONLY the issuing Company:
+        # the requesting Company's approval scope must also be explicit.
+        limited = "ci-bridge-billing-limited@invalid.test"
+        self._actor(limited, "Finance Controller")
+        self.assertFalse(frappe.db.exists("User Permission", {
+            "user": limited, "allow": "Company", "for_value": BUYER,
+            "apply_to_all_doctypes": 1,
+        }))
+        frappe.set_user(limited)
+        try:
+            with (
+                patch(module + ".today", return_value=str(next_day)),
+                patch(module + ".now_datetime", return_value=clock),
+                self.assertRaises(frappe.PermissionError),
+            ):
+                batch.approve_and_create_invoices()
+        finally:
+            frappe.set_user("Administrator")
+        batch.reload()
+        self.assertEqual(batch.status, "Under Review")
+        self.assertFalse(batch.sales_invoice or batch.purchase_invoice)
+        self.assertEqual(frappe.db.count("Sales Invoice", {
+            "remarks": "Intercompany material billing batch " + batch.name,
+        }), 0)
+
+    def test_i_cancelled_pair_requires_independent_audited_manual_review(self):
+        """One correction request, distinct reviewer, no invoice re-creation."""
+        batch, stock, sales, purchase, original_sle, original_gl = (
+            self._submit_real_pair()
+        )
+        purchase.cancel()
+        sales = frappe.get_doc("Sales Invoice", sales.name)
+        sales.cancel()
+        sales.reload()
+        purchase.reload()
+        self.assertEqual((sales.docstatus, purchase.docstatus), (2, 2))
+        frappe.set_user(BILLING_PREPARER)
+        try:
+            requested = batch.request_cancelled_invoice_correction(
+                "Both linked original invoices were cancelled; request a documented manual correction."
+            )
+            self.assertEqual(requested["status"], "Requested")
+            self.assertFalse(requested["automatic_rebilling"])
+            with self.assertRaises(Exception):
+                batch.request_cancelled_invoice_correction(
+                    "A duplicate request must never release stock or billing claims."
+                )
+        finally:
+            frappe.set_user("Administrator")
+        case = frappe.get_doc("CCPC Intercompany Billing Correction", requested["case"])
+        self.assertEqual(case.requested_by, BILLING_PREPARER)
+        self.assertEqual(case.sales_invoice, sales.name)
+        self.assertEqual(case.purchase_invoice, purchase.name)
+        self.assertEqual(case.status, "Requested")
+        self.assertEqual(frappe.db.count(
+            "CCPC Intercompany Billing Correction", {"billing_batch": batch.name},
+        ), 1)
+
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            decided = batch.review_cancelled_invoice_correction(
+                "Approve", "Manual Accounting correction reviewed; retain original documents and stock source."
+            )
+            self.assertEqual(decided["status"], "Approved for Manual Correction")
+            self.assertFalse(decided["automatic_rebilling"])
+            with self.assertRaises(Exception):
+                batch.review_cancelled_invoice_correction(
+                    "Approve", "A finalized review cannot be replayed or changed."
+                )
+        finally:
+            frappe.set_user("Administrator")
+        case.reload()
+        self.assertEqual(case.status, "Approved for Manual Correction")
+        self.assertEqual(case.reviewed_by, BILLING_APPROVER)
+        self.assertTrue(case.reviewed_on and case.review_note)
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual((batch.sales_invoice, batch.purchase_invoice),
+                         (sales.name, purchase.name))
+        self.assertEqual(frappe.db.count("Sales Invoice", {
+            "remarks": "Intercompany material billing batch " + batch.name,
+        }), 1)
+        self.assertEqual(frappe.db.count("Purchase Invoice", {
+            "remarks": "Intercompany material billing batch " + batch.name,
+        }), 1)
+        self.assertEqual(frappe.db.count("Stock Ledger Entry", {
+            "voucher_type": "Stock Entry", "voucher_no": stock.name,
+        }), original_sle)
+        self.assertEqual(frappe.db.count("GL Entry", {
+            "voucher_type": "Stock Entry", "voucher_no": stock.name,
+        }), original_gl)
+
+    def test_j_partially_cancelled_pair_cannot_enter_correction_review(self):
+        """One-sided cancellation never authorizes a second invoice pair."""
+        batch, stock, sales, purchase, _, _ = self._submit_real_pair()
+        purchase.cancel()
+        # The seller invoice is still submitted: deliberately stop here.
+        sales = frappe.get_doc("Sales Invoice", sales.name)
+        self.assertEqual(sales.docstatus, 1)
+        frappe.set_user(BILLING_PREPARER)
+        try:
+            with self.assertRaises(frappe.ValidationError):
+                batch.request_cancelled_invoice_correction(
+                    "Purchase cancelled but linked Sales Invoice still posted."
+                )
+        finally:
+            frappe.set_user("Administrator")
+        self.assertEqual(frappe.db.count(
+            "CCPC Intercompany Billing Correction", {"billing_batch": batch.name},
+        ), 0)
+        self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual(batch.sales_invoice, sales.name)
+        self.assertEqual(batch.purchase_invoice, purchase.name)
