@@ -841,6 +841,20 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         # Native ERPNext cancellation order must be valid without bypassing
         # controller validation; failure is a real release-review blocker.
         purchase.cancel()
+        purchase.reload()
+        self.assertEqual(purchase.docstatus, 2)
+
+        # Cancelling the linked Purchase Invoice can modify the counterpart
+        # Sales Invoice's modified timestamp. Frappe correctly refuses to
+        # cancel a stale in-memory document (Build #125 TimestampMismatchError).
+        # Refresh the actual submitted Sales Invoice from MariaDB before its
+        # own independent native cancellation. Do not suppress timestamp
+        # validation or bypass controller/permission checks.
+        sales = frappe.get_doc("Sales Invoice", sales.name)
+        self.assertEqual(
+            sales.docstatus, 1,
+            "Cancelling the buyer invoice must not auto-cancel the seller invoice",
+        )
         sales.cancel()
         purchase.reload()
         sales.reload()
