@@ -815,6 +815,26 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         batch, stock, sales, purchase, original_sle, original_gl = (
             self._submit_real_pair()
         )
+        # A non-Accounts actor must not be allowed to reverse ledger entries.
+        self._actor(
+            "ci-bridge-no-invoice-permission@invalid.test",
+            "CCPC CI No Invoice Access",
+        )
+        frappe.set_user("ci-bridge-no-invoice-permission@invalid.test")
+        try:
+            for invoice in (purchase, sales):
+                doc = frappe.get_doc(invoice.doctype, invoice.name)
+                self.assertFalse(
+                    frappe.has_permission(
+                        invoice.doctype, ptype="cancel", doc=doc
+                    ),
+                    invoice.doctype + " incorrectly allowed unprivileged cancel",
+                )
+                with self.assertRaises(frappe.PermissionError):
+                    doc.cancel()
+        finally:
+            frappe.set_user("Administrator")
+
         # Native ERPNext cancellation order must be valid without bypassing
         # controller validation; failure is a real release-review blocker.
         purchase.cancel()
