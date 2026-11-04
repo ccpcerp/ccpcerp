@@ -1353,6 +1353,9 @@ class IntercompanyMaterialBillingBatch(Document):
                 "company": self.issuing_company,
                 "customer": customer,
                 "posting_date": self.period_end,
+                # Native ERPNext validate_posting_time() otherwise overwrites
+                # a supplied historical posting date with the current date.
+                "set_posting_time": 1,
                 "currency": defaults.currency,
                 "debit_to": defaults.receivable_account,
                 "update_stock": 0,
@@ -1395,6 +1398,9 @@ class IntercompanyMaterialBillingBatch(Document):
                 "company": self.requesting_company,
                 "supplier": supplier,
                 "posting_date": self.period_end,
+                # Native ERPNext validate_posting_time() otherwise overwrites
+                # a supplied historical posting date with the current date.
+                "set_posting_time": 1,
                 "currency": defaults.currency,
                 "credit_to": defaults.payable_account,
                 "update_stock": 0,
@@ -1437,6 +1443,15 @@ class IntercompanyMaterialBillingBatch(Document):
                 )
             )
 
+        if not invoice.posting_date or getdate(invoice.posting_date) != getdate(self.period_end):
+            frappe.throw(
+                _("{0} {1} must retain billing period-end posting date {2}.").format(
+                    invoice.doctype,
+                    frappe.bold(invoice.name),
+                    frappe.bold(self.period_end),
+                )
+            )
+
         if abs(flt(invoice.grand_total) - flt(self.total_amount)) > 0.01:
             frappe.throw(
                 _(
@@ -1447,6 +1462,22 @@ class IntercompanyMaterialBillingBatch(Document):
                     invoice.grand_total,
                     self.total_amount,
                 )
+            )
+
+    def _validate_draft_invoice_pair(self, sales_invoice, purchase_invoice):
+        """Require both persisted Draft references before approving the batch."""
+        if (
+            sales_invoice.inter_company_invoice_reference != purchase_invoice.name
+            or purchase_invoice.inter_company_invoice_reference != sales_invoice.name
+            or frappe.db.get_value(
+                "Sales Invoice", sales_invoice.name, "inter_company_invoice_reference"
+            ) != purchase_invoice.name
+            or frappe.db.get_value(
+                "Purchase Invoice", purchase_invoice.name, "inter_company_invoice_reference"
+            ) != sales_invoice.name
+        ):
+            frappe.throw(
+                _("Both Draft intercompany invoices must reference each other before approval.")
             )
 
     @frappe.whitelist()
@@ -1518,7 +1549,8 @@ class IntercompanyMaterialBillingBatch(Document):
     
             sales_invoice.inter_company_invoice_reference = purchase_invoice.name
             sales_invoice.save(ignore_permissions=True)
-    
+            self._validate_draft_invoice_pair(sales_invoice, purchase_invoice)
+
             now = now_datetime()
             self.approved_by = frappe.session.user
             self.approved_on = now
