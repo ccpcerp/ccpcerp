@@ -1,11 +1,13 @@
 # Copyright (c) 2026, CCPC and contributors
 # See license.txt
 
+from datetime import datetime
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import frappe
 from frappe.utils import getdate
+from erpnext.utilities.transaction_base import TransactionBase
 
 from ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.intercompany_material_billing_batch import (
     IntercompanyMaterialBillingBatch,
@@ -1571,6 +1573,58 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         self.assertEqual(item["department"], "Maintenance - RMC")
         self.assertEqual(item["equipment"], "EQ-1")
         self.assertNotIn("warehouse", item)
+
+    def test_native_posting_time_validation_retains_both_invoice_month_end_dates(self):
+        # Exercise the real ERPNext date validator, not just the mocked
+        # frappe.get_doc input. This catches its default-to-Today behavior.
+        doc = batch(status="Under Review")
+        issuer = frappe._dict(
+            currency="PHP",
+            cost_center="Main - CCPC",
+            receivable_account="1312 - Intercompany Receivable - CCPC",
+            income_account="6050 - Intercompany Material Charges - CCPC",
+        )
+        buyer = frappe._dict(
+            currency="PHP",
+            cost_center="Main - RMC",
+            payable_account="2121 - Intercompany Payable - RMC",
+            expense_account="5150 - Intercompany Materials Expense - RMC",
+        )
+        with patch(f"{MODULE}.frappe.get_doc", side_effect=lambda data: frappe._dict(data)):
+            invoices = (
+                IntercompanyMaterialBillingBatch._build_sales_invoice(
+                    doc, "Ricor Mills Corporation", issuer
+                ),
+                IntercompanyMaterialBillingBatch._build_purchase_invoice(
+                    doc, "Cagayan Corn Products Corporation", buyer, "SINV-2026-00001"
+                ),
+            )
+
+        with (
+            patch(
+                "erpnext.utilities.transaction_base.frappe.flags",
+                frappe._dict(in_import=False),
+            ),
+            patch(
+                "erpnext.utilities.transaction_base.now_datetime",
+                return_value=datetime(2026, 11, 4, 9, 0, 0),
+            ),
+        ):
+            for invoice in invoices:
+                with self.subTest(doctype=invoice.doctype):
+                    self.assertEqual(invoice.set_posting_time, 1)
+                    invoice.flags = frappe._dict(from_restore=False)
+                    invoice.posting_time = "12:00:00"
+                    TransactionBase.validate_posting_time(invoice)
+                    self.assertEqual(getdate(invoice.posting_date), getdate("2026-10-31"))
+
+                    # Negative control demonstrates the native overwrite risk.
+                    unprotected = frappe._dict(invoice.copy())
+                    unprotected.set_posting_time = 0
+                    TransactionBase.validate_posting_time(unprotected)
+                    self.assertEqual(
+                        getdate(unprotected.posting_date), getdate("2026-11-04")
+                    )
 
     def test_generated_invoice_guard_rejects_invalid_generated_document(self):
         doc = batch(total_amount=10000)
