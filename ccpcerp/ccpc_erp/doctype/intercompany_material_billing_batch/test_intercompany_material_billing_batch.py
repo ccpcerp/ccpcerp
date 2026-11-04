@@ -1849,6 +1849,52 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         )
         self.assertEqual(result["total_amount"], 10000)
 
+    def test_draft_pair_link_failure_rolls_back_without_approving_batch(self):
+        doc = batch(
+            status="Under Review",
+            finalized_by="maker@example.com",
+            finalized_on="2026-11-01 08:00:00",
+            approved_by=None,
+            approved_on=None,
+            sales_invoice=None,
+            purchase_invoice=None,
+        )
+        doc._get_company_invoice_defaults.side_effect = [
+            frappe._dict(currency="PHP"),
+            frappe._dict(currency="PHP"),
+        ]
+        doc._get_internal_party.side_effect = ["Internal Customer", "Internal Supplier"]
+        sales_invoice = MagicMock(name="Sales Invoice")
+        sales_invoice.name = "SINV-2026-00001"
+        purchase_invoice = MagicMock(name="Purchase Invoice")
+        purchase_invoice.name = "PINV-2026-00001"
+        doc._build_sales_invoice.return_value = sales_invoice
+        doc._build_purchase_invoice.return_value = purchase_invoice
+        doc._validate_draft_invoice_pair.side_effect = frappe.ValidationError(
+            "Both Draft intercompany invoices must reference each other before approval."
+        )
+
+        with (
+            patch(f"{MODULE}.frappe.session", frappe._dict(user="checker@example.com")),
+            self.assertRaisesRegex(
+                frappe.ValidationError, "must reference each other"
+            ),
+        ):
+            IntercompanyMaterialBillingBatch.approve_and_create_invoices(doc)
+
+        frappe.db.savepoint.assert_called_once()
+        self.assertTrue(frappe.db.rollback.called)
+        self.assertEqual(
+            frappe.db.rollback.call_args.kwargs,
+            {"save_point": frappe.db.savepoint.call_args.args[0]},
+        )
+        self.assertEqual(doc.status, "Under Review")
+        self.assertIsNone(doc.sales_invoice)
+        self.assertIsNone(doc.purchase_invoice)
+        self.assertIsNone(doc.approved_by)
+        self.assertIsNone(doc.approved_on)
+        doc._save_authorized_workflow_transition.assert_not_called()
+
     def test_empty_draft_batch_is_allowed(self):
         doc = batch(status="Draft", items=[])
 
