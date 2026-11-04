@@ -1476,6 +1476,8 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             getdate(values["posting_date"]),
             getdate("2026-10-31"),
         )
+        # Native ERPNext otherwise resets Draft posting_date to Today.
+        self.assertEqual(values["set_posting_time"], 1)
         self.assertEqual(
             values["debit_to"],
             "1312 - Intercompany Receivable - CCPC",
@@ -1541,6 +1543,8 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             getdate(values["posting_date"]),
             getdate("2026-10-31"),
         )
+        # Native ERPNext otherwise resets Draft posting_date to Today.
+        self.assertEqual(values["set_posting_time"], 1)
         self.assertEqual(
             values["credit_to"],
             "2121 - Intercompany Payable - RMC",
@@ -1577,6 +1581,7 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             docstatus=0,
             update_stock=0,
             taxes=[],
+            posting_date=getdate("2026-10-31"),
             grand_total=10000,
         )
 
@@ -1589,6 +1594,8 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             ("submitted", {"docstatus": 1}),
             ("stock movement", {"update_stock": 1}),
             ("automatic taxes", {"taxes": [frappe._dict(charge_type="On Net Total")]}),
+            ("posting date changed to Today", {"posting_date": getdate("2026-11-04")}),
+            ("missing posting date", {"posting_date": None}),
             ("wrong total", {"grand_total": 9999}),
         )
 
@@ -1601,6 +1608,62 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
                     IntercompanyMaterialBillingBatch._validate_generated_invoice(
                         doc,
                         candidate,
+                    )
+
+    def test_draft_invoice_pair_rejects_missing_or_unsaved_reciprocal_links(self):
+        doc = batch()
+        sales_invoice = frappe._dict(
+            name="SINV-2026-00001",
+            inter_company_invoice_reference="PINV-2026-00001",
+        )
+        purchase_invoice = frappe._dict(
+            name="PINV-2026-00001",
+            inter_company_invoice_reference="SINV-2026-00001",
+        )
+
+        expected = {
+            "Sales Invoice": purchase_invoice.name,
+            "Purchase Invoice": sales_invoice.name,
+        }
+        with patch(
+            f"{MODULE}.frappe.db.get_value",
+            side_effect=lambda dt, name, field: expected[dt],
+        ) as stored:
+            IntercompanyMaterialBillingBatch._validate_draft_invoice_pair(
+                doc, sales_invoice, purchase_invoice
+            )
+            self.assertEqual(stored.call_count, 2)
+
+        for label, changed in (
+            ("unsaved SI reference", {"si_ref": None}),
+            ("unsaved PI reference", {"pi_ref": None}),
+            ("persisted SI reference missing", {"stored_si_ref": None}),
+            ("persisted PI reference missing", {"stored_pi_ref": None}),
+        ):
+            with self.subTest(label=label):
+                si = frappe._dict(sales_invoice.copy())
+                pi = frappe._dict(purchase_invoice.copy())
+                si.inter_company_invoice_reference = changed.get(
+                    "si_ref", purchase_invoice.name
+                )
+                pi.inter_company_invoice_reference = changed.get(
+                    "pi_ref", sales_invoice.name
+                )
+                stored_refs = {
+                    "Sales Invoice": changed.get("stored_si_ref", purchase_invoice.name),
+                    "Purchase Invoice": changed.get("stored_pi_ref", sales_invoice.name),
+                }
+                with (
+                    patch(
+                        f"{MODULE}.frappe.db.get_value",
+                        side_effect=lambda dt, name, field: stored_refs[dt],
+                    ),
+                    self.assertRaisesRegex(
+                        frappe.ValidationError, "must reference each other"
+                    ),
+                ):
+                    IntercompanyMaterialBillingBatch._validate_draft_invoice_pair(
+                        doc, si, pi
                     )
 
     def test_approval_creates_cross_linked_draft_invoices_and_marks_batch_approved(self):
@@ -1701,6 +1764,9 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         )
         sales_invoice.save.assert_called_once_with(
             ignore_permissions=True
+        )
+        doc._validate_draft_invoice_pair.assert_called_once_with(
+            sales_invoice, purchase_invoice
         )
 
         self.assertEqual(doc.status, "Approved")
