@@ -92,6 +92,9 @@ def _filters(report_key, filters):
 
 def _assert_returned_companies(report_key, rows, issuer, requester):
     """Verify returned rows and linked master provenance before any response."""
+    # The equipment report can emit many rows referring to the same frozen
+    # Equipment Registry IDs; resolve each distinct ID just once per request.
+    checked_equipment = set()
     for row in rows:
         if not isinstance(row, dict):
             _deny()
@@ -120,11 +123,21 @@ def _assert_returned_companies(report_key, rows, issuer, requester):
                     if actual and actual != issuer:
                         _deny()
         if report_key == "equipment":
-            name = row.get("source_equipment")
-            if name:
-                actual = frappe.db.get_value("Equipment Registry", name, "company")
-                if actual and actual != issuer:
+            # Both snapshot fields are included in the report response, even
+            # when legacy evidence contains a conflicting or missing pair.
+            # A value is an Equipment Registry name (equipment_number); do
+            # not disclose foreign OR unresolvable identifiers to executives.
+            for field in ("source_equipment", "source_equipment_code"):
+                name = row.get(field)
+                if name is None or name == "":
+                    continue  # An absent snapshot contains no identifier.
+                if not isinstance(name, str):
                     _deny()
+                if name not in checked_equipment:
+                    actual = frappe.db.get_value("Equipment Registry", name, "company")
+                    if actual != issuer:
+                        _deny()
+                    checked_equipment.add(name)
 
 
 @frappe.whitelist(methods=["POST"])
