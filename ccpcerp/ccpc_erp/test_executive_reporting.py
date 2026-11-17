@@ -186,6 +186,7 @@ class TestCCPCGroupExecutiveReporting(TestCase):
                       "source_quality": "BILLING_COMPANY_MISMATCH"}],
                     self.company, self.other,
                 )
+
     def test_equipment_gateway_denies_foreign_or_missing_registry(self):
         # Both frozen identifiers are returned, including on conflicting
         # legacy snapshots. Reject either foreign or dangling references.
