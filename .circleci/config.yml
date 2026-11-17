@@ -50,6 +50,9 @@ jobs:
             if [ "${CIRCLE_BRANCH:-}" = "review/four-day-one-reports-integration-2026-10-29" ]; then
               python -m unittest discover -s .circleci -p 'test_four_reports_ci_config_static.py' -v
             fi
+            if [ "${CIRCLE_BRANCH:-}" = "review/ricor-direct-consumption-billing-item-2026-11-17" ]; then
+              python -m unittest discover -s .circleci -p 'test_ricor_direct_ci_static.py' -v
+            fi
 
   isolated-erpnext-integration:
     # Disposable CircleCI-only MariaDB/Redis/Frappe site. NOT persistent DEVELOPMENT.
