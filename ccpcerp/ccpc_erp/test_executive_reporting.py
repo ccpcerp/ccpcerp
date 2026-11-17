@@ -276,7 +276,8 @@ class TestCCPCGroupExecutiveReporting(TestCase):
 
     def test_equipment_gateway_denies_invalid_reference_type(self):
         with (
-            patch.object(gateway.frappe.db, "get_value") as lookup,
+            patch.object(gateway.frappe.db, "get_value",
+                         return_value=self.company) as lookup,
             patch.object(gateway, "_deny",
                          side_effect=PermissionError("denied")),
             self.assertRaisesRegex(PermissionError, "denied"),
