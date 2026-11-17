@@ -22,6 +22,11 @@ parameters:
     type: boolean
     default: false
 
+  # Ricor direct-expense native PI + test actors; manually held, default disabled.
+  run_ricor_direct:
+    type: boolean
+    default: false
+
   # Combined report acceptance: exact-SHA, manually held, disabled by default.
   run_four_reports_integrated:
     type: boolean
@@ -358,6 +363,52 @@ jobs:
             set -euo pipefail
             python .circleci/finance_baseline_deadline.py run bash .circleci/billing_controls_stage.sh tests
 
+  ricor-direct-consumption-integration:
+    # DISPOSABLE CI ONLY; staged from the exact approved SHA after manual hold.
+    docker:
+      - image: cimg/python:3.14-node
+      - image: mariadb:11.8
+        environment:
+          MARIADB_ROOT_PASSWORD: ccpc-ricor-ci-ephemeral-only
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "13000"]
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "11000"]
+    resource_class: large
+    environment:
+      CI: "Yes"
+      TEST_SITE: ci-ricor-direct.localhost
+      CI_DB_ROOT_PASSWORD: ccpc-ricor-ci-ephemeral-only
+      CI_ADMIN_PASSWORD: ccpc-ricor-ci-ephemeral-admin-only
+      CCPC_ALLOW_RICOR_DIRECT_FIXTURES: isolated-only
+    steps:
+      - checkout
+      - run:
+          name: Verify approved source before running any disposable build
+          command: |
+            set -euo pipefail
+            bash .circleci/ricor_direct_stage.sh identity
+            python .circleci/finance_baseline_deadline.py start
+            python .circleci/finance_baseline_deadline.py run python -m compileall -q ccpcerp
+      - run:
+          name: Verify ephemeral MariaDB and Redis sidecars
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/ricor_direct_stage.sh services
+      - run:
+          name: Install reviewed v16 revisions in disposable Ricor test site
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/ricor_direct_stage.sh install
+      - run:
+          name: Three native SQL Item/PI and named Finance mapping authority tests
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/ricor_direct_stage.sh tests
+
 workflows:
   starter-validation:
     jobs:
@@ -394,6 +445,21 @@ workflows:
           filters:
             branches:
               only: review/four-day-one-reports-integration-2026-10-29
+  opt-in-ricor-direct-consumption:
+    when: << pipeline.parameters.run_ricor_direct >>
+    jobs:
+      - ricor-direct-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/ricor-direct-consumption-billing-item-2026-11-17
+      - ricor-direct-consumption-integration:
+          requires:
+            - ricor-direct-manual-approval
+          filters:
+            branches:
+              only: review/ricor-direct-consumption-billing-item-2026-11-17
+
   opt-in-billing-controls:
     when: << pipeline.parameters.run_billing_controls >>
     jobs:
