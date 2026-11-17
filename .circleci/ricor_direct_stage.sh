@@ -19,6 +19,9 @@ test "$(git rev-parse HEAD)" = "${CCPC_RICOR_APPROVED_SHA}"
 test "${CCPC_ALLOW_RICOR_DIRECT_FIXTURES:-}" = "isolated-only"
 
 case "${1:-}" in
+  identity)
+    echo "Pinned Ricor disposable CI source, site, job and opt-in: PASS"
+    ;;
   services)
     for port in 3306 13000 11000; do
       ready=0
