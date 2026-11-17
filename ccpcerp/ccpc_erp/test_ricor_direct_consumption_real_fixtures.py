@@ -52,6 +52,9 @@ class TestRicorDirectConsumptionRealFixtures(ERPNextTestSuite):
             raise RuntimeError("Ricor fixture tests are confined to dedicated disposable CircleCI site")
         super().setUp()
         frappe.set_user("Administrator")
+        # The authority test requires both synthetic Companies; load their
+        # official ERPNext fixtures before relying on Stock Entry dependencies.
+        self.load_test_records("Company")
         self.load_test_records("Stock Entry")
         self.assertTrue(frappe.db.exists("Company", COMPANY))
         self.assertTrue(frappe.db.exists("Company", OTHER_COMPANY))
