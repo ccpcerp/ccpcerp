@@ -11,6 +11,7 @@ import os
 import frappe
 from erpnext.tests.utils import ERPNextTestSuite
 from erpnext.stock.doctype.item.test_item import make_item
+from frappe.utils import flt, nowdate
 
 from ccpcerp.ccpc_erp.bc_issue_runtime import _real_authority
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
@@ -40,6 +41,7 @@ def _disposable_only():
         and bool(env.get("CIRCLE_WORKFLOW_ID"))
         and bool(env.get("CIRCLE_BUILD_NUM"))
         and len(env.get("CIRCLE_SHA1", "")) == 40
+        and env.get("CIRCLE_SHA1") == env.get("CCPC_RICOR_APPROVED_SHA")
         and env.get("CCPC_ALLOW_RICOR_DIRECT_FIXTURES") == "isolated-only"
     )
 
@@ -94,6 +96,84 @@ class TestRicorDirectConsumptionRealFixtures(ERPNextTestSuite):
                 source_item_code="CI-ORIGINAL-STOCK", frozen_source_uom=UOM,
                 candidate=actual, item_group_is_leaf=True,
             )
+
+    def test_native_nonstock_purchase_invoice_retains_expense_and_no_postings(self):
+        """Real ERPNext PI.insert/validate, not a fake accounting field assignment."""
+        code = "CI-DIRECT-PI-" + frappe.generate_hash(length=12)
+        material = make_item(
+            item_code=code,
+            properties={
+                "item_group": GROUP, "stock_uom": UOM, "is_stock_item": 0,
+                "is_purchase_item": 1, "is_fixed_asset": 0,
+                "enable_deferred_expense": 0, "has_variants": 0, "disabled": 0,
+            },
+        )
+        item_fields = [
+            "name", "item_group", "stock_uom", "disabled", "is_stock_item",
+            "is_purchase_item", "is_fixed_asset", "enable_deferred_expense",
+            "has_variants", "variant_of",
+        ]
+        item_row = frappe.db.get_value("Item", material.name, item_fields, as_dict=True)
+        self.assertEqual(
+            validate_direct_consumption_billing_item(
+                source_item_code="CI-ORIGINAL-STOCK",
+                frozen_source_uom=UOM,
+                candidate=item_row, item_group_is_leaf=True,
+            ),
+            material.name,
+        )
+        supplier_group = frappe.db.get_value(
+            "Supplier Group", {"is_group": 0}, "name",
+        )
+        self.assertTrue(supplier_group)
+        supplier = frappe.get_doc({
+            "doctype": "Supplier",
+            "supplier_name": "CI Direct Supplier " + frappe.generate_hash(length=10),
+            "supplier_type": "Company",
+            "supplier_group": supplier_group,
+        }).insert(ignore_permissions=True)
+        currency = frappe.db.get_value("Company", COMPANY, "default_currency")
+        payable = frappe.db.get_value("Account", {
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+            "root_type": "Liability", "account_type": "Payable",
+            "account_currency": currency,
+        }, "name")
+        expense = frappe.db.get_value("Account", {
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+            "root_type": "Expense",
+        }, "name")
+        center = frappe.db.get_value("Cost Center", {
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+        }, "name")
+        self.assertTrue(currency and payable and expense and center)
+        invoice = frappe.get_doc({
+            "doctype": "Purchase Invoice",
+            "company": COMPANY, "supplier": supplier.name,
+            "posting_date": nowdate(), "currency": currency,
+            "credit_to": payable, "update_stock": 0, "is_opening": "No",
+            "items": [{
+                "item_code": material.name, "qty": 2, "uom": UOM,
+                "conversion_factor": 1, "rate": 50, "expense_account": expense,
+                "cost_center": center,
+            }],
+        })
+        invoice.insert(ignore_permissions=True)
+        saved = frappe.get_doc("Purchase Invoice", invoice.name)
+        self.assertEqual(saved.docstatus, 0)
+        self.assertEqual(saved.company, COMPANY)
+        self.assertFalse(saved.update_stock)
+        self.assertEqual(len(saved.items), 1)
+        self.assertEqual(saved.items[0].item_code, material.name)
+        self.assertEqual(saved.items[0].expense_account, expense)
+        self.assertEqual(saved.items[0].cost_center, center)
+        self.assertEqual(saved.items[0].uom, UOM)
+        self.assertAlmostEqual(flt(saved.items[0].qty), 2)
+        self.assertAlmostEqual(flt(saved.items[0].rate), 50)
+        self.assertAlmostEqual(flt(saved.grand_total), 100, places=2)
+        for ledger in ("GL Entry", "Stock Ledger Entry"):
+            self.assertEqual(frappe.db.count(ledger, {
+                "voucher_type": "Purchase Invoice", "voucher_no": saved.name,
+            }), 0)
 
     def _role(self, name):
         if not frappe.db.exists("Role", name):
