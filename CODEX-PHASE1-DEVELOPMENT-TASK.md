@@ -1,5 +1,16 @@
 # Codex task — finish Phase 1 Withdrawal / Department cost release candidate
 
+## 2026-11-18 full engineering delegation — execute without repetitive owner check-ins
+
+**Authorized scope was expanded by the owner:** You own the *end-to-end Phase 1 DEVELOPMENT coding and test mission*. Treat this as an **implementation task**, not a readiness-audit request. Inside your independently isolated *synthetic* workspace you may autonomously select implementation details, install Frappe/ERPNext and needed packages, create/migrate/reset only your own test site, create and submit synthetic ERPNext stock and accounting records, inspect/test/repair failures, make necessary code and test changes, run repeated local tests, and publish commits + PR on a **new unprotected task branch**. Do not stop for approval before routine test-system operations. If a test fails, diagnose and fix it before returning. Aim to produce a materially improved, reviewable exact-branch release candidate.
+
+**Immediate acceptance priority:** complete at least one actual same-Company issued Withdrawal with native Stock Entry, SLE, Expense GL, signed Expense/Center mapping and original Department Material Consumption report in a disposable Frappe v16 site, including a negative cross-Company assertion and duplicate protection. If cloud provisioning does not support a real DB, still deliver a runnable targeted installed-Frappe test harness and fixes in GitHub; clearly mark live SQL NOT RUN. Avoid being stalled by the earlier 0-step GitHub Actions failure.
+
+**The distinction remains technical and mandatory:** a disposable Codex Cloud workspace is acceptable; the owner's pre-existing DEV container with host SSH directory mounted is NOT. You may not read/modify its mounted credentials, persistent MAIN DEV Company/invoice/stock records, production systems/backups, or shared host Docker; no approval to merge into protected release/production branches, alter real roles, start new API subscriptions or self-trigger a paid external CI job. Sandbox isolation must be real, not just a statement in this task.
+
+**Definition of done for this Codex task:** changed reviewed source, actual passed tests with commands/log evidence and exact commit SHA, a PR against the Phase 1 branch, and a short unresolved-item list. If an environment permission/setup blocker makes all programming impossible, say exactly which access is missing instead of generating another long proposal.
+
+
 **Owner authorization, 2026-11-17:** perform substantial autonomous **coding and testing** in Codex's isolated disposable workspace, not in shared DEV or any production environment. No extra paid OpenAI API, scheduled automation or public repo. Use the connected **private** `ccpcerp/ccpcerp` GitHub source, starting from release branch `release/withdrawal-department-phase1-2026-11-17`, [draft PR #35](https://github.com/ccpcerp/ccpcerp/pull/35). Read `AGENTS.md`.
 
 ## Deliverable to complete in one task, not another generic readiness audit
