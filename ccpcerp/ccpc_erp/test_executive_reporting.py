@@ -186,3 +186,140 @@ class TestCCPCGroupExecutiveReporting(TestCase):
                       "source_quality": "BILLING_COMPANY_MISMATCH"}],
                     self.company, self.other,
                 )
+
+    def test_equipment_gateway_denies_foreign_or_missing_registry(self):
+        # Both frozen identifiers are returned, including on conflicting
+        # legacy snapshots. Reject either foreign or dangling references.
+        cases = (
+            ("foreign_code_with_local_link",
+             {"source_equipment": "CCPC-EQ-01",
+              "source_equipment_code": "RMC-EQ-02"},
+             {"CCPC-EQ-01": self.company, "RMC-EQ-02": self.other}),
+            ("foreign_code_without_first_link",
+             {"source_equipment": None,
+              "source_equipment_code": "RMC-EQ-02"},
+             {"RMC-EQ-02": self.other}),
+            ("missing_code_registry",
+             {"source_equipment": "CCPC-EQ-01",
+              "source_equipment_code": "MISSING-EQ"},
+             {"CCPC-EQ-01": self.company}),
+            ("missing_first_registry",
+             {"source_equipment": "MISSING-EQ",
+              "source_equipment_code": "CCPC-EQ-01"},
+             {"CCPC-EQ-01": self.company}),
+            ("foreign_first_with_local_code",
+             {"source_equipment": "RMC-EQ-02",
+              "source_equipment_code": "CCPC-EQ-01"},
+             {"CCPC-EQ-01": self.company, "RMC-EQ-02": self.other}),
+        )
+        for label, values, owners in cases:
+            with self.subTest(case=label):
+                checked = []
+                def get_value(doctype, name, field):
+                    self.assertEqual((doctype, field),
+                                     ("Equipment Registry", "company"))
+                    checked.append(name)
+                    return owners.get(name)
+                with (
+                    patch.object(gateway.frappe.db, "get_value",
+                                 side_effect=get_value),
+                    patch.object(gateway, "_deny",
+                                 side_effect=PermissionError("denied")),
+                    self.assertRaisesRegex(PermissionError, "denied"),
+                ):
+                    gateway._assert_returned_companies(
+                        "equipment",
+                        [{"issuing_company": self.company, **values,
+                          "source_quality": "SNAPSHOT_PAIR_CONFLICT"}],
+                        self.company, None,
+                    )
+                # The failure must be tied to a non-local identifier, not a
+                # blanket rejection of all rows carrying quality flags.
+                self.assertTrue(checked)
+                self.assertTrue(any(owners.get(name) != self.company
+                                    for name in checked))
+
+    def test_equipment_gateway_preserves_valid_local_and_blank_snapshots(self):
+        # Conflicting references to two different issuer-owned Equipment
+        # Registry records stay visible with the native report's quality flag.
+        # Missing first link, both-null legacy snapshots and duplicate local
+        # IDs remain allowed; the native source-quality flags are unchanged.
+        rows = [
+            {"issuing_company": self.company,
+             "source_equipment": "CCPC-EQ-01",
+             "source_equipment_code": "CCPC-EQ-02",
+             "source_quality": "SNAPSHOT_PAIR_CONFLICT"},
+            {"issuing_company": self.company,
+             "source_equipment": None,
+             "source_equipment_code": "CCPC-EQ-02",
+             "source_quality": "SNAPSHOT_PAIR_CONFLICT"},
+            {"issuing_company": self.company,
+             "source_equipment": None,
+             "source_equipment_code": None,
+             "source_quality": "LEGACY_NO_EQUIPMENT_SNAPSHOT"},
+            {"issuing_company": self.company,
+             "source_equipment": "CCPC-EQ-01",
+             "source_equipment_code": "CCPC-EQ-01",
+             "source_quality": "OK"},
+        ]
+        seen = []
+        def get_value(doctype, name, field):
+            self.assertEqual((doctype, field), ("Equipment Registry", "company"))
+            seen.append(name)
+            return self.company
+        with patch.object(gateway.frappe.db, "get_value",
+                          side_effect=get_value):
+            self.assertIsNone(gateway._assert_returned_companies(
+                "equipment", rows, self.company, None))
+        self.assertCountEqual(seen, ["CCPC-EQ-01", "CCPC-EQ-02"])
+        self.assertEqual(rows[0]["source_quality"], "SNAPSHOT_PAIR_CONFLICT")
+        self.assertEqual(rows[2]["source_quality"], "LEGACY_NO_EQUIPMENT_SNAPSHOT")
+
+    def test_equipment_gateway_denies_invalid_reference_type(self):
+        with (
+            patch.object(gateway.frappe.db, "get_value",
+                         return_value=self.company) as lookup,
+            patch.object(gateway, "_deny",
+                         side_effect=PermissionError("denied")),
+            self.assertRaisesRegex(PermissionError, "denied"),
+        ):
+            gateway._assert_returned_companies(
+                "equipment",
+                [{"issuing_company": self.company,
+                  "source_equipment": "CCPC-EQ-01",
+                  "source_equipment_code": 12345}],
+                self.company, None,
+            )
+        # It must never query the master table with a nonstring reference.
+        self.assertEqual(lookup.call_count, 1)
+
+    def test_equipment_gateway_blocks_foreign_code_from_http_result(self):
+        def execute(_filters):
+            return [], [{
+                "issuing_company": self.company,
+                "source_equipment": "CCPC-EQ-01",
+                "source_equipment_code": "RMC-EQ-02",
+                "source_quality": "SNAPSHOT_PAIR_CONFLICT",
+            }]
+        lookups = []
+        def get_value(doctype, name, field):
+            lookups.append((doctype, name, field))
+            if doctype == "Company":
+                return gateway.COMPANIES.get(name)
+            if doctype == "Equipment Registry":
+                return {"CCPC-EQ-01": self.company,
+                        "RMC-EQ-02": self.other}.get(name)
+            raise AssertionError("unexpected source query")
+        with (
+            patch.object(gateway, "_actor_is_authorized"),
+            patch.object(gateway.frappe.db, "get_value",
+                         side_effect=get_value),
+            patch.object(gateway, "import_module",
+                         return_value=SimpleNamespace(execute=execute)),
+            patch.object(gateway, "_deny",
+                         side_effect=PermissionError("denied")),
+            self.assertRaisesRegex(PermissionError, "denied"),
+        ):
+            gateway.run_group_report("equipment", self.filters)
+        self.assertIn(("Equipment Registry", "RMC-EQ-02", "company"), lookups)
+        self.assertFalse(gateway.in_executive_report())

@@ -1,0 +1,135 @@
+{
+ "actions": [],
+ "autoname": "naming_series:",
+ "creation": "2026-11-03 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "naming_series",
+  "billing_batch",
+  "issuing_company",
+  "requesting_company",
+  "sales_invoice",
+  "purchase_invoice",
+  "status",
+  "reason",
+  "requested_by",
+  "requested_on",
+  "review_note",
+  "reviewed_by",
+  "reviewed_on"
+ ],
+ "fields": [
+  {
+   "fieldname": "naming_series",
+   "label": "Series",
+   "fieldtype": "Select",
+   "options": "ICCR-.YYYY.-.#####",
+   "default": "ICCR-.YYYY.-.#####",
+   "hidden": 1
+  },
+  {
+   "fieldname": "billing_batch",
+   "label": "Original Billing Batch",
+   "fieldtype": "Link",
+   "options": "Intercompany Material Billing Batch",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "issuing_company",
+   "label": "Issuing Company",
+   "fieldtype": "Link",
+   "options": "Company",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "requesting_company",
+   "label": "Requesting Company",
+   "fieldtype": "Link",
+   "options": "Company",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "sales_invoice",
+   "label": "Original Sales Invoice",
+   "fieldtype": "Link",
+   "options": "Sales Invoice",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "purchase_invoice",
+   "label": "Original Purchase Invoice",
+   "fieldtype": "Link",
+   "options": "Purchase Invoice",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "status",
+   "label": "Review Status",
+   "fieldtype": "Select",
+   "options": "Requested\nApproved for Manual Correction\nDeclined",
+   "default": "Requested",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "reason",
+   "label": "Correction Reason",
+   "fieldtype": "Small Text",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_by",
+   "label": "Requested By",
+   "fieldtype": "Link",
+   "options": "User",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_on",
+   "label": "Requested On",
+   "fieldtype": "Datetime",
+   "reqd": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "review_note",
+   "label": "Finance Checker Decision Note",
+   "fieldtype": "Small Text",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reviewed_by",
+   "label": "Reviewed By",
+   "fieldtype": "Link",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "reviewed_on",
+   "label": "Reviewed On",
+   "fieldtype": "Datetime",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 0,
+ "is_submittable": 0,
+ "links": [],
+ "modified": "2026-11-03 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "CCPC ERP",
+ "name": "CCPC Intercompany Billing Correction",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

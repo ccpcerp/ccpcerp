@@ -17,6 +17,11 @@ parameters:
     type: boolean
     default: false
 
+  # Distinct review-only, manual billing-controls MariaDB acceptance.
+  run_billing_controls:
+    type: boolean
+    default: false
+
   # Combined report acceptance: exact-SHA, manually held, disabled by default.
   run_four_reports_integrated:
     type: boolean
@@ -296,6 +301,63 @@ jobs:
             set -euo pipefail
             python .circleci/finance_baseline_deadline.py run bash .circleci/four_reports_stage.sh tests
 
+  billing-controls-isolated-integration:
+    # One opt-in, manually approved Finance/Billing acceptance on disposable CI.
+    docker:
+      - image: cimg/python:3.14-node
+      - image: mariadb:11.8
+        environment:
+          MARIADB_ROOT_PASSWORD: ccpc-billing-disposable-only
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "13000"]
+      - image: redis:7-alpine
+        command: ["redis-server", "--port", "11000"]
+    resource_class: large
+    environment:
+      CI: "Yes"
+      TEST_SITE: ci-billing-review.localhost
+      CI_DB_ROOT_PASSWORD: ccpc-billing-disposable-only
+      CI_ADMIN_PASSWORD: ccpc-billing-disposable-admin-only
+      CCPC_ALLOW_BILLING_CONTROLS_TESTS: isolated-only
+    steps:
+      - checkout
+      - run:
+          name: Reject unapproved review branch, commit, runner and site before installing anything
+          command: |
+            set -euo pipefail
+            python - \<<'PY'
+            import os
+            import subprocess
+            from ccpcerp.ccpc_erp.ci_billing_controls_site_guard import assert_billing_controls_disposable_site
+            assert_billing_controls_disposable_site(os.environ.get("TEST_SITE"))
+            checked_out = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+            if checked_out != os.environ["CCPC_BILLING_APPROVED_SHA"]:
+                raise SystemExit("Billing CI checked-out commit is not the approved SHA")
+            print("Approved disposable Billing Controls CI identity and checkout verified")
+            PY
+            python .circleci/finance_baseline_deadline.py start
+            python .circleci/finance_baseline_deadline.py run python -m unittest discover -s .circleci -p 'test_billing_controls_ci_guard.py' -v
+            python .circleci/finance_baseline_deadline.py run python -m unittest discover -s .circleci -p 'test_finance_bridge_config_static.py' -v
+            python .circleci/finance_baseline_deadline.py run python -m compileall -q ccpcerp
+      - run:
+          name: Verify disposable MariaDB and Redis sidecars
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/billing_controls_stage.sh services
+      - run:
+          name: Install exact-pinned Frappe ERPNext and CCPC on isolated billing site
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/billing_controls_stage.sh install
+      - run:
+          name: Ten real MariaDB billing authorization and cancellation review tests
+          no_output_timeout: 20m
+          command: |
+            set -euo pipefail
+            python .circleci/finance_baseline_deadline.py run bash .circleci/billing_controls_stage.sh tests
+
 workflows:
   starter-validation:
     jobs:
@@ -332,6 +394,21 @@ workflows:
           filters:
             branches:
               only: review/four-day-one-reports-integration-2026-10-29
+  opt-in-billing-controls:
+    when: << pipeline.parameters.run_billing_controls >>
+    jobs:
+      - billing-controls-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: review/billing-authorization-correction-2026-11-03
+      - billing-controls-isolated-integration:
+          requires:
+            - billing-controls-manual-approval
+          filters:
+            branches:
+              only: review/billing-authorization-correction-2026-11-03
+
   opt-in-finance-bridge:
     when: << pipeline.parameters.run_finance_bridge >>
     jobs:

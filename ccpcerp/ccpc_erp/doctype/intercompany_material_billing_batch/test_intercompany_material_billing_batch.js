@@ -32,6 +32,15 @@ global.frappe = {
         confirmMessage = message;
         return yes();
     },
+    prompt(fields, submit) {
+        if (fields.some((field) => field.fieldname === "reason")) {
+            return submit({reason: "Cancelled linked invoice pair needs Finance review."});
+        }
+        return submit({
+            action: "Approve",
+            note: "Independent checker recorded manual correction approval.",
+        });
+    },
 };
 
 const {
@@ -47,11 +56,15 @@ function form({
     status = "Draft",
     dirty = false,
     callResults = {},
+    finalizedBy = "billing-preparer@example.com",
 } = {}) {
     return {
         doc: {
             name: "ICMB-2026-00001",
             status,
+            finalized_by: finalizedBy,
+            sales_invoice: status === "Approved" ? "SINV-TEST" : null,
+            purchase_invoice: status === "Approved" ? "PINV-TEST" : null,
         },
         is_new: () => isNew,
         is_dirty: () => dirty,
@@ -79,29 +92,25 @@ function form({
 
 
 async function run() {
-    // Finance Controller can manage billing.
+    // Finance Checker can approve only, a separate Billing Preparer prepares.
     frappe.session.user = "finance@example.com";
     frappe.user_roles = ["Finance Controller"];
     assert.equal(can_manage_intercompany_billing(), true);
 
-    // System Manager can manage billing.
+    // System Manager and Administrator are not normal workflow exceptions.
     frappe.user_roles = ["System Manager"];
-    assert.equal(can_manage_intercompany_billing(), true);
-
-    // Administrator can manage billing.
+    assert.equal(can_manage_intercompany_billing(), false);
     frappe.session.user = "Administrator";
     frappe.user_roles = [];
-    assert.equal(can_manage_intercompany_billing(), true);
+    assert.equal(can_manage_intercompany_billing(), false);
 
-    // Ordinary user cannot manage billing.
     frappe.session.user = "ordinary@example.com";
     frappe.user_roles = [];
     assert.equal(can_manage_intercompany_billing(), false);
 
-    // Draft saved batch shows both actions for Finance Controller.
-    frappe.session.user = "finance@example.com";
-    frappe.user_roles = ["Finance Controller"];
-
+    // Draft saved batch shows both preparation actions only to the preparer.
+    frappe.session.user = "billing-preparer@example.com";
+    frappe.user_roles = ["CCPC Billing Preparer"];
     const draft = form();
     handlers.refresh(draft);
 
@@ -113,12 +122,21 @@ async function run() {
         ]
     );
 
+    frappe.session.user = "finance@example.com";
+    frappe.user_roles = ["Finance Controller"];
+    const checkerDraft = form();
+    handlers.refresh(checkerDraft);
+    assert.equal(checkerDraft.buttons.length, 0);
+
+    // New batches should not show refresh/finalize actions.
     // New batches should not show refresh/finalize actions.
     const newBatch = form({ isNew: true });
     handlers.refresh(newBatch);
     assert.equal(newBatch.buttons.length, 0);
 
-    // Under Review batches show only the approval action.
+    // Under Review: Finance Checker sees approval, preparer does not.
+    frappe.session.user = "finance@example.com";
+    frappe.user_roles = ["Finance Controller"];
     const underReview = form({ status: "Under Review" });
     handlers.refresh(underReview);
 
@@ -129,10 +147,52 @@ async function run() {
         ]
     );
 
-    // Approved batches should not show billing actions.
+    // Approved batches offer Finance's controlled correction decision.
     const approved = form({ status: "Approved" });
     handlers.refresh(approved);
-    assert.equal(approved.buttons.length, 0);
+    assert.deepEqual(approved.buttons.map((b) => b.label),
+        ["Record Correction Decision"]);
+
+    // The finalizing user cannot approve their own batch.
+    const selfApproval = form({
+        status: "Under Review", finalizedBy: "finance@example.com",
+    });
+    handlers.refresh(selfApproval);
+    assert.equal(selfApproval.buttons.length, 0);
+
+    // Billing preparer may request correction but not decide it.
+    frappe.session.user = "billing-preparer@example.com";
+    frappe.user_roles = ["CCPC Billing Preparer"];
+    const approvedForPrep = form({status: "Approved"});
+    handlers.refresh(approvedForPrep);
+    assert.deepEqual(approvedForPrep.buttons.map((b) => b.label),
+        ["Request Correction Review"]);
+
+    // Controlled correction buttons call the guarded backend methods.
+    await approvedForPrep.buttons[0].action();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(approvedForPrep.calls,
+        ["request_cancelled_invoice_correction"]);
+    assert.equal(approvedForPrep.reloaded, 1);
+
+    frappe.session.user = "finance@example.com";
+    frappe.user_roles = ["Finance Controller"];
+    const reviewForm = form({
+        status: "Approved",
+        callResults: {
+            review_cancelled_invoice_correction: {
+                status: "Approved for Manual Correction",
+            },
+        },
+    });
+    handlers.refresh(reviewForm);
+    assert.deepEqual(reviewForm.buttons.map((b) => b.label),
+        ["Record Correction Decision"]);
+    await reviewForm.buttons[0].action();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(reviewForm.calls,
+        ["review_cancelled_invoice_correction"]);
+    assert.equal(reviewForm.reloaded, 1);
 
     // Non-finance users should not see actions.
     frappe.user_roles = [];
@@ -141,7 +201,7 @@ async function run() {
     assert.equal(unauthorized.buttons.length, 0);
 
     // Preview refresh saves dirty form, calls backend, then reloads.
-    frappe.user_roles = ["Finance Controller"];
+    frappe.user_roles = ["CCPC Billing Preparer"];
     alerts = [];
 
     const preview = form({

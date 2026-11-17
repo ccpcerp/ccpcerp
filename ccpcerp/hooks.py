@@ -207,8 +207,8 @@ app_include_js = "/assets/ccpcerp/js/workspace_approval_shortcuts.js"
 
 # Role is defined before Page JSON sync (and before app installation),
 # but no named user, source DocPerm or Company permission is ever assigned.
-before_install = "ccpcerp.setup.ensure_ccpc_group_executive_reporting_role"
-before_migrate = "ccpcerp.setup.ensure_ccpc_group_executive_reporting_role"
+before_install = "ccpcerp.setup.ensure_ccpc_bootstrap_roles"
+before_migrate = "ccpcerp.setup.ensure_ccpc_bootstrap_roles"
 after_migrate = "ccpcerp.setup.after_migrate"
 boot_session = "ccpcerp.ccpc_erp.desktop_visibility.filter_boot_desktop_icons"
 

@@ -1,10 +1,12 @@
 # Copyright (c) 2026, CCPC and contributors
 # See license.txt
 
+from datetime import datetime
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import frappe
+from erpnext.utilities.transaction_base import TransactionBase
 from frappe.utils import getdate
 
 from ccpcerp.ccpc_erp.doctype.intercompany_material_billing_batch.intercompany_material_billing_batch import (
@@ -708,7 +710,7 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         ):
             result = IntercompanyMaterialBillingBatch.refresh_preview(doc)
 
-        doc.check_permission.assert_called_once_with("write")
+        doc._require_billing_preparer.assert_called_once_with()
         doc._require_draft_refresh.assert_called_once_with()
         doc._set_billing_period.assert_called_once_with()
         doc._rebuild_items_from_sources.assert_called_once_with()
@@ -1293,49 +1295,32 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         doc._build_purchase_invoice.assert_not_called()
         doc.save.assert_not_called()
 
-    def test_finance_approver_roles_are_allowed(self):
-        cases = [
-            ("Administrator", []),
-            ("finance@example.com", ["Finance Controller"]),
-            ("manager@example.com", ["System Manager"]),
-        ]
-
-        for user, roles in cases:
-            with self.subTest(user=user):
-                doc = batch()
-
-                with (
-                    patch(
-                        f"{MODULE}.frappe.session",
-                        frappe._dict(user=user),
-                    ),
-                    patch(
-                        f"{MODULE}.frappe.get_roles",
-                        return_value=roles,
-                    ),
-                ):
-                    IntercompanyMaterialBillingBatch._require_finance_approver(
-                        doc
-                    )
-
-                doc.check_permission.assert_called_once_with("write")
+    def test_finance_approver_requires_named_company_scoped_checker(self):
+        doc = batch(status="Under Review")
+        doc.finalized_by = "billing-preparer@example.com"
+        with (
+            patch(f"{MODULE}.frappe.session", frappe._dict(user="checker@example.com")),
+            patch(f"{MODULE}.require_billing_actor", return_value="checker@example.com") as actor,
+            patch(f"{MODULE}.require_distinct_billing_review") as independent,
+        ):
+            result = IntercompanyMaterialBillingBatch._require_finance_approver(doc)
+        self.assertEqual(result, "checker@example.com")
+        doc.check_permission.assert_called_once_with("write")
+        actor.assert_called_once_with(
+            "Finance Controller", doc.issuing_company, doc.requesting_company,
+        )
+        independent.assert_called_once_with(
+            "billing-preparer@example.com", "checker@example.com",
+        )
 
     def test_non_finance_user_cannot_approve(self):
-        doc = batch()
-
+        doc = batch(status="Under Review")
         with (
-            patch(
-                f"{MODULE}.frappe.session",
-                frappe._dict(user="ordinary@example.com"),
-            ),
-            patch(
-                f"{MODULE}.frappe.get_roles",
-                return_value=["Accounts User"],
-            ),
+            patch(f"{MODULE}.require_billing_actor",
+                  side_effect=frappe.PermissionError("explicit Finance checker role required")),
             self.assertRaises(frappe.PermissionError),
         ):
             IntercompanyMaterialBillingBatch._require_finance_approver(doc)
-
         doc.check_permission.assert_called_once_with("write")
 
     def test_approval_requires_under_review_status(self):
@@ -1493,6 +1478,8 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             getdate(values["posting_date"]),
             getdate("2026-10-31"),
         )
+        # Native ERPNext otherwise resets Draft posting_date to Today.
+        self.assertEqual(values["set_posting_time"], 1)
         self.assertEqual(
             values["debit_to"],
             "1312 - Intercompany Receivable - CCPC",
@@ -1558,6 +1545,8 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             getdate(values["posting_date"]),
             getdate("2026-10-31"),
         )
+        # Native ERPNext otherwise resets Draft posting_date to Today.
+        self.assertEqual(values["set_posting_time"], 1)
         self.assertEqual(
             values["credit_to"],
             "2121 - Intercompany Payable - RMC",
@@ -1585,6 +1574,58 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         self.assertEqual(item["equipment"], "EQ-1")
         self.assertNotIn("warehouse", item)
 
+    def test_native_posting_time_validation_retains_both_invoice_month_end_dates(self):
+        # Exercise the real ERPNext date validator, not just the mocked
+        # frappe.get_doc input. This catches its default-to-Today behavior.
+        doc = batch(status="Under Review")
+        issuer = frappe._dict(
+            currency="PHP",
+            cost_center="Main - CCPC",
+            receivable_account="1312 - Intercompany Receivable - CCPC",
+            income_account="6050 - Intercompany Material Charges - CCPC",
+        )
+        buyer = frappe._dict(
+            currency="PHP",
+            cost_center="Main - RMC",
+            payable_account="2121 - Intercompany Payable - RMC",
+            expense_account="5150 - Intercompany Materials Expense - RMC",
+        )
+        with patch(f"{MODULE}.frappe.get_doc", side_effect=lambda data: frappe._dict(data)):
+            invoices = (
+                IntercompanyMaterialBillingBatch._build_sales_invoice(
+                    doc, "Ricor Mills Corporation", issuer
+                ),
+                IntercompanyMaterialBillingBatch._build_purchase_invoice(
+                    doc, "Cagayan Corn Products Corporation", buyer, "SINV-2026-00001"
+                ),
+            )
+
+        with (
+            patch(
+                "erpnext.utilities.transaction_base.frappe.flags",
+                frappe._dict(in_import=False),
+            ),
+            patch(
+                "erpnext.utilities.transaction_base.now_datetime",
+                return_value=datetime(2026, 11, 4, 9, 0, 0),
+            ),
+        ):
+            for invoice in invoices:
+                with self.subTest(doctype=invoice.doctype):
+                    self.assertEqual(invoice.set_posting_time, 1)
+                    invoice.flags = frappe._dict(from_restore=False)
+                    invoice.posting_time = "12:00:00"
+                    TransactionBase.validate_posting_time(invoice)
+                    self.assertEqual(getdate(invoice.posting_date), getdate("2026-10-31"))
+
+                    # Negative control demonstrates the native overwrite risk.
+                    unprotected = frappe._dict(invoice.copy())
+                    unprotected.set_posting_time = 0
+                    TransactionBase.validate_posting_time(unprotected)
+                    self.assertEqual(
+                        getdate(unprotected.posting_date), getdate("2026-11-04")
+                    )
+
     def test_generated_invoice_guard_rejects_invalid_generated_document(self):
         doc = batch(total_amount=10000)
 
@@ -1594,6 +1635,7 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             docstatus=0,
             update_stock=0,
             taxes=[],
+            posting_date=getdate("2026-10-31"),
             grand_total=10000,
         )
 
@@ -1606,6 +1648,8 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             ("submitted", {"docstatus": 1}),
             ("stock movement", {"update_stock": 1}),
             ("automatic taxes", {"taxes": [frappe._dict(charge_type="On Net Total")]}),
+            ("posting date changed to Today", {"posting_date": getdate("2026-11-04")}),
+            ("missing posting date", {"posting_date": None}),
             ("wrong total", {"grand_total": 9999}),
         )
 
@@ -1618,6 +1662,62 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
                     IntercompanyMaterialBillingBatch._validate_generated_invoice(
                         doc,
                         candidate,
+                    )
+
+    def test_draft_invoice_pair_rejects_missing_or_unsaved_reciprocal_links(self):
+        doc = batch()
+        sales_invoice = frappe._dict(
+            name="SINV-2026-00001",
+            inter_company_invoice_reference="PINV-2026-00001",
+        )
+        purchase_invoice = frappe._dict(
+            name="PINV-2026-00001",
+            inter_company_invoice_reference="SINV-2026-00001",
+        )
+
+        expected = {
+            "Sales Invoice": purchase_invoice.name,
+            "Purchase Invoice": sales_invoice.name,
+        }
+        with patch(
+            f"{MODULE}.frappe.db.get_value",
+            side_effect=lambda dt, name, field: expected[dt],
+        ) as stored:
+            IntercompanyMaterialBillingBatch._validate_draft_invoice_pair(
+                doc, sales_invoice, purchase_invoice
+            )
+            self.assertEqual(stored.call_count, 2)
+
+        for label, changed in (
+            ("unsaved SI reference", {"si_ref": None}),
+            ("unsaved PI reference", {"pi_ref": None}),
+            ("persisted SI reference missing", {"stored_si_ref": None}),
+            ("persisted PI reference missing", {"stored_pi_ref": None}),
+        ):
+            with self.subTest(label=label):
+                si = frappe._dict(sales_invoice.copy())
+                pi = frappe._dict(purchase_invoice.copy())
+                si.inter_company_invoice_reference = changed.get(
+                    "si_ref", purchase_invoice.name
+                )
+                pi.inter_company_invoice_reference = changed.get(
+                    "pi_ref", sales_invoice.name
+                )
+                stored_refs = {
+                    "Sales Invoice": changed.get("stored_si_ref", purchase_invoice.name),
+                    "Purchase Invoice": changed.get("stored_pi_ref", sales_invoice.name),
+                }
+                with (
+                    patch(
+                        f"{MODULE}.frappe.db.get_value",
+                        side_effect=lambda dt, name, field: stored_refs[dt],
+                    ),
+                    self.assertRaisesRegex(
+                        frappe.ValidationError, "must reference each other"
+                    ),
+                ):
+                    IntercompanyMaterialBillingBatch._validate_draft_invoice_pair(
+                        doc, si, pi
                     )
 
     def test_approval_creates_cross_linked_draft_invoices_and_marks_batch_approved(self):
@@ -1719,6 +1819,9 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
         sales_invoice.save.assert_called_once_with(
             ignore_permissions=True
         )
+        doc._validate_draft_invoice_pair.assert_called_once_with(
+            sales_invoice, purchase_invoice
+        )
 
         self.assertEqual(doc.status, "Approved")
         self.assertEqual(doc.approved_by, "finance@example.com")
@@ -1745,6 +1848,52 @@ class TestIntercompanyMaterialBillingBatch(TestCase):
             getdate("2026-10-31"),
         )
         self.assertEqual(result["total_amount"], 10000)
+
+    def test_draft_pair_link_failure_rolls_back_without_approving_batch(self):
+        doc = batch(
+            status="Under Review",
+            finalized_by="maker@example.com",
+            finalized_on="2026-11-01 08:00:00",
+            approved_by=None,
+            approved_on=None,
+            sales_invoice=None,
+            purchase_invoice=None,
+        )
+        doc._get_company_invoice_defaults.side_effect = [
+            frappe._dict(currency="PHP"),
+            frappe._dict(currency="PHP"),
+        ]
+        doc._get_internal_party.side_effect = ["Internal Customer", "Internal Supplier"]
+        sales_invoice = MagicMock(name="Sales Invoice")
+        sales_invoice.name = "SINV-2026-00001"
+        purchase_invoice = MagicMock(name="Purchase Invoice")
+        purchase_invoice.name = "PINV-2026-00001"
+        doc._build_sales_invoice.return_value = sales_invoice
+        doc._build_purchase_invoice.return_value = purchase_invoice
+        doc._validate_draft_invoice_pair.side_effect = frappe.ValidationError(
+            "Both Draft intercompany invoices must reference each other before approval."
+        )
+
+        with (
+            patch(f"{MODULE}.frappe.session", frappe._dict(user="checker@example.com")),
+            self.assertRaisesRegex(
+                frappe.ValidationError, "must reference each other"
+            ),
+        ):
+            IntercompanyMaterialBillingBatch.approve_and_create_invoices(doc)
+
+        frappe.db.savepoint.assert_called_once()
+        self.assertTrue(frappe.db.rollback.called)
+        self.assertEqual(
+            frappe.db.rollback.call_args.kwargs,
+            {"save_point": frappe.db.savepoint.call_args.args[0]},
+        )
+        self.assertEqual(doc.status, "Under Review")
+        self.assertIsNone(doc.sales_invoice)
+        self.assertIsNone(doc.purchase_invoice)
+        self.assertIsNone(doc.approved_by)
+        self.assertIsNone(doc.approved_on)
+        doc._save_authorized_workflow_transition.assert_not_called()
 
     def test_empty_draft_batch_is_allowed(self):
         doc = batch(status="Draft", items=[])

@@ -10,8 +10,8 @@ exercise native ERPNext invoice submission, Company GL, cancellation/reversal,
 and permission denial on those disposable synthetic drafts; the custom billing
 service must NEVER auto-submit. Only the billing Controller clock is simulated,
 and a second-invoice failure probes actual MariaDB savepoint rollback.
-Runs only via the default-off, manually held exact-SHA Finance bridge workflow;
-every test requires its established disposable CI identity/site guard.
+Runs only under either the old Finance Bridge identity or the separate
+manually held, exact-SHA Billing Controls identity; all tests fail closed.
 No production data or persistent DEVELOPMENT site is accessed.
 """
 from datetime import datetime, timedelta
@@ -36,6 +36,10 @@ from ccpcerp.ccpc_erp.bc_mapping_workflow import (
 from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import (
     assert_finance_disposable_site,
 )
+from ccpcerp.ccpc_erp.ci_billing_controls_site_guard import (
+    assert_billing_controls_disposable_site,
+    is_reviewed_billing_controls_disposable_site,
+)
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip import (
     test_withdrawal_real_ledger_integration as base_ledger,
 )
@@ -48,6 +52,8 @@ QTY_RECEIVED = base_ledger.QTY_RECEIVED
 UNIT_RATE = base_ledger.UNIT_RATE
 MAKER = "ci-bridge-finance-maker@invalid.test"
 CHECKER = "ci-bridge-finance-checker@invalid.test"
+BILLING_PREPARER = "ci-bridge-billing-preparer@invalid.test"
+BILLING_APPROVER = "ci-bridge-billing-approver@invalid.test"
 BUYER = "_Test Company 5"
 
 
@@ -59,7 +65,13 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
 
     def setUp(self):
         # This MUST precede all fixture loading, SQL queries and user writes.
-        assert_finance_disposable_site(getattr(frappe.local, "site", None))
+        site = getattr(frappe.local, "site", None)
+        # The original Finance runner is unchanged; the new review runner
+        # has a separate project-approved SHA, job and ephemeral site.
+        if is_reviewed_billing_controls_disposable_site(site):
+            assert_billing_controls_disposable_site(site)
+        else:
+            assert_finance_disposable_site(site)
         super().setUp()
         base_ledger.TestWithdrawalRealLedgerIntegration.setUp(self)
         frappe.set_user("Administrator")
@@ -163,6 +175,91 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
                 "apply_to_all_doctypes": 1,
             }).insert(ignore_permissions=True)
 
+    def _billing_actor(self, email, role):
+        # Only synthetic named users, assigned both Company grants on the
+        # guard-enforced disposable site. Never mirrors DEV/PROD user records.
+        self._actor(email, role)
+        if not frappe.db.exists("User Permission", {
+            "user": email, "allow": "Company", "for_value": BUYER,
+            "apply_to_all_doctypes": 1,
+        }):
+            frappe.get_doc({
+                "doctype": "User Permission",
+                "user": email, "allow": "Company", "for_value": BUYER,
+                "apply_to_all_doctypes": 1,
+            }).insert(ignore_permissions=True)
+        if email == BILLING_APPROVER and role == "Finance Controller":
+            self._grant_disposable_invoice_master_read_to_checker()
+
+    def _grant_disposable_invoice_master_read_to_checker(self):
+        """Model only native invoice-validation master reads, never posting.
+
+        Build #134 reached ERPNext's Account-read gate; Build #137 then
+        reached Item.check_permission() in get_item_details. The disposable
+        checker needs read access to the invoice's Account, Item and internal
+        party masters, even though the two Invoice inserts ignore DocPerm.
+        Do not assign Accounts User/Manager or relax billing authorization.
+        The caller's setUp has already asserted the exact disposable CI site.
+        """
+        from frappe.permissions import add_permission
+
+        read_role = "CCPC CI Billing Master Read Only"
+        readable_masters = ("Account", "Item", "Customer", "Supplier")
+        frappe.set_user("Administrator")
+        if not frappe.db.exists("Role", read_role):
+            frappe.get_doc({
+                "doctype": "Role", "role_name": read_role,
+            }).insert(ignore_permissions=True)
+        for master in readable_masters:
+            if not frappe.db.exists("Custom DocPerm", {
+                "parent": master, "role": read_role, "permlevel": 0,
+            }):
+                # Only a CI-only role receives the standard read rule.
+                add_permission(master, read_role, 0)
+            rights = frappe.db.get_value(
+                "Custom DocPerm",
+                {"parent": master, "role": read_role, "permlevel": 0},
+                ["read", "write", "create", "delete", "submit", "cancel"],
+                as_dict=True,
+            )
+            self.assertTrue(rights and rights.read, master + " read missing")
+            self.assertFalse(any(int(rights[field]) for field in (
+                "write", "create", "delete", "submit", "cancel",
+            )), master + " CI permission must be read-only")
+
+        user = frappe.get_doc("User", BILLING_APPROVER)
+        self.assertFalse(any(row.role in (
+            "Accounts User", "Accounts Manager", "System Manager",
+        ) for row in user.roles))
+        if not any(row.role == read_role for row in user.roles):
+            user.append("roles", {"role": read_role})
+            user.save(ignore_permissions=True)
+        for master in readable_masters:
+            frappe.clear_cache(doctype=master)
+        frappe.clear_cache(user=BILLING_APPROVER)
+
+        # Exercise the precise ERPNext Item permission gate that failed in
+        # Build #137; confirm the earlier Account gate and no invoice submit.
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            account = frappe.db.get_value(
+                "Company", COMPANY, "default_receivable_account",
+            )
+            self.assertTrue(account)
+            self.assertTrue(frappe.has_permission(
+                "Account", ptype="read", doc=account,
+            ))
+            self.assertTrue(frappe.has_permission(
+                "Item", ptype="read", doc=self.item.name,
+            ))
+            frappe.get_doc("Item", self.item.name).check_permission("read")
+            for doctype in ("Sales Invoice", "Purchase Invoice"):
+                self.assertFalse(frappe.has_permission(
+                    doctype, ptype="submit",
+                ), "The CI billing checker must not have invoice submit rights.")
+        finally:
+            frappe.set_user("Administrator")
+
     def _approve_signed(self, kind, source, value):
         frappe.set_user(MAKER)
         draft = propose_mapping(kind, COMPANY, source, value)
@@ -188,14 +285,16 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         return draft["name"]
 
     def _billing_candidate(self):
-        frappe.set_user("Administrator")
+        self._billing_actor(BILLING_PREPARER, "CCPC Billing Preparer")
+        self._billing_actor(BILLING_APPROVER, "Finance Controller")
+        frappe.set_user(BILLING_PREPARER)
         batch = frappe.get_doc({
             "doctype": "Intercompany Material Billing Batch",
             "issuing_company": COMPANY,
             "requesting_company": BUYER,
             "billing_month": nowdate(),
             "status": "Draft",
-        }).insert(ignore_permissions=True)
+        }).insert()
         return batch
 
     def test_a_signed_issue_reaches_real_ledger_and_billing_source(self):
@@ -462,6 +561,16 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.load_test_records("Sales Invoice")
         self.customer = self._create_internal_party("Customer", BUYER, COMPANY)
         self.supplier = self._create_internal_party("Supplier", COMPANY, BUYER)
+        # Native invoice validation can read the linked internal parties.
+        # Confirm the named checker can read ONLY the test-created parties.
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            for party_type, party_name in (
+                ("Customer", self.customer), ("Supplier", self.supplier),
+            ):
+                frappe.get_doc(party_type, party_name).check_permission("read")
+        finally:
+            frappe.set_user("Administrator")
         specs = (
             ("1312", "Intercompany Receivable", "Asset", "Receivable"),
             ("2121", "Intercompany Payable", "Liability", "Payable"),
@@ -549,6 +658,7 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         This simulates elapsed wall-clock month-end for the CI fixture only.
         """
         period_end = getdate(get_last_day(nowdate()))
+        frappe.set_user(BILLING_PREPARER)
         # First prove the real Controller rejects premature finalization.
         # If CI runs on a boundary day when the period already ended, this
         # same-day request still correctly fails (<= period_end).
@@ -576,18 +686,22 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertEqual(batch.status, "Under Review")
         self.assertEqual(getdate(batch.finalized_on), simulated_next_day)
         self.assertEqual(getdate(batch.period_end), period_end)
-        self.assertEqual(batch.finalized_by, "Administrator")
+        self.assertEqual(batch.finalized_by, BILLING_PREPARER)
         self.assertEqual(len(batch.items), 1)
         return module, after_month_end, simulated_next_day
 
     def _approve_real_pair_at_month_end(
         self, batch, module, after_month_end, simulated_next_day
     ):
-        with (
-            patch(module + ".today", return_value=str(simulated_next_day)),
-            patch(module + ".now_datetime", return_value=after_month_end),
-        ):
-            return batch.approve_and_create_invoices()
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            with (
+                patch(module + ".today", return_value=str(simulated_next_day)),
+                patch(module + ".now_datetime", return_value=after_month_end),
+            ):
+                return batch.approve_and_create_invoices()
+        finally:
+            frappe.set_user("Administrator")
 
     def _assert_drafts_are_real_and_unposted(self, result, stock, item, batch):
         sales = frappe.get_doc("Sales Invoice", result["sales_invoice"])
@@ -646,7 +760,7 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self._assert_drafts_are_real_and_unposted(
             approved, stock, detail, batch
         )
-        self.assertEqual(batch.approved_by, "Administrator")
+        self.assertEqual(batch.approved_by, BILLING_APPROVER)
         self.assertTrue(batch.approved_on)
         with self.assertRaises(Exception):
             self._approve_real_pair_at_month_end(
@@ -918,3 +1032,151 @@ class TestFinanceWithdrawalBillingBridgeDisposable(ERPNextTestSuite):
         self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
         batch.reload()
         self.assertEqual(batch.status, "Approved")
+
+    def test_h_billing_preparer_self_approval_and_wrong_company_denied(self):
+        """Live SQL/roles: even dual-role preparer cannot approve own month."""
+        batch, stock, detail = self._issue_signed_source_for_real_pair()
+        self._prepare_disposable_invoice_masters()
+        module, clock, next_day = self._finalize_real_month_end(batch)
+        # This synthetic actor now holds both roles but is STILL the finalizer.
+        self._actor(BILLING_PREPARER, "Finance Controller")
+        frappe.set_user(BILLING_PREPARER)
+        try:
+            with (
+                patch(module + ".today", return_value=str(next_day)),
+                patch(module + ".now_datetime", return_value=clock),
+                self.assertRaises(frappe.PermissionError),
+            ):
+                batch.approve_and_create_invoices()
+        finally:
+            frappe.set_user("Administrator")
+        batch.reload()
+        self.assertEqual(batch.status, "Under Review")
+        self.assertFalse(batch.sales_invoice or batch.purchase_invoice)
+
+        # Distinct checker but with a grant for ONLY the issuing Company:
+        # the requesting Company's approval scope must also be explicit.
+        limited = "ci-bridge-billing-limited@invalid.test"
+        self._actor(limited, "Finance Controller")
+        self.assertFalse(frappe.db.exists("User Permission", {
+            "user": limited, "allow": "Company", "for_value": BUYER,
+            "apply_to_all_doctypes": 1,
+        }))
+        frappe.set_user(limited)
+        try:
+            with (
+                patch(module + ".today", return_value=str(next_day)),
+                patch(module + ".now_datetime", return_value=clock),
+                self.assertRaises(frappe.PermissionError),
+            ):
+                batch.approve_and_create_invoices()
+        finally:
+            frappe.set_user("Administrator")
+        batch.reload()
+        self.assertEqual(batch.status, "Under Review")
+        self.assertFalse(batch.sales_invoice or batch.purchase_invoice)
+        self.assertEqual(frappe.db.count("Sales Invoice", {
+            "remarks": "Intercompany material billing batch " + batch.name,
+        }), 0)
+
+    def test_i_cancelled_pair_requires_independent_audited_manual_review(self):
+        """One correction request, distinct reviewer, no invoice re-creation."""
+        batch, stock, sales, purchase, original_sle, original_gl = (
+            self._submit_real_pair()
+        )
+        purchase.cancel()
+        sales = frappe.get_doc("Sales Invoice", sales.name)
+        sales.cancel()
+        sales.reload()
+        purchase.reload()
+        self.assertEqual((sales.docstatus, purchase.docstatus), (2, 2))
+        frappe.set_user(BILLING_PREPARER)
+        try:
+            requested = batch.request_cancelled_invoice_correction(
+                "Both linked original invoices were cancelled; request a documented manual correction."
+            )
+            self.assertEqual(requested["status"], "Requested")
+            self.assertFalse(requested["automatic_rebilling"])
+            with self.assertRaises(Exception):
+                batch.request_cancelled_invoice_correction(
+                    "A duplicate request must never release stock or billing claims."
+                )
+        finally:
+            frappe.set_user("Administrator")
+        case = frappe.get_doc("CCPC Intercompany Billing Correction", requested["case"])
+        self.assertEqual(case.requested_by, BILLING_PREPARER)
+        self.assertEqual(case.sales_invoice, sales.name)
+        self.assertEqual(case.purchase_invoice, purchase.name)
+        self.assertEqual(case.status, "Requested")
+        self.assertEqual(frappe.db.count(
+            "CCPC Intercompany Billing Correction", {"billing_batch": batch.name},
+        ), 1)
+
+        frappe.set_user(BILLING_APPROVER)
+        try:
+            decided = batch.review_cancelled_invoice_correction(
+                "Approve", "Manual Accounting correction reviewed; retain original documents and stock source."
+            )
+            self.assertEqual(decided["status"], "Approved for Manual Correction")
+            self.assertFalse(decided["automatic_rebilling"])
+            with self.assertRaises(Exception):
+                batch.review_cancelled_invoice_correction(
+                    "Approve", "A finalized review cannot be replayed or changed."
+                )
+        finally:
+            frappe.set_user("Administrator")
+        case.reload()
+        self.assertEqual(case.status, "Approved for Manual Correction")
+        self.assertEqual(case.reviewed_by, BILLING_APPROVER)
+        self.assertTrue(case.reviewed_on and case.review_note)
+        self.assertTrue(frappe.db.exists("Version", {
+            "ref_doctype": "CCPC Intercompany Billing Correction",
+            "docname": case.name,
+        }), "The approved correction must have native Frappe Version audit evidence.")
+        # Even an ignore_permissions save from code cannot rewrite the audit
+        # record without the private, controlled Finance action token.
+        case.reason = "Tampered retrospective reason"
+        with self.assertRaises(frappe.PermissionError):
+            case.save(ignore_permissions=True)
+        case.reload()
+        self.assertIn("Both linked original invoices", case.reason)
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual((batch.sales_invoice, batch.purchase_invoice),
+                         (sales.name, purchase.name))
+        self.assertEqual(frappe.db.count("Sales Invoice", {
+            "remarks": "Intercompany material billing batch " + batch.name,
+        }), 1)
+        self.assertEqual(frappe.db.count("Purchase Invoice", {
+            "remarks": "Intercompany material billing batch " + batch.name,
+        }), 1)
+        self.assertEqual(frappe.db.count("Stock Ledger Entry", {
+            "voucher_type": "Stock Entry", "voucher_no": stock.name,
+        }), original_sle)
+        self.assertEqual(frappe.db.count("GL Entry", {
+            "voucher_type": "Stock Entry", "voucher_no": stock.name,
+        }), original_gl)
+
+    def test_j_partially_cancelled_pair_cannot_enter_correction_review(self):
+        """One-sided cancellation never authorizes a second invoice pair."""
+        batch, stock, sales, purchase, _, _ = self._submit_real_pair()
+        purchase.cancel()
+        # The seller invoice is still submitted: deliberately stop here.
+        sales = frappe.get_doc("Sales Invoice", sales.name)
+        self.assertEqual(sales.docstatus, 1)
+        frappe.set_user(BILLING_PREPARER)
+        try:
+            with self.assertRaises(frappe.ValidationError):
+                batch.request_cancelled_invoice_correction(
+                    "Purchase cancelled but linked Sales Invoice still posted."
+                )
+        finally:
+            frappe.set_user("Administrator")
+        self.assertEqual(frappe.db.count(
+            "CCPC Intercompany Billing Correction", {"billing_batch": batch.name},
+        ), 0)
+        self.assertEqual(frappe.get_doc("Stock Entry", stock.name).docstatus, 1)
+        batch.reload()
+        self.assertEqual(batch.status, "Approved")
+        self.assertEqual(batch.sales_invoice, sales.name)
+        self.assertEqual(batch.purchase_invoice, purchase.name)
