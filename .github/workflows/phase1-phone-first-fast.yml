@@ -1,0 +1,74 @@
+# CCPC Phase 1 only: phone-friendly low-cost checks on approved release-branch pushes.
+# No DB, Frappe bench, external actions beyond checkout, deployment, schedules or secrets.
+name: CCPC Phase 1 - Phone-first fast checks
+
+on:
+  push:
+    branches:
+      - release/withdrawal-department-phase1-2026-11-17
+    paths:
+      - .github/workflows/phase1-phone-first-fast.yml
+      - ccpcerp/ccpc_erp/phase1_release_scope.py
+      - ccpcerp/ccpc_erp/test_phase1_release_scope.py
+      - ccpcerp/ccpc_erp/test_phase1_release_wiring_static.py
+      - ccpcerp/ccpc_erp/test_phase1_release_routes.py
+      - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
+      - ccpcerp/ccpc_erp/doctype/intercompany_material_billing_batch/intercompany_material_billing_batch.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccpc-phase1-fast-single-release-branch
+  cancel-in-progress: true
+
+jobs:
+  phase1-fast:
+    if: github.repository == 'ccpcerp/ccpcerp'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - name: Checkout pushed revision without keeping repository token
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify pinned source ancestry and exact push
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ccpcerp/ccpcerp"
+          test "$GITHUB_REF" = "refs/heads/release/withdrawal-department-phase1-2026-11-17"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor a2f0e89f12afbc28ac10dab71b6af47a455fdc95 HEAD
+          echo "Verified private-repo Phase 1 source: $GITHUB_SHA"
+
+      - name: Compile committed Python source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m compileall -q ccpcerp
+
+      - name: Run pure Phase 1 policy and server-wiring regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest -v \
+            ccpcerp.ccpc_erp.test_phase1_release_scope \
+            ccpcerp.ccpc_erp.test_phase1_release_wiring_static
+
+      - name: Explain scope in GitHub run summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## CCPC Withdrawal and Department cost - fast gate"
+            echo "Branch: release/withdrawal-department-phase1-2026-11-17"
+            echo "Commit: $GITHUB_SHA"
+            echo "Checks: Python syntax, 5 pure scope policy tests and 4 source-wiring tests."
+            echo "No Frappe, MariaDB, stock/GL posting, persistent DEVELOPMENT or PRODUCTION access."
+            echo "The 3 installed-Frappe route tests and genuine financial integration tests are separate, pending approval."
+            echo "Private GitHub-hosted runner; no application secrets, deployment or scheduled workflows."
+          } >> "$GITHUB_STEP_SUMMARY"
