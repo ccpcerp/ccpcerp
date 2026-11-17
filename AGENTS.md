@@ -1,5 +1,16 @@
 # CCPC ERPNext — Codex development instructions (Phase 1 release candidate)
 
+## Owner override — full autonomous DEVELOPMENT engineering authority (2026-11-18)
+
+**The owner is explicitly delegating the full Phase 1 DEVELOPMENT engineering cycle to Codex.** Do not interpret older low-risk-only or repeated approval language as a requirement to stop after each code change. Inside a genuinely isolated, synthetic Codex workspace, Codex may make architectural and application changes necessary to finish the agreed Phase 1, install test dependencies, initialize/migrate/drop its **own** disposable Frappe/ERPNext/MariaDB sites, create synthetic inventory and accounting transactions, run and rerun tests, investigate logs, repair failures, refactor, and commit/push task-branch improvements with a review PR. No per-command user confirmation is needed for those operations within that verified boundary. Continue working around individual test/setup failures using available safe alternatives; deliver functioning code and evidence, not another generic readiness report.
+
+**Allowed target:** the owner's *Codex Cloud or separately isolated, credential-free DEVELOPMENT lab*, not the current SSH-mounted/shared MAIN DEVELOPMENT container. The current production system may still be on the old shared host; physical isolation must be verified before interpreting "not PRODUCTION" as a technical guarantee. Full autonomy over a new disposable database **does not mean** arbitrary file/system/network authority on the owner host. Never launch `danger-full-access` inside the historical `frappe_docker_devcontainer-frappe-1` container while SSH or broad host mounts are accessible.
+
+**Release boundary:** Codex may complete and commit all necessary application and test changes on an unprotected task branch and raise/update PRs; GitHub remains source of truth. A verified review/approval step remains before release-branch merge or persistent MAIN DEVELOPMENT changes. Explicit owner consent remains required for live user/master/financial writes, migrations/pulls/restarts against existing MAIN DEVELOPMENT and for **any PRODUCTION** operation; never share secrets or connect to production. No extra paid API credential arrangements, autonomous public publishing, scheduled reporting, or uncontrolled runner spending are authorized by this code delegation.
+
+**Work strategy:** (1) run/reproduce genuine tests as early as possible; (2) fix defects and retest in the same task; (3) produce exact-source PASS/FAIL evidence from a disposable site, or the smallest runnable test if the cloud machine lacks the needed service; (4) keep one concise open-blocker report and a review PR. Do not keep asking the owner to perform trivial shell steps that Codex can do in its isolated environment. If a Codex feature/account permission prevents code execution, report that specific external blocker once; do not pretend GitHub markdown itself granted cloud permissions.
+
+
 This file applies to work in this repository. **Read GitHub before editing.** The current first-release target is **tested CCPC Withdrawal + real stock/Expense GL + Department material consumption**, same issuing/requesting legal Company; native ERPNext handles unrelated ordinary workflows. Production deployment is a separate owner decision.
 
 ## Working source and objective
