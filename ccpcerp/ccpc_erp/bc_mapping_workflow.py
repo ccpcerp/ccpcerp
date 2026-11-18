@@ -42,7 +42,7 @@ def _company_lock(company):
     _canonical(company, "Mapping Company")
     rows = frappe.db.sql("SELECT name FROM `tabCompany` WHERE name=%s FOR UPDATE",
                          (company,), as_dict=True)
-    _require(len(rows) == 1, "Financial mapping Company must exist.")
+    _require(len(rows) == 1 and rows[0].name == company, "Financial mapping Company must exist.")
 
 
 def _master_validated(doctype, record, company):
@@ -58,14 +58,14 @@ def _scope_values(kind, company, source):
     if kind == "Expense":
         rows = frappe.db.sql("SELECT name, is_group FROM `tabItem Group` WHERE name=%s FOR UPDATE",
                              (source,), as_dict=True)
-        _require(len(rows) == 1 and not rows[0].is_group,
+        _require(len(rows) == 1 and rows[0].name == source and not rows[0].is_group,
                  "Expense mapping requires an exact leaf Item Group.")
     else:
         rows = frappe.db.sql(
             "SELECT name, company, disabled, is_group FROM `tabDepartment` "
             "WHERE name=%s FOR UPDATE", (source,), as_dict=True,
         )
-        _require(len(rows) == 1 and rows[0].company == company
+        _require(len(rows) == 1 and rows[0].name == source and rows[0].company == company
                  and not rows[0].disabled and not rows[0].is_group,
                  "Center mapping requires an eligible Company beneficiary Department.")
     return scope_dt, source_field

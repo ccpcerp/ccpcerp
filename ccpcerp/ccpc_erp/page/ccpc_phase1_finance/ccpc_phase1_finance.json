@@ -1,0 +1,14 @@
+{
+  "doctype": "Page",
+  "icon": "fa fa-table",
+  "module": "CCPC ERP",
+  "name": "ccpc-phase1-finance",
+  "page_name": "ccpc-phase1-finance",
+  "roles": [
+    {"role": "CCPC Mapping Preparer"},
+    {"role": "CCPC Accounting Mapping Approver"}
+  ],
+  "standard": "Yes",
+  "system_page": 0,
+  "title": "Phase 1 Finance Mappings"
+}
