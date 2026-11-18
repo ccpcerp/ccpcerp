@@ -13,6 +13,7 @@ from erpnext import is_perpetual_inventory_enabled
 from erpnext.tests.utils import ERPNextTestSuite
 from frappe.model.workflow import apply_workflow
 
+from ccpcerp.ccpc_erp import phase1_finance_onboarding as onboarding
 from ccpcerp.ccpc_erp import test_finance_withdrawal_billing_bridge_disposable as finance
 from ccpcerp.ccpc_erp import withdrawal_slip_stock as issuance
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
@@ -90,6 +91,39 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
             self._approve_signed("Center", self.department, self.center),
         )
 
+    def _onboard_initial_mappings(self):
+        self._actor(finance.MAKER, onboarding.PREPARER)
+        self._actor(finance.CHECKER, onboarding.CHECKER)
+        revisions = []
+        for kind, source, value in (("Expense", ITEM_GROUP, ACCOUNT), ("Center", self.department, self.center)):
+            frappe.set_user(finance.MAKER)
+            self.assertEqual(onboarding.get_pilot_context(), {
+                "companies": [ledger.COMPANY], "can_propose": True, "can_review": False,
+            })
+            self.assertIn(source, onboarding.search_pilot_master(kind, ledger.COMPANY, "source", source))
+            self.assertIn(value, onboarding.search_pilot_master(kind, ledger.COMPANY, "value", value))
+            self.assertEqual(onboarding.get_pilot_coverage(kind, ledger.COMPANY, source), {"active": None, "draft": None})
+            draft = onboarding.propose_pilot_mapping(kind, ledger.COMPANY, source, value)
+            self.assertEqual(draft["state"], "Draft")
+
+            frappe.set_user(finance.CHECKER)
+            self.assertEqual(onboarding.get_pilot_context(), {
+                "companies": [ledger.COMPANY], "can_propose": False, "can_review": True,
+            })
+            self.assertEqual(onboarding.get_pilot_coverage(kind, ledger.COMPANY, source), {
+                "active": None, "draft": draft["name"],
+            })
+            review = onboarding.review_pilot_mapping(kind, draft["name"])
+            self.assertEqual((review["source"], review["value"], review["owner"]), (source, value, finance.MAKER))
+            approved = onboarding.sign_and_approve_initial_mapping(kind, draft["name"], review["modified"])
+            self.assertEqual(approved["approved_by"], finance.CHECKER)
+            self.assertTrue(approved["version"] and approved["decision_use"])
+            self.assertEqual(onboarding.get_pilot_coverage(kind, ledger.COMPANY, source), {
+                "active": {"revision": draft["name"], "value": value}, "draft": None,
+            })
+            revisions.append(draft["name"])
+        return revisions
+
     def _inventory_and_ledger_counts(self, slip):
         return (
             self._bin_qty(),
@@ -99,7 +133,7 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
         )
 
     def test_actual_issue_reconciles_with_ledger_and_department_report_once(self):
-        expense_revision, center_revision = self._sign_mappings()
+        expense_revision, center_revision = self._onboard_initial_mappings()
         slip = self._review_slip()
         self.assertFalse(frappe.has_permission("Stock Entry", "create"))
         self.assertEqual(frappe.session.user, ledger.ISSUER)
@@ -186,6 +220,66 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
         with self.assertRaises(MappingPolicyError):
             issue_withdrawal_slip(slip.name)
         self.assertEqual(self._inventory_and_ledger_counts(slip), before)
+
+    def test_finance_onboarding_enforces_role_company_and_exact_master(self):
+        self.load_test_records("Sales Invoice")
+        self._actor(finance.MAKER, onboarding.PREPARER)
+        self._actor(finance.CHECKER, onboarding.CHECKER)
+        for user in ("Administrator", ledger.ISSUER):
+            frappe.set_user(user)
+            with self.assertRaises(frappe.ValidationError):
+                onboarding.get_pilot_context()
+
+        frappe.set_user(finance.MAKER)
+        with self.assertRaisesRegex(frappe.ValidationError, "Company-scoped permission"):
+            onboarding.search_pilot_master("Expense", finance.BUYER, "value")
+        with self.assertRaisesRegex(frappe.ValidationError, "Company must exist"):
+            onboarding.get_pilot_coverage("Expense", ledger.COMPANY.lower(), ITEM_GROUP)
+        with self.assertRaisesRegex(frappe.ValidationError, "exact leaf Item Group"):
+            onboarding.propose_pilot_mapping("Expense", ledger.COMPANY, ITEM_GROUP.lower(), ACCOUNT)
+        self.assertEqual(onboarding.search_pilot_master("Expense", ledger.COMPANY, "source", "All Item Groups"), [])
+        self.assertEqual(onboarding.search_pilot_master("Expense", ledger.COMPANY, "value", "Stock In Hand - _TC"), [])
+
+        draft = onboarding.propose_pilot_mapping("Expense", ledger.COMPANY, ITEM_GROUP, ACCOUNT)
+        with self.assertRaisesRegex(frappe.ValidationError, "explicit Finance mapping role"):
+            onboarding.review_pilot_mapping("Expense", draft["name"])
+        frappe.set_user(finance.CHECKER)
+        with self.assertRaisesRegex(frappe.ValidationError, "Only Finance preparers"):
+            onboarding.propose_pilot_mapping("Expense", ledger.COMPANY, ITEM_GROUP, ACCOUNT)
+        review = onboarding.review_pilot_mapping("Expense", draft["name"])
+        with self.assertRaisesRegex(frappe.ValidationError, "changed"):
+            onboarding.sign_and_approve_initial_mapping("Expense", draft["name"], "stale")
+        self._actor(finance.MAKER, onboarding.CHECKER)
+        frappe.set_user(finance.MAKER)
+        with self.assertRaisesRegex(frappe.ValidationError, "cannot approve their own"):
+            onboarding.sign_and_approve_initial_mapping("Expense", draft["name"], review["modified"])
+
+    def test_finance_onboarding_rolls_back_signature_and_approval_together(self):
+        self._actor(finance.MAKER, onboarding.PREPARER)
+        self._actor(finance.CHECKER, onboarding.CHECKER)
+        frappe.set_user(finance.MAKER)
+        draft = onboarding.propose_pilot_mapping("Expense", ledger.COMPANY, ITEM_GROUP, ACCOUNT)["name"]
+        frappe.set_user(finance.CHECKER)
+        review = onboarding.review_pilot_mapping("Expense", draft)
+        original = onboarding.approve_mapping
+
+        def fail_after_approval(*args):
+            approved = original(*args)
+            self.assertTrue(frappe.db.exists("CCPC Mapping Decision Use", approved["decision_use"]))
+            raise RuntimeError("Synthetic audit transaction failure")
+
+        with patch.object(onboarding, "approve_mapping", fail_after_approval):
+            with self.assertRaisesRegex(RuntimeError, "Synthetic audit transaction failure"):
+                onboarding.sign_and_approve_initial_mapping("Expense", draft, review["modified"])
+        self.assertEqual(onboarding.review_pilot_mapping("Expense", draft)["state"], "Draft")
+        self.assertFalse(frappe.db.exists("CCPC Accounting Mapping Decision", {"revision": draft}))
+        self.assertFalse(frappe.db.exists("CCPC Mapping Decision Use", {"revision": draft}))
+        self.assertFalse(frappe.db.exists("Version", {"ref_doctype": "CCPC Expense Mapping Revision", "docname": draft}))
+
+        approved = onboarding.sign_and_approve_initial_mapping("Expense", draft, review["modified"])
+        self.assertEqual(approved["state"], "Approved")
+        with self.assertRaisesRegex(frappe.ValidationError, "untouched Draft"):
+            onboarding.sign_and_approve_initial_mapping("Expense", draft, review["modified"])
 
     def test_company_without_perpetual_inventory_cannot_issue_without_expense_gl(self):
         self._sign_mappings()
