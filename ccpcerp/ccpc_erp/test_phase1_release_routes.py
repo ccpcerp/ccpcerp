@@ -68,6 +68,24 @@ class TestPhase1ReleasedRoutes(unittest.TestCase):
                 with self.assertRaisesRegex(frappe.PermissionError, "disabled"):
                     getattr(billing, name)()
 
+    def test_both_routes_reject_requesting_company_mismatch_with_locked_row(self):
+        slip = _foreign_company_slip()
+        locked = dict(slip)
+        slip.requesting_company = slip.company
+        stock = frappe._dict(docstatus=0, withdrawal_slip=slip.name)
+        module = "ccpcerp.ccpc_erp.withdrawal_slip_stock"
+        with (
+            patch(f"{module}.frappe.get_doc", return_value=slip),
+            patch(f"{module}._require_stockroom_user"),
+            patch(f"{module}._lock_withdrawal_slip", return_value=locked),
+            patch(f"{module}._assert_independent_issuer") as issuer,
+        ):
+            with self.assertRaisesRegex(frappe.ValidationError, "changed during issuance"):
+                _get_issuable_slip(slip.name, locked)
+            with self.assertRaisesRegex(frappe.ValidationError, "changed during issuance"):
+                validate_withdrawal_slip_stock_entry(stock, method="before_submit")
+            issuer.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

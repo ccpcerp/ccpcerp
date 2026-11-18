@@ -40,7 +40,7 @@ class TestWithdrawalPeerIssuance(TestCase):
     def locked(preparer="juan@example.test"):
         return frappe._dict(
             status="Stockroom Review", received_by="Juan",
-            company="TISS", source_warehouse="Stores - TISS",
+            company="TISS", requesting_company="TISS", source_warehouse="Stores - TISS",
             owner=preparer, approving_supervisor=preparer,
         )
 

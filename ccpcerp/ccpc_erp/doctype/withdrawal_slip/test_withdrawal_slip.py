@@ -293,7 +293,7 @@ class TestWithdrawalSlip(TestCase):
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_issuable_slip", return_value=slip),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_no_submitted_material_issue"),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._get_existing_draft_names", return_value=[]),
-			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.require_department_gl_dimension"),
+			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.require_department_gl_posting"),
 			patch("ccpcerp.ccpc_erp.withdrawal_issue_beneficiary.validate_department_company"),
 			# Server timestamp is tested separately; keep this unit test scoped to Department.
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock.stamp_original_issue_posting"),
@@ -716,6 +716,7 @@ class TestWithdrawalSlip(TestCase):
 			status="Stockroom Review",
 			received_by="Pedro Santos",
 			company="CCPC",
+			requesting_company="CCPC",
 			source_warehouse="Warehouse 1 - CCPC",
 			items=[
 				frappe._dict(
@@ -754,6 +755,7 @@ class TestWithdrawalSlip(TestCase):
 			status="Stockroom Review",
 			received_by="Pedro Santos",
 			company="CCPC",
+			requesting_company="CCPC",
 			source_warehouse="Warehouse 1 - CCPC",
 		)),
 			patch("ccpcerp.ccpc_erp.withdrawal_slip_stock._assert_independent_issuer"),
