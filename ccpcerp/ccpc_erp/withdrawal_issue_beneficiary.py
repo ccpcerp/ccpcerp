@@ -2,7 +2,9 @@
 # Approved Decision A beneficiary attribution only; B/C account mappings pending.
 
 import frappe
+from erpnext import is_perpetual_inventory_enabled
 from frappe import _
+from frappe.utils import cint
 
 from ccpcerp.ccpc_erp.equipment_costing import validate_department_company
 
@@ -42,12 +44,14 @@ def resolve_beneficiary_department(slip):
     return beneficiary
 
 
-def require_department_gl_dimension():
-    """Make explicit that a mere custom Department field is insufficient for GL."""
+def require_department_gl_posting(company):
+    """Require ERPNext to post the issue value to GL with its Department."""
     from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
         get_accounting_dimensions,
     )
 
+    if not cint(is_perpetual_inventory_enabled(company)):
+        frappe.throw(_("Enable Perpetual Inventory for the issuing Company before posting a Withdrawal Slip."))
     if "department" not in get_accounting_dimensions():
         frappe.throw(_("Department GL Accounting Dimension must be configured before controlled Material Issue posting."))
     for doctype in ("Stock Entry", "Stock Entry Detail", "GL Entry"):
@@ -58,7 +62,7 @@ def require_department_gl_dimension():
 def apply_issue_beneficiary(entry, slip):
     """Populate actual beneficiary on header/items at original issue creation."""
     beneficiary = resolve_beneficiary_department(slip)
-    require_department_gl_dimension()
+    require_department_gl_posting(slip.company)
     entry.department = beneficiary
     for row in entry.get("items") or []:
         row.department = beneficiary
@@ -68,7 +72,7 @@ def apply_issue_beneficiary(entry, slip):
 def validate_issue_beneficiary(entry, slip):
     """Fail closed on direct, forged or stale voucher submission."""
     beneficiary = resolve_beneficiary_department(slip)
-    require_department_gl_dimension()
+    require_department_gl_posting(slip.company)
     if entry.get("department") != beneficiary:
         frappe.throw(_("Material Issue header Department differs from approved actual beneficiary."))
     for row in entry.get("items") or []:

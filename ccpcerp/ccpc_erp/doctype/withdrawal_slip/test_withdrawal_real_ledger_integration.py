@@ -57,6 +57,10 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                      or os.environ.get("CCPC_ALLOW_CANCELLATION_PROBE") == "isolated-only")
             ):
                 raise RuntimeError("Transaction probes require an approved isolated CI runner and test site")
+        self._set_up_stock()
+        self._set_up_review_slip()
+
+    def _set_up_stock(self):
         # ERPNext's own test bootstrap records, not CCPC production business data.
         frappe.set_user("Administrator")
         self.load_test_records("Stock Entry")
@@ -182,6 +186,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertEqual(self.receipt.docstatus, 1)
         self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED, places=5)
 
+    def _set_up_review_slip(self):
         # A valid synthetic request is inserted as its actual preparer.
         frappe.set_user(PREPARER)
         slip = frappe.get_doc(
