@@ -1,0 +1,15 @@
+{
+  "name": "ccpc-phase1-finance-ui-tests",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Isolated Playwright regression tests for the Phase 1 Finance mapping page",
+  "scripts": {
+    "test": "playwright test --config=playwright.config.cjs --grep-invert=@live",
+    "test:live": "playwright test --config=playwright.config.cjs --grep=@live",
+    "check": "node --check phase1-finance.spec.cjs && node --check phase1-finance.live.spec.cjs && node --check playwright.config.cjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.0",
+    "jquery": "3.7.1"
+  }
+}
