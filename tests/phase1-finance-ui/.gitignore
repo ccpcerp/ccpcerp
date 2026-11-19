@@ -1,0 +1,6 @@
+node_modules/
+test-results/
+playwright-report/
+.auth/
+*.storage-state.json
+*.trace.zip
