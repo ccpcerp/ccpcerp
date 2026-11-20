@@ -5,6 +5,10 @@
 version: 2.1
 
 parameters:
+  # Browser-only manual opt-in. Never a PR label or schedule trigger.
+  run_finance_ui:
+    type: boolean
+    default: false
   run_integration:
     type: boolean
     default: false
@@ -40,6 +44,55 @@ jobs:
             if [ "${CIRCLE_BRANCH:-}" = "review/four-day-one-reports-integration-2026-10-29" ]; then
               python -m unittest discover -s .circleci -p 'test_four_reports_ci_config_static.py' -v
             fi
+
+  finance-ui-playwright-isolated:
+    # Small, credential-free, browser-only container. No Frappe, SQL or ERPNext site.
+    docker:
+      - image: mcr.microsoft.com/playwright:v1.56.0-noble
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Verify exact Finance UI CI identity, branch, checkout and source
+          command: |
+            set -euo pipefail
+            test "$CIRCLECI" = "true"
+            test "$CIRCLE_PROJECT_USERNAME" = "CCPCerp_2026"
+            test "$CIRCLE_PROJECT_REPONAME" = "ccpcerp"
+            test "$CIRCLE_BRANCH" = "test/phase1-finance-playwright-ui-2026-11-20"
+            test "$CIRCLE_JOB" = "finance-ui-playwright-isolated"
+            test -n "$CIRCLE_PIPELINE_ID"
+            test -n "$CIRCLE_WORKFLOW_ID"
+            test -n "$CIRCLE_BUILD_NUM"
+            test "$(git rev-parse HEAD)" = "$CIRCLE_SHA1"
+            test "$(git hash-object tests/phase1-finance-ui/phase1-finance.spec.cjs)" = "a9907ecaf6a265737d0e67809fe4726f3ed4b55e"
+            test "$(git hash-object tests/phase1-finance-ui/package.json)" = "dd9dabd16d76382ddcfe9a6c9da496392e778052"
+            test "$(git hash-object ccpcerp/ccpc_erp/page/ccpc_phase1_finance/ccpc_phase1_finance.js)" = "413cc18d294af23acc4b2b34907fe0bfcbd57fdb"
+            test -z "$CCPC_FINANCE_UI_LIVE"
+            test -z "$CCPC_FINANCE_UI_DEV_URL"
+            test -z "$CCPC_FINANCE_UI_PREPARER_STATE"
+            test -z "$CCPC_FINANCE_UI_CHECKER_STATE"
+            echo "Reviewed Finance UI source, isolated CI identity, no live credentials: PASS"
+            echo "Checkout source SHA: $CIRCLE_SHA1"
+      - run:
+          name: Install pinned Playwright and run four offline Chromium specs
+          no_output_timeout: 8m
+          command: |
+            set -euo pipefail
+            cd tests/phase1-finance-ui
+            node --version
+            npm --version
+            timeout -s TERM 420s bash -c '
+              set -euo pipefail
+              npm install --ignore-scripts --no-audit --no-fund --fetch-retries=0 --fetch-timeout=40000
+              npm ls --depth=0
+              npm run check
+              npm test
+              sha256sum package-lock.json
+            '
+      - store_artifacts:
+          path: tests/phase1-finance-ui/package-lock.json
+          destination: ccpc-finance-ui-package-lock.json
 
   isolated-erpnext-integration:
     # Disposable CircleCI-only MariaDB/Redis/Frappe site. NOT persistent DEVELOPMENT.
@@ -347,3 +400,18 @@ workflows:
           filters:
             branches:
               only: feature/finance-mapping-lifecycle-2026-10-28
+  # Default disabled. Owner starts a parameterized run, then approves its hold.
+  opt-in-finance-ui:
+    when: << pipeline.parameters.run_finance_ui >>
+    jobs:
+      - finance-ui-manual-approval:
+          type: approval
+          filters:
+            branches:
+              only: test/phase1-finance-playwright-ui-2026-11-20
+      - finance-ui-playwright-isolated:
+          requires:
+            - finance-ui-manual-approval
+          filters:
+            branches:
+              only: test/phase1-finance-playwright-ui-2026-11-20
