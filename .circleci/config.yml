@@ -59,7 +59,7 @@ jobs:
             test "$CIRCLECI" = "true"
             test "$CIRCLE_PROJECT_USERNAME" = "CCPCerp_2026"
             test "$CIRCLE_PROJECT_REPONAME" = "ccpcerp"
-            test "$CIRCLE_BRANCH" = "test/phase1-finance-playwright-ui-2026-11-20"
+            test "$CIRCLE_BRANCH" = "release/withdrawal-department-phase1-2026-11-17"
             test "$CIRCLE_JOB" = "finance-ui-playwright-isolated"
             test -n "$CIRCLE_PIPELINE_ID"
             test -n "$CIRCLE_WORKFLOW_ID"
@@ -84,7 +84,7 @@ jobs:
             npm --version
             timeout -s TERM 420s bash -c '
               set -euo pipefail
-              npm install --ignore-scripts --no-audit --no-fund --fetch-retries=0 --fetch-timeout=40000
+              npm ci --ignore-scripts --no-audit --no-fund --fetch-retries=0 --fetch-timeout=40000
               npm ls --depth=0
               npm run check
               npm test
@@ -408,10 +408,10 @@ workflows:
           type: approval
           filters:
             branches:
-              only: test/phase1-finance-playwright-ui-2026-11-20
+              only: release/withdrawal-department-phase1-2026-11-17
       - finance-ui-playwright-isolated:
           requires:
             - finance-ui-manual-approval
           filters:
             branches:
-              only: test/phase1-finance-playwright-ui-2026-11-20
+              only: release/withdrawal-department-phase1-2026-11-17
