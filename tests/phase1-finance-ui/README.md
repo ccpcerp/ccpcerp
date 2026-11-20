@@ -18,6 +18,20 @@ The four offline browser tests run the actual Finance Page JavaScript against a 
 
 **Limits:** these tests check browser rendering only, *not* server-side authorization, actual user grants, master selection, coverage, mapping signatures, Stock Ledger or General Ledger. There is not yet a committed npm lockfile; after a successful isolated install, review and commit its lockfile to make dependency resolution reproducible.
 
+## Opt-in disposable CircleCI runner (official Playwright Test)
+
+The existing GitHub Actions one-shot trial [#44643024277](https://github.com/ccpcerp/ccpcerp/actions/runs/44643024277) was marked failed **before runner allocation**, with zero executed job steps, `runner_id=0` and 0 billable runner milliseconds. Do not claim the Node suite failed; provider failure cause was not exposed in available logs. Do **not** rerun that workflow automatically.
+
+The [CircleCI](https://app.circleci.com/) fallback added to `.circleci/config.yml` is **disabled by default**. It uses Microsoft's disposable Playwright v1.56.0 Noble image, `resource_class: small`, with a 420-second command limit, **no Frappe database**, no MAIN DEVELOPMENT credentials, no production access, and branch + source hash validation. There is a separate manual approval hold. Running a CI service may consume hosted CI credits; verify the organization's remaining free allowance and budget before approving the hold.
+
+To run once using the existing CircleCI project connection:
+
+1. In the `ccpcerp` CircleCI project, choose **Run Pipeline**, branch `test/phase1-finance-playwright-ui-2026-11-20` and latest reviewed commit; set only pipeline parameter `run_finance_ui = true` (leave `run_integration`, `run_finance_lifecycle`, `run_finance_bridge`, `run_four_reports_integrated` false).
+2. Open the `opt-in-finance-ui` workflow and review the pending `finance-ui-manual-approval` hold; ensure branch and expected job `finance-ui-playwright-isolated` before clicking **Approve**. Do not rerun automatically on a failure.
+3. Review the `npm run check` and `npm test` output for **4/4 passing tests**, source pin, exact installed package versions, and the stored `ccpc-finance-ui-package-lock.json` artifact. The operator can share the CircleCI link/output for verification and to commit the reviewed npm lockfile to PR40.
+
+**At the current checkpoint this CircleCI job is configured but has NOT been executed.** PR40 is still draft and unmerged; the earlier local isolated Chromium check executed the four original test functions through a temporary Node adapter and returned **4/4 PASS**, which does not substitute for the official Playwright Test runner or named-user acceptance.
+
 ## Optional authenticated MAIN DEVELOPMENT browser check
 
 `npm test` excludes the separate `@live` tests. Live tests require **explicit opt-in** and accept only `http://development.localhost:8000`, not any production host. They verify the same Company × Mapping type UI matrix with existing named Finance Preparer/Controller sessions.
