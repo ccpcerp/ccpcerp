@@ -61,7 +61,7 @@ The live browser performs navigation and selection changes only, disallows cross
 ## Status and release safety
 
 - Historical named-user browser checks of the four Company × Mapping type combinations were manually recorded PASS on November 19; **they were not automated**.
-- Offline suite: add and syntax-check in GitHub; browser run remains pending until Playwright/Chromium dependencies are installed in a safe disposable workspace.
+- Original four JavaScript test functions: **4/4 PASS** in isolated Chromium using a temporary Node adapter with local Playwright Core and jQuery; the exact pinned `@playwright/test` `npm test` run is still pending a hosted CI run with npm access.
 - Live authenticated tests: not performed; require careful separately scoped DEV execution.
-- No new auto-triggered CI, paid runner, role grant, database write, MAIN DEVELOPMENT checkout/migration/restart or PRODUCTION operation is authorized by this test-only change.
+- A one-time, path-filtered GitHub Actions push test attempted but failed before any runner started (0 billable milliseconds). The CircleCI workflow is manual-only, parameter default false, approval-held and branch-restricted; no recurring CI scheduling or unattended rerun is authorized. No role grant, database write, MAIN DEVELOPMENT checkout/migration/restart or PRODUCTION operation occurred.
 - Playwright disables screenshots, traces and video to avoid preserving authenticated content.
