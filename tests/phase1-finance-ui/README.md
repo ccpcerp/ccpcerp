@@ -30,7 +30,7 @@ To run once using the existing CircleCI project connection:
 2. Open the `opt-in-finance-ui` workflow and review the pending `finance-ui-manual-approval` hold; ensure branch and expected job `finance-ui-playwright-isolated` before clicking **Approve**. Do not rerun automatically on a failure.
 3. Review the `npm run check` and `npm test` output for **4/4 passing tests**, source pin, exact installed package versions, and the stored `ccpc-finance-ui-package-lock.json` artifact. The operator can share the CircleCI link/output for verification and to commit the reviewed npm lockfile to PR40.
 
-**At the current checkpoint this CircleCI job is configured but has NOT been executed.** PR40 is still draft and unmerged; the earlier local isolated Chromium check executed the four original test functions through a temporary Node adapter and returned **4/4 PASS**, which does not substitute for the official Playwright Test runner or named-user acceptance.
+**2026-11-20 CircleCI results (user-provided job build 149 step logs): OFFICIAL 4/4 PASS.** The CircleCI identity/checked-out Git SHA guard passed at `324e7ae717b238392ee8acfc20e61db3a1862f07`. Node `v22.20.0`, npm `10.9.3`, `@playwright/test@1.56.0`, jQuery `3.7.1`, `npm run check` and the actual `npm test` runner all passed (4 tests, 1 worker, 3.0 seconds). The generated `package-lock.json` SHA-256 was `cbe5dc6e71b790d073ba096f18e54ca4fd80dcc56ae16ab6625bc6c352212696`; the job uploaded it to the `ccpc-finance-ui-package-lock.json` artifact (2.6 kB). **The artifact contents have not been provided for review/commit**, and the job log does not establish live named-user/Finance backend or ledger acceptance. PR40 remains draft and unmerged. No repeat CircleCI run is needed for these four offline specs.
 
 ## Optional authenticated MAIN DEVELOPMENT browser check
 
@@ -61,7 +61,7 @@ The live browser performs navigation and selection changes only, disallows cross
 ## Status and release safety
 
 - Historical named-user browser checks of the four Company × Mapping type combinations were manually recorded PASS on November 19; **they were not automated**.
-- Original four JavaScript test functions: **4/4 PASS** in isolated Chromium using a temporary Node adapter with local Playwright Core and jQuery; the exact pinned `@playwright/test` `npm test` run is still pending a hosted CI run with npm access.
+- **Official CircleCI Playwright Test: 4/4 PASS** on exact reviewed commit `324e7ae`, with pinned `@playwright/test@1.56.0` and jQuery `3.7.1`; Node syntax checks also passed. The earlier 4/4 local adapter validation is superseded for these offline tests.
 - Live authenticated tests: not performed; require careful separately scoped DEV execution.
-- A one-time, path-filtered GitHub Actions push test attempted but failed before any runner started (0 billable milliseconds). The CircleCI workflow is manual-only, parameter default false, approval-held and branch-restricted; no recurring CI scheduling or unattended rerun is authorized. No role grant, database write, MAIN DEVELOPMENT checkout/migration/restart or PRODUCTION operation occurred.
+- A one-time GitHub Actions attempt failed before any runner started (0 billable milliseconds). The CircleCI manual-only, approval-held job **subsequently passed its original four browser tests**. No recurring CI schedule or unattended rerun was configured. These are synthetic offline UI checks only; no role grant, database write, MAIN DEVELOPMENT checkout/migration/restart or PRODUCTION operation was part of the test job.
 - Playwright disables screenshots, traces and video to avoid preserving authenticated content.
