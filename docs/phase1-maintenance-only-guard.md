@@ -21,7 +21,7 @@ Expense Account Mapping selects the expense nature for a same-Company, original 
 
 ## Server enforcement and auditability
 
-1. New structured classification is a part of Withdrawal Slip **request intent** and cannot normally be changed after approval. No automatic default to Routine Maintenance.
+1. New structured classification is a part of Withdrawal Slip **request intent** and cannot normally be changed after approval. No automatic default to Routine Maintenance. The Withdrawal Slip browser form's read-only field list also includes the new selector, and the server remains authoritative against modified HTTP input.
 2. During authorized Stockroom issue creation and linked Stock Entry validation on submission, the issue resolver locks/verifies original Slip rows and Item/Item Group masters, resolves actual same-Company beneficiary, then checks the structured classification **before** looking up/allocating any Expense Account or Cost Center. No trust in client-entered Item Groups.
 3. The locked parent snapshot includes `ccpc_material_use`, and optimistic stale-Slip comparisons include it, preventing a changed approved Slip from being processed with a stale permissioned Stock Entry.
 4. The Stock Entry `validate` and `before_submit` hooks also block **unlinked CCPC Bearings Material Issues**, including direct stock posting. Other direct non-Bearings operations and material receipts retain their existing treatment.
@@ -45,3 +45,10 @@ Expense Account Mapping selects the expense nature for a same-Company, original 
 - Actual ERPNext / MariaDB and DEVELOPMENT UAT: **not performed**.
 - Expense Mapping status: still Draft, not active.
 - PRODUCTION: **untouched**.
+
+## Verification checkpoint (2026-11-21)
+
+- **Executed isolated pure policy unit tests:** Six tests passed locally against byte-for-byte copies of `phase1_maintenance_use.py` and `test_phase1_maintenance_use.py` whose Git blob SHA values were compared to the latest private GitHub branch; covers positive routine, missing/capital/other, beneficiary mismatch, mixed group, non-pilot unaffected and malformed group source. This proves only **pure policy logic**, not database/ERPNext integration.
+- **Read-only source review:** 10 code/metadata/hook presence assertions passed using exact GitHub branch content. These are **textual inspection checks**, not executing the Python AST unittest module or testing true Stock Entry transactions.
+- **GitHub Actions:** Latest PR CI run still `failure` before steps were assigned/executed; no GitHub-hosted tests passed. Runner provisioning root cause unverified. PR remains draft.
+- **Required next:** Offline execution of full static wiring suite (using a complete reviewed checkout) and disposable Frappe/MariaDB integration under the safe site gate; then manual review and separately authorized DEVELOPMENT rollout/migration. Do not deploy this branch directly while Finance draft remains unsigned.
