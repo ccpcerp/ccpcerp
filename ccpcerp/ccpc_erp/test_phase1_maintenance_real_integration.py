@@ -8,7 +8,6 @@ posting can be exercised with existing ERPNext synthetic masters.
 """
 import multiprocessing
 import os
-from contextlib import ExitStack
 from queue import Empty
 from unittest.mock import patch
 
@@ -24,6 +23,7 @@ from ccpcerp.ccpc_erp.doctype.withdrawal_slip import (
 )
 from ccpcerp.ccpc_erp import test_finance_withdrawal_billing_bridge_disposable as finance
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import issue_withdrawal_slip
+from ccpcerp.ccpc_erp.ci_pr42_concurrent_issue_worker import _pr42_concurrent_worker
 
 SITE = "ci-pr42-maintenance.localhost"
 GROUP = "_Test Item Group"
@@ -48,63 +48,6 @@ def _is_disposable_pr42_site():
         frappe.conf.get("db_type", "mariadb") == "mariadb",
     ))
 
-
-def _pr42_concurrent_worker(slot, site, sites_path, slip_name, beneficiary, result_queue):
-    """Separate real SQL transaction; never bypasses the production row lock."""
-    try:
-        # The guard precedes ANY mutation and only allows this dedicated
-        # GitHub-hosted, synthetic, owner-opted-in test site.
-        if os.environ.get("CCPC_ALLOW_MAINTENANCE_DB_PROBE") != "pr42-only":
-            raise RuntimeError("PR42 disposable test flag required")
-        frappe.init(site=site, sites_path=sites_path, force=True)
-        if not _is_disposable_pr42_site():
-            raise RuntimeError("Concurrent worker is not on the approved PR42 CI site")
-        frappe.connect()
-        frappe.set_user(ledger.ISSUER)
-        frappe.db.sql("SET SESSION innodb_lock_wait_timeout=30")
-        connection = int(frappe.db.sql("SELECT CONNECTION_ID()")[0][0])
-
-        from ccpcerp.ccpc_erp import withdrawal_slip_stock as stock
-        original_lock = stock._lock_withdrawal_slip
-        first_attempt = False
-
-        def reporting_lock(name):
-            nonlocal first_attempt
-            if name != slip_name:
-                raise AssertionError("Unexpected locked Withdrawal Slip name")
-            if not first_attempt:
-                first_attempt = True
-                result_queue.put(("attempt", slot, connection))
-            return original_lock(name)
-
-        with ExitStack() as stack:
-            # Test-only translations to the synthetic ERPNext fixture
-            # must also apply in the independently spawned workers.
-            for symbol, value in (
-                ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_COMPANY", ledger.COMPANY),
-                ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_ITEM_GROUP", GROUP),
-                ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_BENEFICIARY", beneficiary),
-                ("ccpcerp.ccpc_erp.withdrawal_slip_stock.PILOT_COMPANY", ledger.COMPANY),
-                ("ccpcerp.ccpc_erp.withdrawal_slip_stock.PILOT_ITEM_GROUP", GROUP),
-            ):
-                stack.enter_context(patch(symbol, value))
-            stack.enter_context(patch.object(stock, "_lock_withdrawal_slip", reporting_lock))
-            try:
-                posted = stock.issue_withdrawal_slip(slip_name)
-                if posted.get("submitted") != 1:
-                    raise AssertionError("Missing submitted Stock Entry")
-                frappe.db.commit()
-                result_queue.put(("success", slot, posted["name"]))
-            except frappe.ValidationError as exc:
-                frappe.db.rollback()
-                result_queue.put(("rejected", slot, str(exc)[:300]))
-    except Exception as exc:
-        if getattr(frappe.local, "db", None):
-            frappe.db.rollback()
-        result_queue.put(("error", slot, type(exc).__name__ + ": " + str(exc)[:300]))
-    finally:
-        if getattr(frappe.local, "initialised", False):
-            frappe.destroy()
 
 
 class TestPhase1MaintenanceRealIntegration(ERPNextTestSuite):
