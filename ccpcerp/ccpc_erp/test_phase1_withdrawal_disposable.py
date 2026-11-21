@@ -17,6 +17,7 @@ from ccpcerp.ccpc_erp import phase1_finance_onboarding as onboarding
 from ccpcerp.ccpc_erp import test_finance_withdrawal_billing_bridge_disposable as finance
 from ccpcerp.ccpc_erp import withdrawal_slip_stock as issuance
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_withdrawal_disposable_site
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip import test_withdrawal_real_ledger_integration as ledger
 from ccpcerp.ccpc_erp.report.ccpc_department_material_consumption import (
     ccpc_department_material_consumption as report,
@@ -39,13 +40,17 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
     _approve_signed = finance.TestFinanceWithdrawalBillingBridgeDisposable._approve_signed
 
     def setUp(self):
+        # CircleCI's existing named/socket-only site remains permitted; the
+        # separately controlled PR #41 GitHub runner uses TCP MariaDB in its
+        # own isolated container and is checked by the strict source-branch guard.
+        private_socket_site = frappe.local.site == SITE and bool(frappe.conf.get("db_socket"))
+        reviewed_github_site = is_reviewed_withdrawal_disposable_site(frappe.local.site)
         if (
-            frappe.local.site != SITE
+            not (private_socket_site or reviewed_github_site)
             or os.environ.get("CCPC_PHASE1_DISPOSABLE") != "1"
-            or not frappe.conf.get("db_socket")
             or frappe.conf.get("db_type", "mariadb") != "mariadb"
         ):
-            self.skipTest("Requires the explicitly enabled disposable Phase 1 MariaDB socket site")
+            self.skipTest("Requires explicitly enabled isolated Phase 1 MariaDB site")
         super().setUp()
         self.addCleanup(frappe.set_user, "Administrator")
         self._set_up_stock()
