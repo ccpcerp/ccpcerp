@@ -6,6 +6,7 @@ import unittest
 APP = Path(__file__).resolve().parents[1]
 FLOW = APP.parent / ".github/workflows/phase1-maintenance-mariadb-manual.yml"
 DB_SUITE = Path(__file__).with_name("test_phase1_maintenance_real_integration.py")
+WORKER = Path(__file__).with_name("ci_pr42_concurrent_issue_worker.py")
 
 
 class TestPhase1MaintenanceActionsStatic(unittest.TestCase):
@@ -69,6 +70,31 @@ class TestPhase1MaintenanceActionsStatic(unittest.TestCase):
             if coverage != "CI injected":
                 self.assertIn(coverage, source)
         self.assertEqual(source.count("    def test_"), 10)
+
+
+    def test_spawn_worker_is_lightweight_and_tightly_scoped(self):
+        source = WORKER.read_text(encoding="utf-8")
+        for required in (
+            'site == "ci-pr42-maintenance.localhost"',
+            'env.get("GITHUB_HEAD_REF") == "feature/phase1-maintenance-only-2026-11-21"',
+            'env.get("GITHUB_REF") == "refs/pull/42/merge"',
+            'env.get("CCPC_ALLOW_MAINTENANCE_DB_PROBE") == "pr42-only"',
+            "frappe.init(site=site, sites_path=sites_path, force=True)",
+            "SELECT CONNECTION_ID()",
+            "frappe.db.commit()",
+            "frappe.db.rollback()",
+            "stock.issue_withdrawal_slip(slip_name)",
+        ):
+            self.assertIn(required, source)
+        for dangerous in (
+            "from erpnext.tests.utils",
+            "from erpnext.stock.doctype.item.test_item",
+            "from ccpcerp.ccpc_erp import test_",
+            "development.localhost",
+            "production",
+            "runs-on: self-hosted",
+        ):
+            self.assertNotIn(dangerous, source)
 
 
 if __name__ == "__main__":
