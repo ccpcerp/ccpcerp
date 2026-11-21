@@ -44,6 +44,16 @@ class TestPhase1MaintenanceWiring(unittest.TestCase):
         self.assertIn("Other / Unclassified", field["options"].split("\n"))
         self.assertIn("ccpc_material_use", doc["field_order"])
 
+    def test_classification_is_read_only_after_approval_in_browser(self):
+        source = (BASE / "doctype/withdrawal_slip/withdrawal_slip.js").read_text(encoding="utf-8")
+        request_fields = source.split("const request_intent_fields = [", 1)[1].split("];", 1)[0]
+        self.assertIn('"ccpc_material_use"', request_fields)
+        self.assertIn(
+            'frm.set_df_property(fieldname, "read_only", request_editable ? 0 : 1)',
+            source,
+        )
+        self.assertIn('state !== "Returned for Correction"', source)
+
     def test_request_intent_cannot_be_changed_after_approval(self):
         module = ast.parse(
             (BASE / "doctype/withdrawal_slip/withdrawal_slip.py").read_text(encoding="utf-8")
