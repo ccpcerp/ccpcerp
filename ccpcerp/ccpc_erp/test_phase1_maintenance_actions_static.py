@@ -44,6 +44,7 @@ class TestPhase1MaintenanceActionsStatic(unittest.TestCase):
     def test_db_suite_checks_real_ledger_and_fails_closed_outside_ci(self):
         source = DB_SUITE.read_text(encoding="utf-8")
         for needed in ("GITHUB_ACTIONS", "GITHUB_HEAD_REF", "GITHUB_BASE_REF",
+                       'env.get("GITHUB_REF") == "refs/pull/42/merge"',
                        "GITHUB_WORKFLOW", "CCPC_ALLOW_MAINTENANCE_DB_PROBE",
                        'frappe.conf.get("db_host") == "127.0.0.1"',
                        "Stock Ledger Entry", "GL Entry",
