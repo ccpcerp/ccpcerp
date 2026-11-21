@@ -61,7 +61,10 @@ class TestPhase1MaintenanceRealIntegration(ERPNextTestSuite):
         self.addCleanup(frappe.set_user, "Administrator")
         self._set_up_stock()
         self.assertTrue(frappe.get_meta("Withdrawal Slip").has_field("ccpc_material_use"))
-        self.assertTrue(frappe.db.sql(\n            "SHOW COLUMNS FROM `tabWithdrawal Slip` LIKE %s",\n            ("ccpc_material_use",), as_dict=True,\n        ))
+        self.assertTrue(frappe.db.sql(
+            "SHOW COLUMNS FROM `tabWithdrawal Slip` LIKE %s",
+            ("ccpc_material_use",), as_dict=True,
+        ))
         self.center = frappe.db.get_value(
             "Cost Center", {"company": ledger.COMPANY, "is_group": 0, "disabled": 0}, "name"
         )
