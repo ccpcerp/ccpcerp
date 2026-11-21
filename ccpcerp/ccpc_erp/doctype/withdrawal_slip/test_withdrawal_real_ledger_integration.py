@@ -891,6 +891,43 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         slip_name = self.slip_name
         item_name = self.item.name
 
+        # PR41's GitHub-hosted disposable site intentionally does not use
+        # CircleCI's simulated SQL approvals. Exercise the real independent
+        # Finance maker/checker signed-decision workflow, test-only, before
+        # opening a fresh WSGI request/transaction.
+        if site == "ci-withdrawal.localhost" and os.environ.get("GITHUB_ACTIONS") == "true":
+            from ccpcerp.ccpc_erp.test_finance_withdrawal_billing_bridge_disposable import (
+                CHECKER as FINANCE_CHECKER,
+                MAKER as FINANCE_MAKER,
+                TestFinanceWithdrawalBillingBridgeDisposable as FinanceApprovalTest,
+            )
+
+            FinanceApprovalTest._actor(self, FINANCE_MAKER, "CCPC Mapping Preparer")
+            FinanceApprovalTest._actor(self, FINANCE_CHECKER, "CCPC Accounting Mapping Approver")
+            expense_account = "Stock Adjustment - _TC"
+            center = frappe.db.get_value(
+                "Cost Center",
+                {"company": COMPANY, "is_group": 0, "disabled": 0},
+                "name",
+            )
+            self.assertTrue(center, "Disposable company must have a leaf Cost Center")
+            expense_revision = FinanceApprovalTest._approve_signed(
+                self, "Expense", "_Test Item Group", expense_account
+            )
+            center_revision = FinanceApprovalTest._approve_signed(
+                self, "Center", self.department, center
+            )
+            frappe.set_user("Administrator")
+            for doctype, revision in (
+                ("CCPC Expense Mapping Revision", expense_revision),
+                ("CCPC Center Mapping Revision", center_revision),
+            ):
+                self.assertEqual(
+                    frappe.db.get_value(doctype, revision, "approval_state"),
+                    "Approved",
+                    f"Expected signed Finance approval for {doctype} on the disposable site",
+                )
+
         # Site and test-item fixtures are committed ONLY on this ephemeral site
         # so the WSGI HTTP requests can see a legitimate Slip via fresh SQL.
         frappe.db.commit()
@@ -1007,7 +1044,14 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                               fail_after_native_posting):
                 failed = call(issuer, "post", issuer_token)
             self.assertNotEqual(failed.status_code, 200)
-            self.assertEqual(len(failed_posts), 1, "Failure probe did not reach the posting hook")
+            self.assertEqual(
+                len(failed_posts),
+                1,
+                "Failure probe did not reach the posting hook; "
+                f"HTTP status={failed.status_code}, "
+                f"Frappe error type={(failed.get_json(silent=True) or {}).get('exc_type')!r}. "
+                "Raw HTTP response and session credentials intentionally omitted.",
+            )
             self.assertGreater(failed_posts[0]["sle"], 0)
             self.assertGreater(failed_posts[0]["gl"], 0)
             self.assertEqual(failed_posts[0]["status"], "Fully Issued")

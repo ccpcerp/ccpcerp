@@ -1,4 +1,4 @@
-# Single authorized PR #41 attempt only. GitHub-hosted runner, synthetic site.
+# Single newly authorized PR #41 correction attempt only. GitHub-hosted runner, synthetic site.
 # No schedule, deployment, reusable credentials or shared DEVELOPMENT/PRODUCTION.
 name: CCPC Phase 1 PR41 - One-shot disposable MariaDB integration
 
@@ -23,7 +23,8 @@ jobs:
     if: >-
       github.repository == 'ccpcerp/ccpcerp' &&
       github.ref == 'refs/heads/test/phase1-http-rollback-reissue-report-2026-11-21' &&
-      github.event.before == '4e28efca11da6fa6dde21f41118e71fa7ae8a04a'
+      github.run_attempt == 1 &&
+      github.event.before == '7b65eda1510b28a41b8c487f35c6f277dd831851'
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
@@ -70,9 +71,9 @@ jobs:
           test "$GITHUB_EVENT_NAME" = "push"
           test "$GITHUB_REF" = "refs/heads/test/phase1-http-rollback-reissue-report-2026-11-21"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          test "$(git rev-parse HEAD^)" = "4e28efca11da6fa6dde21f41118e71fa7ae8a04a"
+          test "$(git rev-parse HEAD^)" = "7b65eda1510b28a41b8c487f35c6f277dd831851"
           git merge-base --is-ancestor 034afb116cf3fe0e3f9315b932eceba6dc961ce6 HEAD
-          test "$(git hash-object ccpcerp/ccpc_erp/doctype/withdrawal_slip/test_withdrawal_real_ledger_integration.py)" = "412e1609d3da583883057fe4ee985ebea1fbb9c8"
+          test "$(git hash-object ccpcerp/ccpc_erp/doctype/withdrawal_slip/test_withdrawal_real_ledger_integration.py)" = "47bc6795b23c4cd199ca98cc7d859c570aa7a4e0"
           test "$(git hash-object ccpcerp/ccpc_erp/test_phase1_withdrawal_disposable.py)" = "eb1fab6d444aac69f2b5b80176b99be9c9c17513"
           test "$(git hash-object ccpcerp/ccpc_erp/ci_disposable_site_guard.py)" = "c893df33669f7241652e4f2b2d46ce44ac2168d6"
           echo "Verified reviewed PR #41 test source and one-shot parent."
@@ -126,6 +127,7 @@ jobs:
           bench setup requirements --dev
 
       - name: Create and migrate ONLY a new disposable MariaDB site
+        id: create_site
         shell: bash
         run: |
           set -euo pipefail
@@ -138,15 +140,8 @@ jobs:
           bench --site "$TEST_SITE" migrate
           bench --site "$TEST_SITE" set-config allow_tests true
 
-      - name: Run failed authenticated HTTP post - rollback - retry test
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$BENCH_DIR"
-          bench --site "$TEST_SITE" run-tests \
-            --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration \
-            --test test_zzz_real_wsgi_method_session_role_and_csrf_enforcement
-
+      # Run the Finance/report test first. It uses ordinary test rollback,
+      # before the HTTP probe explicitly commits synthetic Finance fixtures.
       - name: Run cancelled/reissued Department consumption ledger test
         shell: bash
         run: |
@@ -156,16 +151,28 @@ jobs:
             --module ccpcerp.ccpc_erp.test_phase1_withdrawal_disposable \
             --test test_cancelled_issue_excluded_and_reissue_reported_once
 
+      - name: Run failed authenticated HTTP post - rollback - retry test
+        # Also collect the second result after a test assertion failure, but
+        # never run it if the disposable site failed to initialize.
+        if: ${{ !cancelled() && steps.create_site.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration \
+            --test test_zzz_real_wsgi_method_session_role_and_csrf_enforcement
+
       - name: Record exact acceptance scope, including unexecuted steps
         if: always()
         shell: bash
         run: |
           {
             echo "## CCPC Phase 1 PR41 one-shot acceptance"
-            echo "Private repository; GitHub-hosted Ubuntu runner; synthetic MariaDB and Redis."
+            echo "Public app repository; GitHub-hosted Ubuntu runner; synthetic MariaDB and Redis."
             echo "Exact committed app source: $GITHUB_SHA"
             echo "Target: two actual Frappe v16 / ERPNext v16 integration methods, sequentially."
             echo "Check step status above; incomplete steps are NOT passes."
             echo "No CCPC customer data, MAIN DEVELOPMENT, PRODUCTION, merge or deployment."
-            echo "No automatic second attempt. Job limit: 50 minutes."
+            echo "Single corrected attempt only; no automatic retry. Job limit: 50 minutes."
           } >> "$GITHUB_STEP_SUMMARY"
