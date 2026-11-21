@@ -1,0 +1,171 @@
+# Single authorized PR #41 attempt only. GitHub-hosted runner, synthetic site.
+# No schedule, deployment, reusable credentials or shared DEVELOPMENT/PRODUCTION.
+name: CCPC Phase 1 PR41 - One-shot disposable MariaDB integration
+
+on:
+  push:
+    branches:
+      - test/phase1-http-rollback-reissue-report-2026-11-21
+    paths:
+      - .github/workflows/phase1-pr41-one-shot-integration.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccpc-phase1-pr41-one-shot
+  cancel-in-progress: true
+
+jobs:
+  phase1-disposable-integration:
+    # A single push from the reviewed parent commit may run the expensive job.
+    # Later pushes, reruns on different source histories and other branches skip.
+    if: >-
+      github.repository == 'ccpcerp/ccpcerp' &&
+      github.ref == 'refs/heads/test/phase1-http-rollback-reissue-report-2026-11-21' &&
+      github.event.before == '4e28efca11da6fa6dde21f41118e71fa7ae8a04a'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      CI: "Yes"
+      BENCH_DIR: ${{ github.workspace }}/../ccpc-phase1-pr41-bench
+      TEST_SITE: ci-withdrawal.localhost
+      CI_DB_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_ADMIN_PASSWORD: ci-admin-${{ github.run_id }}-${{ github.run_attempt }}
+      CCPC_ALLOW_COMMIT_PROBE: isolated-only
+      CCPC_ALLOW_HTTP_PROBE: isolated-only
+      CCPC_PHASE1_DISPOSABLE: "1"
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      redis-cache:
+        image: redis:7-alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:7-alpine
+        ports:
+          - 11000:6379
+
+    steps:
+      - name: Checkout exact reviewed commit without retaining token
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enforce one-shot ancestry and exact three reviewed test blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ccpcerp/ccpcerp"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$GITHUB_REF" = "refs/heads/test/phase1-http-rollback-reissue-report-2026-11-21"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = "4e28efca11da6fa6dde21f41118e71fa7ae8a04a"
+          git merge-base --is-ancestor 034afb116cf3fe0e3f9315b932eceba6dc961ce6 HEAD
+          test "$(git hash-object ccpcerp/ccpc_erp/doctype/withdrawal_slip/test_withdrawal_real_ledger_integration.py)" = "412e1609d3da583883057fe4ee985ebea1fbb9c8"
+          test "$(git hash-object ccpcerp/ccpc_erp/test_phase1_withdrawal_disposable.py)" = "eb1fab6d444aac69f2b5b80176b99be9c9c17513"
+          test "$(git hash-object ccpcerp/ccpc_erp/ci_disposable_site_guard.py)" = "c893df33669f7241652e4f2b2d46ce44ac2168d6"
+          echo "Verified reviewed PR #41 test source and one-shot parent."
+
+      - name: Fast syntax and pure Phase 1 policy checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q ccpcerp
+          python3 -m unittest -v \
+            ccpcerp.ccpc_erp.test_phase1_release_scope \
+            ccpcerp.ccpc_erp.test_phase1_release_wiring_static
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install disposable Frappe bench prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+          npm install -g yarn
+          python -m pip install frappe-bench
+          MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
+            -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+
+      - name: Build isolated Frappe v16 / ERPNext v16 / PR41 bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+            --python "$(command -v python)" "$BENCH_DIR"
+          cd "$BENCH_DIR"
+          bench set-config -g redis_cache redis://127.0.0.1:13000
+          bench set-config -g redis_queue redis://127.0.0.1:11000
+          bench set-config -g redis_socketio redis://127.0.0.1:11000
+          bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+          bench get-app ccpcerp "$GITHUB_WORKSPACE"
+          git -C apps/ccpcerp fetch --quiet --no-tags "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+          git -C apps/ccpcerp checkout --quiet --detach "$GITHUB_SHA"
+          test "$(git -C apps/ccpcerp rev-parse HEAD)" = "$GITHUB_SHA"
+          bench setup requirements --dev
+
+      - name: Create and migrate ONLY a new disposable MariaDB site
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
+            --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+            --admin-password "$CI_ADMIN_PASSWORD"
+          bench --site "$TEST_SITE" install-app erpnext
+          bench --site "$TEST_SITE" install-app ccpcerp
+          bench --site "$TEST_SITE" migrate
+          bench --site "$TEST_SITE" set-config allow_tests true
+
+      - name: Run failed authenticated HTTP post - rollback - retry test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration \
+            --test test_zzz_real_wsgi_method_session_role_and_csrf_enforcement
+
+      - name: Run cancelled/reissued Department consumption ledger test
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.test_phase1_withdrawal_disposable \
+            --test test_cancelled_issue_excluded_and_reissue_reported_once
+
+      - name: Record exact acceptance scope, including unexecuted steps
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## CCPC Phase 1 PR41 one-shot acceptance"
+            echo "Private repository; GitHub-hosted Ubuntu runner; synthetic MariaDB and Redis."
+            echo "Exact committed app source: $GITHUB_SHA"
+            echo "Target: two actual Frappe v16 / ERPNext v16 integration methods, sequentially."
+            echo "Check step status above; incomplete steps are NOT passes."
+            echo "No CCPC customer data, MAIN DEVELOPMENT, PRODUCTION, merge or deployment."
+            echo "No automatic second attempt. Job limit: 50 minutes."
+          } >> "$GITHUB_STEP_SUMMARY"
