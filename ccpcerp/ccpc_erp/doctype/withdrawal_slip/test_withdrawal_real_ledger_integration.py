@@ -11,6 +11,7 @@ import multiprocessing
 import os
 from contextlib import closing
 from queue import Empty
+from unittest.mock import patch
 
 import frappe
 from frappe.utils import flt
@@ -972,8 +973,71 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 "Wrong CSRF must fail specifically in Frappe's request-security layer",
             )
 
-            # Correct method + genuine session + valid CSRF token should
-            # execute Stock Entry submission via actual Frappe request/commit.
+            # A genuine POST must roll back its whole transaction when an
+            # installed hook raises AFTER native Stock Ledger / Expense GL
+            # posting and Withdrawal Slip status updates. The injected fault
+            # changes no production/controller code and runs only on this
+            # guarded disposable site.
+            from ccpcerp.ccpc_erp import withdrawal_slip_stock as stock_module
+
+            real_sync = stock_module.sync_withdrawal_slip_issue_status
+            failed_posts = []
+
+            def fail_after_native_posting(stock_entry, method=None):
+                real_sync(stock_entry, method)
+                failed_posts.append({
+                    "name": stock_entry.name,
+                    "sle": frappe.db.count(
+                        "Stock Ledger Entry", {
+                            "voucher_type": "Stock Entry", "voucher_no": stock_entry.name,
+                            "is_cancelled": 0,
+                        }
+                    ),
+                    "gl": frappe.db.count(
+                        "GL Entry", {
+                            "voucher_type": "Stock Entry", "voucher_no": stock_entry.name,
+                            "is_cancelled": 0,
+                        }
+                    ),
+                    "status": frappe.db.get_value("Withdrawal Slip", slip_name, "status"),
+                })
+                raise frappe.ValidationError("Synthetic HTTP failure after native ledger posting")
+
+            with patch.object(stock_module, "sync_withdrawal_slip_issue_status",
+                              fail_after_native_posting):
+                failed = call(issuer, "post", issuer_token)
+            self.assertNotEqual(failed.status_code, 200)
+            self.assertEqual(len(failed_posts), 1, "Failure probe did not reach the posting hook")
+            self.assertGreater(failed_posts[0]["sle"], 0)
+            self.assertGreater(failed_posts[0]["gl"], 0)
+            self.assertEqual(failed_posts[0]["status"], "Fully Issued")
+            failed_entry = failed_posts[0]["name"]
+
+            # The failed WSGI request has closed its transaction. Reopen a
+            # Frappe context and also inspect via an independent PyMySQL
+            # connection to rule out stale in-transaction visibility.
+            init_test_context()
+            self.assertFalse(frappe.db.exists("Stock Entry", failed_entry))
+            self.assertEqual(
+                frappe.db.count("Stock Entry", {"withdrawal_slip": slip_name}), 0,
+                "No draft or submitted issue may survive failed HTTP POST",
+            )
+            slip_after_failure = frappe.get_doc("Withdrawal Slip", slip_name)
+            self.assertEqual(slip_after_failure.status, "Stockroom Review")
+            self.assertAlmostEqual(
+                flt(slip_after_failure.items[0].issued_qty), 0, places=5
+            )
+            rolled_back = self._independent_sql_snapshot(failed_entry)
+            self.assertEqual(rolled_back["entry_count"], 0)
+            self.assertEqual(rolled_back["sle_count"], 0)
+            self.assertEqual(rolled_back["gl_count"], 0)
+            self.assertAlmostEqual(rolled_back["bin_qty"], QTY_RECEIVED, places=5)
+            self.assertAlmostEqual(
+                rolled_back["bin_value"], QTY_RECEIVED * UNIT_RATE, places=2
+            )
+
+            # The same authenticated Stockroom issuer retries once, then
+            # success/replay checks below must still show exactly one issue.
             accepted = call(issuer, "post", issuer_token)
             self.assertEqual(accepted.status_code, 200, accepted.get_data(as_text=True)[:700])
             message = (accepted.get_json() or {}).get("message") or {}
