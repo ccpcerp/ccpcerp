@@ -87,7 +87,7 @@ jobs:
           print("Approved PR42 label, PR identity, source SHA and ancestry: PASS")
           PY
 
-      - name: Compile and run fast 24-plus offline policy/static tests
+      - name: Compile and run offline policy/static and CI-safety tests
         shell: bash
         run: |
           set -euo pipefail
@@ -96,7 +96,8 @@ jobs:
             ccpcerp.ccpc_erp.test_phase1_maintenance_use \
             ccpcerp.ccpc_erp.test_phase1_maintenance_wiring_static \
             ccpcerp.ccpc_erp.test_phase1_release_scope \
-            ccpcerp.ccpc_erp.test_phase1_release_wiring_static
+            ccpcerp.ccpc_erp.test_phase1_release_wiring_static \
+            ccpcerp.ccpc_erp.test_phase1_maintenance_actions_static
 
       - name: Install pinned-major Python and Node
         uses: actions/setup-python@v6
