@@ -374,3 +374,106 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
         self.assertEqual(slip.status, "Stockroom Review")
         self.assertEqual(slip.items[0].issued_qty, 0)
         self.assertEqual(issue_withdrawal_slip(slip.name)["submitted"], 1)
+
+    def test_cancelled_issue_excluded_and_reissue_reported_once(self):
+        """A cancelled issue must leave no consumption row; replacement is counted once."""
+        self._onboard_initial_mappings()
+        slip = self._review_slip()
+        self.assertEqual(frappe.session.user, ledger.ISSUER)
+
+        original_name = issue_withdrawal_slip(slip.name)["name"]
+        frappe.set_user("Administrator")
+        original = frappe.get_doc("Stock Entry", original_name)
+        filters = {
+            "company": ledger.COMPANY,
+            "department": self.department,
+            "from_date": original.posting_date,
+            "to_date": original.posting_date,
+        }
+        _, initial_rows = report.execute(filters)
+        initial = [row for row in initial_rows if row["withdrawal_slip"] == slip.name]
+        self.assertEqual(len(initial), 1)
+        self.assertEqual(initial[0]["stock_entry"], original_name)
+
+        # Use genuine ERPNext cancellation and CCPC on_cancel hooks, never
+        # manually change docstatus or purge historical ledger entries.
+        original.cancel()
+        self.assertEqual(original.docstatus, 2)
+        self.assertEqual(self._bin_qty(), ledger.QTY_RECEIVED)
+        slip.reload()
+        self.assertEqual(slip.status, "Stockroom Review")
+        self.assertEqual(slip.items[0].issued_qty, 0)
+
+        _, cancelled_rows = report.execute(filters)
+        self.assertEqual(
+            [row for row in cancelled_rows if row["withdrawal_slip"] == slip.name],
+            [],
+            "Cancelled voucher must not remain in Department consumption",
+        )
+        for doctype in ("Stock Ledger Entry", "GL Entry"):
+            self.assertEqual(
+                frappe.db.count(doctype, {
+                    "voucher_type": "Stock Entry",
+                    "voucher_no": original_name,
+                    "is_cancelled": 0,
+                }),
+                0,
+                f"Cancelled {doctype} must have no active original rows",
+            )
+
+        # The same approved slip may be reissued only by its independent
+        # Stockroom issuer; the preparer/self-approval policy is unchanged.
+        frappe.set_user(ledger.ISSUER)
+        replacement_name = issue_withdrawal_slip(slip.name)["name"]
+        self.assertNotEqual(replacement_name, original_name)
+        frappe.set_user("Administrator")
+        replacement = frappe.get_doc("Stock Entry", replacement_name)
+        self.assertEqual(replacement.docstatus, 1)
+        self.assertEqual(replacement.company, ledger.COMPANY)
+        self.assertEqual(self._bin_qty(), ledger.QTY_RECEIVED - ledger.QTY_ISSUED)
+        self.assertEqual(
+            frappe.db.count("Stock Entry", {"withdrawal_slip": slip.name, "docstatus": 1}),
+            1,
+        )
+
+        _, replacement_rows = report.execute(filters)
+        actual = [row for row in replacement_rows if row["withdrawal_slip"] == slip.name]
+        self.assertEqual(len(actual), 1, "Replacement must appear exactly once")
+        row = actual[0]
+        self.assertEqual(row["stock_entry"], replacement_name)
+        self.assertEqual(row["stock_entry_detail"], replacement.items[0].name)
+        self.assertEqual(row["beneficiary_department_at_issue"], self.department)
+        self.assertEqual(row["issuing_company"], ledger.COMPANY)
+        self.assertEqual(row["stock_uom"], STOCK_UOM)
+        self.assertEqual(row["issued_qty"], ledger.QTY_ISSUED)
+        self.assertEqual(row["sle_issued_qty"], ledger.QTY_ISSUED)
+        self.assertAlmostEqual(
+            row["gross_sle_issue_value"], ledger.QTY_ISSUED * ledger.UNIT_RATE, places=2
+        )
+        self.assertEqual(row["source_quality"], "OK")
+        self.assertNotIn(original_name, [r["stock_entry"] for r in actual])
+
+        active_sle = frappe.get_all(
+            "Stock Ledger Entry",
+            filters={"voucher_type": "Stock Entry", "voucher_no": replacement_name, "is_cancelled": 0},
+            fields=["voucher_detail_no", "actual_qty", "stock_value_difference"],
+        )
+        self.assertEqual(len(active_sle), 1)
+        self.assertEqual(active_sle[0].voucher_detail_no, replacement.items[0].name)
+        self.assertAlmostEqual(active_sle[0].actual_qty, -ledger.QTY_ISSUED, places=5)
+        self.assertAlmostEqual(
+            row["gross_sle_issue_value"], -active_sle[0].stock_value_difference, places=2
+        )
+        active_expense = frappe.get_all(
+            "GL Entry",
+            filters={"voucher_type": "Stock Entry", "voucher_no": replacement_name,
+                     "account": ACCOUNT, "is_cancelled": 0},
+            fields=["debit", "credit", "cost_center", "department"],
+        )
+        self.assertEqual(len(active_expense), 1)
+        self.assertEqual(active_expense[0].cost_center, self.center)
+        self.assertEqual(active_expense[0].department, self.department)
+        self.assertAlmostEqual(
+            active_expense[0].debit, row["gross_sle_issue_value"], places=2
+        )
+        self.assertAlmostEqual(active_expense[0].credit, 0, places=2)
