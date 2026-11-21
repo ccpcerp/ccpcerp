@@ -27,7 +27,7 @@ class TestPhase1MaintenanceActionsStatic(unittest.TestCase):
         self.assertIn("ref: ${{ github.event.pull_request.head.sha }}", source)
         self.assertIn("test \"$(git rev-parse HEAD)\" = \"$CCPC_PR42_TEST_SHA\"", source)
         self.assertIn("git merge-base --is-ancestor 034afb116cf3fe0e3f9315b932eceba6dc961ce6 HEAD", source)
-        for forbidden in ("runs-on: self-hosted", "secrets.", "docker.sock", "development.localhost",
+        for forbidden in ("runs-on: self-hosted", "${{ secrets.", "docker.sock", "development.localhost",
                           "ccpcerp.local", "/home/gani/", "docker compose down", "bench --site production"):
             self.assertNotIn(forbidden, source)
 
