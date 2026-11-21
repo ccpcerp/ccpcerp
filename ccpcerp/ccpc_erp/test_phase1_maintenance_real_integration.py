@@ -34,6 +34,7 @@ def _is_disposable_pr42_site():
         env.get("GITHUB_ACTIONS") == "true",
         env.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp",
         env.get("GITHUB_EVENT_NAME") == "pull_request",
+        env.get("GITHUB_REF") == "refs/pull/42/merge",
         env.get("GITHUB_HEAD_REF") == "feature/phase1-maintenance-only-2026-11-21",
         env.get("GITHUB_BASE_REF") == "release/withdrawal-department-phase1-2026-11-17",
         env.get("GITHUB_WORKFLOW") == "CCPC PR42 - manual Bearings MariaDB acceptance",
