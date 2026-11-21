@@ -53,7 +53,22 @@ class TestPhase1MaintenanceActionsStatic(unittest.TestCase):
                        "Other / Unclassified", "Maintenance beneficiary",
                        "cannot mix", "Withdrawal Slip"):
             self.assertIn(needed, source)
-        self.assertEqual(source.count("    def test_"), 6)
+        for coverage in (
+            "def test_g_failed_posting_rollback_discards_stock_and_gl_as_one_unit",
+            "def test_h_actual_cancellation_reverses_inventory_and_gl",
+            "def test_i_non_stockroom_and_request_creator_cannot_issue",
+            "def test_j_two_real_independent_stockroom_connections_only_issue_once",
+            "multiprocessing.get_context(\"spawn\")",
+            "SELECT name FROM `tabWithdrawal Slip` WHERE name=%s FOR UPDATE",
+            "frappe.db.rollback",
+            'CCPC_ALLOW_MAINTENANCE_DB_PROBE',
+            "CI injected",
+        ):
+            # These paths must be visibly covered; the real assertions execute
+            # only in the isolated Actions MariaDB suite.
+            if coverage != "CI injected":
+                self.assertIn(coverage, source)
+        self.assertEqual(source.count("    def test_"), 10)
 
 
 if __name__ == "__main__":
