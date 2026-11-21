@@ -6,7 +6,10 @@ Pure policy tests separately verify the exact literal CCPC/Bearings scope.
 Patch constants ONLY inside this test process so actual locked SQL + SLE/GL
 posting can be exercised with existing ERPNext synthetic masters.
 """
+import multiprocessing
 import os
+from contextlib import ExitStack
+from queue import Empty
 from unittest.mock import patch
 
 import frappe
@@ -44,6 +47,64 @@ def _is_disposable_pr42_site():
         frappe.conf.get("db_host") == "127.0.0.1",
         frappe.conf.get("db_type", "mariadb") == "mariadb",
     ))
+
+
+def _pr42_concurrent_worker(slot, site, sites_path, slip_name, beneficiary, result_queue):
+    """Separate real SQL transaction; never bypasses the production row lock."""
+    try:
+        # The guard precedes ANY mutation and only allows this dedicated
+        # GitHub-hosted, synthetic, owner-opted-in test site.
+        if os.environ.get("CCPC_ALLOW_MAINTENANCE_DB_PROBE") != "pr42-only":
+            raise RuntimeError("PR42 disposable test flag required")
+        frappe.init(site=site, sites_path=sites_path, force=True)
+        if not _is_disposable_pr42_site():
+            raise RuntimeError("Concurrent worker is not on the approved PR42 CI site")
+        frappe.connect()
+        frappe.set_user(ledger.ISSUER)
+        frappe.db.sql("SET SESSION innodb_lock_wait_timeout=30")
+        connection = int(frappe.db.sql("SELECT CONNECTION_ID()")[0][0])
+
+        from ccpcerp.ccpc_erp import withdrawal_slip_stock as stock
+        original_lock = stock._lock_withdrawal_slip
+        first_attempt = False
+
+        def reporting_lock(name):
+            nonlocal first_attempt
+            if name != slip_name:
+                raise AssertionError("Unexpected locked Withdrawal Slip name")
+            if not first_attempt:
+                first_attempt = True
+                result_queue.put(("attempt", slot, connection))
+            return original_lock(name)
+
+        with ExitStack() as stack:
+            # Test-only translations to the synthetic ERPNext fixture
+            # must also apply in the independently spawned workers.
+            for symbol, value in (
+                ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_COMPANY", ledger.COMPANY),
+                ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_ITEM_GROUP", GROUP),
+                ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_BENEFICIARY", beneficiary),
+                ("ccpcerp.ccpc_erp.withdrawal_slip_stock.PILOT_COMPANY", ledger.COMPANY),
+                ("ccpcerp.ccpc_erp.withdrawal_slip_stock.PILOT_ITEM_GROUP", GROUP),
+            ):
+                stack.enter_context(patch(symbol, value))
+            stack.enter_context(patch.object(stock, "_lock_withdrawal_slip", reporting_lock))
+            try:
+                posted = stock.issue_withdrawal_slip(slip_name)
+                if posted.get("submitted") != 1:
+                    raise AssertionError("Missing submitted Stock Entry")
+                frappe.db.commit()
+                result_queue.put(("success", slot, posted["name"]))
+            except frappe.ValidationError as exc:
+                frappe.db.rollback()
+                result_queue.put(("rejected", slot, str(exc)[:300]))
+    except Exception as exc:
+        if getattr(frappe.local, "db", None):
+            frappe.db.rollback()
+        result_queue.put(("error", slot, type(exc).__name__ + ": " + str(exc)[:300]))
+    finally:
+        if getattr(frappe.local, "initialised", False):
+            frappe.destroy()
 
 
 class TestPhase1MaintenanceRealIntegration(ERPNextTestSuite):
@@ -244,3 +305,187 @@ class TestPhase1MaintenanceRealIntegration(ERPNextTestSuite):
             frappe.db.get_value("Withdrawal Slip", slip.name, "ccpc_material_use"),
             "Routine Maintenance",
         )
+
+
+    def test_g_failed_posting_rollback_discards_stock_and_gl_as_one_unit(self):
+        """Inject failure AFTER genuine submission; transaction rollback is atomic."""
+        from erpnext.stock.doctype.stock_entry.stock_entry import StockEntry
+
+        slip = self._slip("Routine Maintenance")
+        baseline = self._snapshot(slip)
+        frappe.db.savepoint("pr42_posted_rollback")
+        original_submit = StockEntry.submit
+
+        def submit_then_abort(doc):
+            original_submit(doc)
+            self.assertEqual(doc.docstatus, 1)
+            self.assertGreater(frappe.db.count(
+                "Stock Ledger Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}
+            ), 0)
+            self.assertGreater(frappe.db.count(
+                "GL Entry", {"voucher_type": "Stock Entry", "voucher_no": doc.name}
+            ), 0)
+            raise RuntimeError("PR42 injected failure after genuine ERPNext posting")
+
+        try:
+            with patch.object(StockEntry, "submit", submit_then_abort):
+                with self.assertRaisesRegex(RuntimeError, "PR42 injected failure"):
+                    issue_withdrawal_slip(slip.name)
+        finally:
+            # A Frappe request would roll back its failed transaction; a
+            # savepoint lets this synthetic test keep its fixtures intact.
+            frappe.db.rollback(save_point="pr42_posted_rollback")
+        self.assertEqual(self._snapshot(slip), baseline)
+        self.assertFalse(frappe.db.exists("Stock Entry", {"withdrawal_slip": slip.name}))
+        self.assertEqual(frappe.db.get_value("Withdrawal Slip", slip.name, "status"),
+                         "Stockroom Review")
+
+    def test_h_actual_cancellation_reverses_inventory_and_gl(self):
+        """ERPNext native cancel, not a mock or direct docstatus update."""
+        slip = self._slip("Routine Maintenance")
+        initial_qty = self._bin_qty()
+        initial_stock_value = flt(frappe.db.get_value(
+            "Bin", {"item_code": self.item.name, "warehouse": ledger.WAREHOUSE},
+            "stock_value",
+        ))
+        posted = issue_withdrawal_slip(slip.name)
+        frappe.set_user("Administrator")
+        entry = frappe.get_doc("Stock Entry", posted["name"])
+        self.assertEqual(entry.docstatus, 1)
+        entry.cancel()
+        self.assertEqual(entry.docstatus, 2)
+        self.assertAlmostEqual(self._bin_qty(), initial_qty)
+        self.assertAlmostEqual(flt(frappe.db.get_value(
+            "Bin", {"item_code": self.item.name, "warehouse": ledger.WAREHOUSE},
+            "stock_value",
+        )), initial_stock_value, places=2)
+        sle = frappe.get_all(
+            "Stock Ledger Entry",
+            filters={"voucher_type": "Stock Entry", "voucher_no": entry.name},
+            fields=["actual_qty", "is_cancelled"],
+        )
+        self.assertGreaterEqual(len(sle), 2)
+        self.assertAlmostEqual(sum(flt(row.actual_qty) for row in sle), 0)
+        self.assertTrue(all(int(row.is_cancelled) == 1 for row in sle))
+        gl = frappe.get_all(
+            "GL Entry",
+            filters={"voucher_type": "Stock Entry", "voucher_no": entry.name},
+            fields=["account", "debit", "credit"],
+        )
+        self.assertGreaterEqual(len(gl), 4)
+        per_account = {}
+        for line in gl:
+            per_account[line.account] = per_account.get(line.account, 0.0) + (
+                flt(line.debit) - flt(line.credit)
+            )
+        self.assertGreaterEqual(len(per_account), 2)
+        for name, balance in per_account.items():
+            self.assertAlmostEqual(balance, 0, places=2, msg=name)
+        slip.reload()
+        self.assertEqual(slip.status, "Stockroom Review")
+        self.assertAlmostEqual(flt(slip.items[0].issued_qty), 0)
+
+    def test_i_non_stockroom_and_request_creator_cannot_issue(self):
+        """Real roles, no mocked authorization, no phantom financial rows."""
+        slip = self._slip("Routine Maintenance")
+        before = self._snapshot(slip)
+        for unauthorized in (ledger.PREPARER, "Guest", "Administrator"):
+            with self.subTest(user=unauthorized):
+                frappe.set_user(unauthorized)
+                with self.assertRaises(frappe.PermissionError):
+                    issue_withdrawal_slip(slip.name)
+                self.assertEqual(self._snapshot(slip), before)
+
+    def test_j_two_real_independent_stockroom_connections_only_issue_once(self):
+        """Two separate Frappe processes reach one held FOR UPDATE lock."""
+        slip = self._slip("Routine Maintenance")
+        frappe.set_user("Administrator")
+        # Commit synthetic fixture ONLY inside this throwaway Actions site.
+        frappe.db.commit()
+        site = frappe.local.site
+        sites_path = os.path.abspath(frappe.local.sites_path)
+        self.assertEqual(site, SITE)
+        locked = frappe.db.sql(
+            "SELECT name FROM `tabWithdrawal Slip` WHERE name=%s FOR UPDATE",
+            (slip.name,),
+        )
+        self.assertEqual(locked[0][0], slip.name)
+
+        ctx = multiprocessing.get_context("spawn")
+        queue = ctx.Queue()
+        children = [
+            ctx.Process(
+                target=_pr42_concurrent_worker,
+                args=(slot, site, sites_path, slip.name, self.department, queue),
+                daemon=False,
+            )
+            for slot in (1, 2)
+        ]
+        released = False
+        results = []
+        try:
+            for child in children:
+                child.start()
+            attempts = {}
+            while len(attempts) < 2:
+                try:
+                    message = queue.get(timeout=40)
+                except Empty as exc:
+                    raise AssertionError("Both issuers must reach the original row-lock method") from exc
+                self.assertEqual(message[0], "attempt", repr(message))
+                self.assertNotIn(message[1], attempts)
+                attempts[message[1]] = message[2]
+            self.assertEqual(set(attempts), {1, 2})
+            self.assertEqual(len(set(attempts.values())), 2)
+            self.assertNotIn(int(frappe.db.sql("SELECT CONNECTION_ID()")[0][0]),
+                             attempts.values())
+            self.assertTrue(all(child.is_alive() for child in children))
+            self.assertEqual(frappe.db.count(
+                "Stock Entry", {"withdrawal_slip": slip.name, "docstatus": 1}
+            ), 0)
+
+            frappe.db.rollback()  # Release original parent row lock.
+            released = True
+            while len(results) < 2:
+                try:
+                    results.append(queue.get(timeout=40))
+                except Empty as exc:
+                    raise AssertionError("Concurrent workers did not finish") from exc
+            for child in children:
+                child.join(timeout=10)
+                self.assertEqual(child.exitcode, 0)
+        finally:
+            if not released:
+                frappe.db.rollback()
+            for child in children:
+                if child.is_alive():
+                    child.terminate()
+                    child.join(timeout=5)
+            queue.close()
+            queue.join_thread()
+
+        successes = [item for item in results if item[0] == "success"]
+        denials = [item for item in results if item[0] == "rejected"]
+        self.assertEqual(len(successes), 1, repr(results))
+        self.assertEqual(len(denials), 1, repr(results))
+        self.assertTrue(
+            any(word in denials[0][2].lower() for word in ("already", "stockroom review")),
+            repr(denials),
+        )
+        frappe.db.sql("SELECT name FROM `tabWithdrawal Slip` WHERE name=%s", (slip.name,))
+        entries = frappe.get_all(
+            "Stock Entry", filters={"withdrawal_slip": slip.name, "docstatus": 1},
+            pluck="name",
+        )
+        self.assertEqual(entries, [successes[0][2]])
+        voucher = {"voucher_type": "Stock Entry", "voucher_no": entries[0], "is_cancelled": 0}
+        sle = frappe.get_all("Stock Ledger Entry", filters=voucher, fields=["actual_qty"])
+        gl = frappe.get_all("GL Entry", filters=voucher, fields=["debit", "credit"])
+        self.assertEqual(len(sle), 1)
+        self.assertAlmostEqual(sum(flt(row.actual_qty) for row in sle), -1)
+        self.assertGreaterEqual(len(gl), 2)
+        self.assertAlmostEqual(sum(flt(row.debit) for row in gl),
+                               sum(flt(row.credit) for row in gl), places=2)
+        self.assertAlmostEqual(self._bin_qty(), ledger.QTY_RECEIVED - 1)
+        self.assertEqual(frappe.db.get_value("Withdrawal Slip", slip.name, "status"),
+                         "Fully Issued")
