@@ -71,3 +71,18 @@ Expense Account Mapping selects the expense nature for a same-Company, original 
 
 **Execution risk:** Earlier GitHub-hosted review attempts failed with no assigned runner and zero steps. The cause is still unverified; workflow execution may be unavailable because of private-repository Actions settings or hosted-runner availability. The owner should check repository Actions policy/billing/minutes before applying the label. If runner provisioning fails again, treat it as no test execution and use another owner-approved disposable runner; never silently fall back to persistent DEV or PROD. CI passing is not authorization for app merge, DEV migration or Expense mapping sign-off.
 
+
+## 2026-11-21 — GitHub Actions PR42 disposable MariaDB acceptance passed
+
+**Verified CI evidence:** GitHub-hosted run [44882706418](https://github.com/ccpcerp/ccpcerp/actions/runs/44882706418), at exact app commit `ff7129f3271b73a2922a6d214f698a77eb9d439a`, completed **successfully**, including test job `isolated-pr42-ledger`. Fetched runner logs show **28 offline Python policy/static/workflow-safety tests: OK**, and **6 real ERPNext v16/MariaDB 11.8 integration tests: OK** on a new synthetic `ci-pr42-maintenance.localhost` site. No skipped tests reported in the six-method integration suite. The suite independently exercised:
+- signed synthetic Finance Expense and Center mapping followed by routine-maintenance original Material Issue, real Stock Ledger quantity/value, balanced General Ledger, Department and Cost Center, and duplicate rejection;
+- capital, other/unclassified and blank classification denials without stock or GL change;
+- wrong beneficiary, mixed Item Group and unlinked/native issue denials without financial postings;
+- post-approval material-use immutability.
+
+**What this does not prove:** Actual CCPC master-data Company/Department/item/category mapping, live Finance sign-off, full concurrent transaction/rollback/cancellation coverage, the behavior of all historical Withdrawals, UI-level acceptance, DEVELOPMENT application and database migration, or any PRODUCTION behavior. The test only temporarily translates exact pilot constants to synthetic fixtures in test memory. The original 24 policy checks and 4 new CI safety checks were executed. PR remains **Draft** pending code review, broader integration/UAT and separate Finance signature.
+
+**Source repair identified by running CI:** Retry of preexisting cheap run [44881701981](https://github.com/ccpcerp/ccpcerp/actions/runs/44881701981) reached a real runner and found Python syntax error in a new test-only SQL field assertion. Fixed in app commit `ff7129f`. Automatically triggered cheap [run 44882657682](https://github.com/ccpcerp/ccpcerp/actions/runs/44882657682) passed, followed by the label-triggered real database green run. Existing CircleCI job unchanged.
+
+**Repository visibility changed:** Repository `ccpcerp/ccpcerp` was verified **public** following the owner's decision. Treat source, all public branches/history, Actions logs and any existing forks as potentially permanently exposed; simply switching the repository to private later cannot revoke prior copies. No full secret/history scan was performed by this acceptance run. Audit sensitive material immediately, rotate any exposed credentials, and assess restoring private access as appropriate. Public visibility is not a release authorization.
+
