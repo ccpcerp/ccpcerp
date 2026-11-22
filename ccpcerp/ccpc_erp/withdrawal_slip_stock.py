@@ -18,10 +18,22 @@ from ccpcerp.ccpc_erp.bc_issue_runtime import (
 	stamp_original_issue_posting,
 	validate_original_issue_b_c,
 )
+from ccpcerp.ccpc_erp.phase1_release_scope import (
+	Phase1ScopeError,
+	require_same_company_issue,
+)
 
 
 ISSUABLE_STATES = {"Stockroom Review"}
 EPSILON = 0.000001
+
+
+def _assert_phase1_same_company(slip):
+	"""Do not post a cross-Company Withdrawal during the Phase 1 rollout."""
+	try:
+		require_same_company_issue(slip.company, slip.requesting_company)
+	except Phase1ScopeError as exc:
+		frappe.throw(_(str(exc)), frappe.PermissionError)
 
 
 def _clear_withdrawal_slip_cache_after_commit():
@@ -37,7 +49,7 @@ def _clear_withdrawal_slip_cache_after_commit():
 def _lock_withdrawal_slip(withdrawal_slip):
 	"""Serialize issue creation and submission on the same parent row."""
 	rows = frappe.db.sql(
-		"""SELECT status, received_by, company, source_warehouse, equipment, work_for_department,
+		"""SELECT status, received_by, company, requesting_company, source_warehouse, equipment, work_for_department,
 		owner, approving_supervisor
 		FROM `tabWithdrawal Slip` WHERE name = %s FOR UPDATE""",
 		(withdrawal_slip,),
@@ -104,9 +116,10 @@ def _get_issuable_slip(withdrawal_slip, locked):
 	slip.check_permission("write")
 	# A previous nonlocking read may have opened a REPEATABLE READ snapshot.
 	# Never issue from a stale Slip document after acquiring the row lock.
-	for fieldname in ("status", "received_by", "company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
+	for fieldname in ("status", "received_by", "company", "requesting_company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
 		if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 			frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
+	_assert_phase1_same_company(slip)
 	if slip.status not in ISSUABLE_STATES:
 		frappe.throw(
 			_("Withdrawal Slip {0} must be in Stockroom Review before stock can be issued.").format(
@@ -255,12 +268,13 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	locked = _lock_withdrawal_slip(doc.withdrawal_slip) if method == "before_submit" else None
 	slip = frappe.get_doc("Withdrawal Slip", doc.withdrawal_slip)
 	if locked:
-		for fieldname in ("status", "received_by", "company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
+		for fieldname in ("status", "received_by", "company", "requesting_company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
 			if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 				frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 		_assert_independent_issuer(locked)
 		_assert_no_submitted_material_issue(slip.name)
 
+	_assert_phase1_same_company(slip)
 	if slip.status not in ISSUABLE_STATES:
 		frappe.throw(
 			_("Withdrawal Slip {0} cannot be issued while it is in status {1}.").format(

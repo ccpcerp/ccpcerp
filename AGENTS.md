@@ -1,0 +1,42 @@
+# CCPC ERPNext — Codex development instructions (Phase 1 release candidate)
+
+## Owner override — full autonomous DEVELOPMENT engineering authority (2026-11-18)
+
+**The owner is explicitly delegating the full Phase 1 DEVELOPMENT engineering cycle to Codex.** Do not interpret older low-risk-only or repeated approval language as a requirement to stop after each code change. Inside a genuinely isolated, synthetic Codex workspace, Codex may make architectural and application changes necessary to finish the agreed Phase 1, install test dependencies, initialize/migrate/drop its **own** disposable Frappe/ERPNext/MariaDB sites, create synthetic inventory and accounting transactions, run and rerun tests, investigate logs, repair failures, refactor, and commit/push task-branch improvements with a review PR. No per-command user confirmation is needed for those operations within that verified boundary. Continue working around individual test/setup failures using available safe alternatives; deliver functioning code and evidence, not another generic readiness report.
+
+**Allowed target:** the owner's *Codex Cloud or separately isolated, credential-free DEVELOPMENT lab*, not the current SSH-mounted/shared MAIN DEVELOPMENT container. The current production system may still be on the old shared host; physical isolation must be verified before interpreting "not PRODUCTION" as a technical guarantee. Full autonomy over a new disposable database **does not mean** arbitrary file/system/network authority on the owner host. Never launch `danger-full-access` inside the historical `frappe_docker_devcontainer-frappe-1` container while SSH or broad host mounts are accessible.
+
+**Release boundary:** Codex may complete and commit all necessary application and test changes on an unprotected task branch and raise/update PRs; GitHub remains source of truth. A verified review/approval step remains before release-branch merge or persistent MAIN DEVELOPMENT changes. Explicit owner consent remains required for live user/master/financial writes, migrations/pulls/restarts against existing MAIN DEVELOPMENT and for **any PRODUCTION** operation; never share secrets or connect to production. No extra paid API credential arrangements, autonomous public publishing, scheduled reporting, or uncontrolled runner spending are authorized by this code delegation.
+
+**Work strategy:** (1) run/reproduce genuine tests as early as possible; (2) fix defects and retest in the same task; (3) produce exact-source PASS/FAIL evidence from a disposable site, or the smallest runnable test if the cloud machine lacks the needed service; (4) keep one concise open-blocker report and a review PR. Do not keep asking the owner to perform trivial shell steps that Codex can do in its isolated environment. If a Codex feature/account permission prevents code execution, report that specific external blocker once; do not pretend GitHub markdown itself granted cloud permissions.
+
+
+This file applies to work in this repository. **Read GitHub before editing.** The current first-release target is **tested CCPC Withdrawal + real stock/Expense GL + Department material consumption**, same issuing/requesting legal Company; native ERPNext handles unrelated ordinary workflows. Production deployment is a separate owner decision.
+
+## Working source and objective
+- First-release GitHub branch: `release/withdrawal-department-phase1-2026-11-17`, draft PR #35: https://github.com/ccpcerp/ccpcerp/pull/35.
+- Finance feature baseline is commit `a2f0e89f12afbc28ac10dab71b6af47a455fdc95`. Do not assume default `version-16` contains current functionality. Verify current branch HEAD and PR diff.
+- Project workflow and current handoff live in the **separate private** `ccpcerp/ccpc-frappe-deployment` repository, under `docs/ccpc-project/`. If inaccessible, continue from this file and explicitly report documentation access as unverified rather than inferring outdated milestones.
+- Immediate executable task: `CODEX-PHASE1-DEVELOPMENT-TASK.md`. Finish functional code and realistic tests; do not spend a session producing only another broad source audit.
+
+## Allowed autonomy in an isolated, disposable environment
+- Inspect, edit, refactor, run code and tests, build a **synthetic** Frappe/ERPNext v16/MariaDB test site and repair test failures. Use a sandbox you control that contains **no CCPC business data or shared credential/backup mounts**.
+- Use synthetic Company, Stockroom, Item, GL, Department and User fixtures. You may create/recreate and delete **only test resources created in that dedicated disposable environment**. Do not assume `development.localhost` or `ccpc-integration2.localhost` is disposable.
+- Validate the actual positive same-Company Withdrawal -> approved issue -> submitted Stock Entry -> SLE / Expense GL / original Department report and rejection/rollback paths; the earlier CircleCI acceptance is prior evidence, not this candidate's proof.
+- Run cheap preflight first: `python -m compileall -q ccpcerp` and `python -m unittest -v ccpcerp.ccpc_erp.test_phase1_release_scope ccpcerp.ccpc_erp.test_phase1_release_wiring_static`. These are offline, not ledger acceptance.
+- Commit narrow verified code changes to an **unprotected task/review branch**, and propose a PR against the Phase 1 release branch. Record command, passed/failed/untested count, source SHA and any genuine ledger voucher test evidence. The owner wants a reviewable finished improvement, not endless preflight reports.
+
+## Explicit host/credential boundaries — not merely instructions in place of isolation
+- Never use unrestricted Codex CLI in the **existing** DEVELOPMENT container `frappe_docker_devcontainer-frappe-1` until its credential and host mounts have been independently removed or an isolated replacement is provided. A November 16 checkpoint found the container had `/home/frappe/.ssh` mounted and source code under a broad `/workspace` bind. No Docker socket/privileged mode was reported; that alone does **not** make it safe.
+- The legacy PRODUCTION instance was historically on `ccpcerpserver` alongside DEV. A new physical `ccpcerp-prod` server is separately documented, but its status as the *actual live* production system was not independently verified when this policy was written. Do not assume production is physically isolated until the current site has been verified.
+- Do not open/read/copy SSH keys, tokens, `.env`, Frappe `site_config.json`, production databases, protected private backups, NAS mounts or unrelated personal files. Never print credentials to a transcript, tool output, CI logs or GitHub. Do not work around failures by adding these accesses.
+- No Docker host socket or privileged host operations, no network route to production/backup systems, no shared MAIN DEVELOPMENT site/config/DB/Redis state in a Codex writable test sandbox. Actual enforcement requires environment setup; this document alone cannot create a security boundary.
+- Do not edit, migrate, post, delete or restart existing MAIN DEVELOPMENT, legacy PROD or new PROD, or alter protected GitHub branches, financial approval records or actual user permissions. Even owner-approved Codex coding autonomy does **not** authorize changing business data or PROD. No scheduled agent reporting, paid API arrangements, auto-merge or auto-deploy.
+
+## Engineering quality and handoff
+- Keep Company scoping, permission checks, transaction locks, duplicate issue prevention, Expense/Cost Center mapping provenance, cancellations and reporting separation intact.
+- This release deliberately **blocks** custom intercompany billing actions; do not reactivate billing PR #33/#34, modify historical invoice records, or change the agreed same-Company boundary unless the owner explicitly changes scope.
+- If the sandbox lacks Docker/bench/DB, do useful implementation, source tests and a **precise runnable disposable integration test** instead of claiming real SQL PASS. Do not try to access MAIN DEV to compensate.
+- At end: state what code changed, branch/commit/PR, which genuine tests ran, what remains, and the one next action. Keep credentials, customer/business data and sensitive logs out of reports.
+
+Owner-approved high-level delegation: **Codex can perform broad code/debug/test work inside a properly isolated disposable DEVELOPMENT workspace**. Creating or granting that isolation, and any actual persistent DEVELOPMENT/PRODUCTION operation, require their own verified operating boundary.

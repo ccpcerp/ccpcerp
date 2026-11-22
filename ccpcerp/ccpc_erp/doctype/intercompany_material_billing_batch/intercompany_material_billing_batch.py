@@ -9,6 +9,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt, get_first_day, get_last_day, getdate, now_datetime, today
 
+from ccpcerp.ccpc_erp.phase1_release_scope import (
+    Phase1ScopeError,
+    require_billing_disabled,
+)
+
 
 EPSILON = 0.000001
 ER_CHECKREAD = 1020
@@ -42,8 +47,17 @@ def get_wrapped_database_errno(error):
     return original.args[0] if original and original.args else None
 
 
+def _assert_billing_not_released():
+    """Fail closed even on direct server/whitelisted method calls."""
+    try:
+        require_billing_disabled()
+    except Phase1ScopeError as exc:
+        frappe.throw(_(str(exc)), frappe.PermissionError)
+
+
 class IntercompanyMaterialBillingBatch(Document):
     def on_trash(self):
+        _assert_billing_not_released()
         persisted, has_items = self._get_locked_deletion_state()
         protected_values = (
             persisted.sales_invoice,
@@ -120,9 +134,11 @@ class IntercompanyMaterialBillingBatch(Document):
         return persisted_rows[0], bool(item_rows)
 
     def before_validate(self):
+        _assert_billing_not_released()
         self._set_billing_period()
 
     def validate(self):
+        _assert_billing_not_released()
         self._validate_companies()
         self._validate_billing_scope_immutability()
         self._validate_status_transition()
@@ -1065,6 +1081,7 @@ class IntercompanyMaterialBillingBatch(Document):
 
     @frappe.whitelist()
     def refresh_preview(self):
+        _assert_billing_not_released()
         self.check_permission("write")
         self._lock_and_reload_for_mutation()
         self._require_draft_refresh()
@@ -1086,6 +1103,7 @@ class IntercompanyMaterialBillingBatch(Document):
 
     @frappe.whitelist()
     def finalize_month(self):
+        _assert_billing_not_released()
         self.check_permission("write")
         self._lock_and_reload_for_mutation()
         self._require_draft_refresh()
@@ -1442,6 +1460,7 @@ class IntercompanyMaterialBillingBatch(Document):
 
     @frappe.whitelist()
     def approve_and_create_invoices(self):
+        _assert_billing_not_released()
         self._require_finance_approver()
         self._lock_and_reload_for_mutation()
         self._require_under_review_for_approval()

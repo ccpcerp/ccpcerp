@@ -43,7 +43,22 @@ def is_reviewed_withdrawal_disposable_site(site):
         and env.get("GITHUB_HEAD_REF") in _WITHDRAWAL_GH_BRANCHES
         and env.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
     )
-    return old_approved_github_site or is_reviewed_circleci_disposable_site(site)
+    # One-shot PR #41 source-branch GitHub-hosted test context only.
+    phase1_pr41_github_site = (
+        site == "ci-withdrawal.localhost"
+        and env.get("GITHUB_ACTIONS") == "true"
+        and env.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
+        and env.get("GITHUB_EVENT_NAME") == "push"
+        and env.get("GITHUB_REF") ==
+        "refs/heads/test/phase1-http-rollback-reissue-report-2026-11-21"
+        and len(env.get("GITHUB_SHA", "")) == 40
+        and env.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
+    )
+    return (
+        old_approved_github_site
+        or phase1_pr41_github_site
+        or is_reviewed_circleci_disposable_site(site)
+    )
 
 
 def is_reviewed_intercompany_disposable_site(site):
