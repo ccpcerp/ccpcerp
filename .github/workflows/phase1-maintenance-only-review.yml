@@ -1,0 +1,43 @@
+# Pure, disposable Phase 1 policy check. No bench, MariaDB, secrets or deploy.
+name: CCPC Phase 1 - maintenance-only policy review
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - release/withdrawal-department-phase1-2026-11-17
+    paths:
+      - .github/workflows/phase1-maintenance-only-review.yml
+      - ccpcerp/ccpc_erp/phase1_maintenance_use.py
+      - ccpcerp/ccpc_erp/test_phase1_maintenance_*.py
+      - ccpcerp/ccpc_erp/bc_issue_runtime.py
+      - ccpcerp/ccpc_erp/withdrawal_slip_stock.py
+      - ccpcerp/ccpc_erp/doctype/withdrawal_slip/withdrawal_slip.py
+      - ccpcerp/ccpc_erp/doctype/withdrawal_slip/withdrawal_slip.json
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccpc-phase1-maintenance-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  offline-policy:
+    if: ${{ github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact same-repo PR revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile all application Python
+        run: python3 -m compileall -q ccpcerp
+      - name: Run pure policy and static server wiring regression tests
+        run: |
+          python3 -m unittest -v \
+            ccpcerp.ccpc_erp.test_phase1_maintenance_use \
+            ccpcerp.ccpc_erp.test_phase1_maintenance_wiring_static \
+            ccpcerp.ccpc_erp.test_phase1_release_scope \
+            ccpcerp.ccpc_erp.test_phase1_release_wiring_static

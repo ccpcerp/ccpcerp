@@ -26,6 +26,7 @@ REQUEST_INTENT_HEADER_FIELDS = (
 	"work_for_section",
 	"physical_location",
 	"purpose",
+	"ccpc_material_use",
 	"company",
 )
 REQUEST_INTENT_ITEM_FIELDS = ("item_code", "requested_qty", "remarks")

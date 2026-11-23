@@ -23,6 +23,9 @@ from ccpcerp.ccpc_erp.bc_issue_locked_source import read_locked_issue_item_group
 from ccpcerp.ccpc_erp.bc_mapping_policy import (
     MappingPolicyError, is_effective_after_approval,
 )
+from ccpcerp.ccpc_erp.phase1_maintenance_use import (
+    MaintenanceUseError, require_maintenance_pilot_use,
+)
 from ccpcerp.ccpc_erp.withdrawal_issue_beneficiary import resolve_beneficiary_department
 
 
@@ -276,6 +279,16 @@ def resolve_locked_original_issue(slip, entry):
     _canonical(slip.company, "Issue Company")
     beneficiary = resolve_beneficiary_department(slip)
     lines = _locked_source_lines(slip, beneficiary)
+    # Locked source Item Groups, not HTTP inputs or editable Stock Entry rows.
+    # Shared resolver runs for both issue creation and before_submit recheck.
+    try:
+        require_maintenance_pilot_use(
+            slip.company, beneficiary,
+            tuple(line.item_group for line in lines),
+            slip.get("ccpc_material_use"),
+        )
+    except MaintenanceUseError as exc:
+        raise MappingPolicyError(str(exc)) from exc
     posting = _validated_voucher_posting_utc(entry)
     expenses = []
     centers = []
