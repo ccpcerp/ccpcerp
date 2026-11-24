@@ -1,0 +1,179 @@
+# Owner-approved preparation only. No push, schedule, deployment or automatic
+# PR synchronization trigger. A maintainer explicitly applying the exact
+# 'ccpc-run-phase1-integrated-db' label to PR #42 is the opt-in to spend hosted runner minutes.
+# No self-hosted runners, real CCPC sites/credentials or shared Docker resources.
+name: CCPC Phase1 - manual integrated Bearings MariaDB acceptance
+
+on:
+  pull_request:
+    types: [labeled]
+    branches:
+      - review/phase1-maintenance-release-integration-2026-11-24
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccpc-phase1-integrated-manual-db
+  cancel-in-progress: false
+
+jobs:
+  isolated-phase1_integrated-ledger:
+    if: >-
+      ${{ github.event.label.name == 'ccpc-run-phase1-integrated-db'
+              && github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp'
+          && github.head_ref == 'review/phase1-maintenance-integrated-tests-2026-11-24'
+          && github.repository == 'ccpcerp/ccpcerp' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CI: "Yes"
+      BENCH_DIR: ${{ github.workspace }}/../ccpc-phase1-integrated-frappe-bench
+      TEST_SITE: ci-phase1-integrated.localhost
+      CCPC_PHASE1_TEST_SHA: ${{ github.event.pull_request.head.sha }}
+      CI_DB_ROOT_PASSWORD: ci-phase1-integrated-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_ADMIN_PASSWORD: ci-phase1-integrated-admin-${{ github.run_id }}-${{ github.run_attempt }}
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: ci-phase1_integrated-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      redis-cache:
+        image: redis:7-alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:7-alpine
+        ports:
+          - 11000:6379
+
+    steps:
+      - name: Checkout exact same-repo Phase1 integrated head (no persisted Git token)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fail closed on event identity and reviewed Phase 1 ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "pull_request"
+          test "$GITHUB_REPOSITORY" = "ccpcerp/ccpcerp"
+          test "${GITHUB_RUN_ATTEMPT:-}" = "1"
+          test "$GITHUB_HEAD_REF" = "review/phase1-maintenance-integrated-tests-2026-11-24"
+          test "$GITHUB_BASE_REF" = "review/phase1-maintenance-release-integration-2026-11-24"
+          test "$(git rev-parse HEAD)" = "$CCPC_PHASE1_TEST_SHA"
+          test -z "$(git status --porcelain)"
+          git merge-base --is-ancestor 034afb116cf3fe0e3f9315b932eceba6dc961ce6 HEAD
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
+              event = json.load(handle)
+          pr = event["pull_request"]
+          assert event["action"] == "labeled"
+          assert event["label"]["name"] == "ccpc-run-phase1-integrated-db"
+          assert isinstance(pr["number"], int) and pr["number"] > 0
+          assert os.environ["GITHUB_REF"] == f"refs/pull/{pr['number']}/merge"
+          assert pr["head"]["sha"] == os.environ["CCPC_PHASE1_TEST_SHA"]
+          assert pr["head"]["repo"]["full_name"] == "ccpcerp/ccpcerp"
+          assert pr["head"]["ref"] == "review/phase1-maintenance-integrated-tests-2026-11-24"
+          assert pr["base"]["ref"] == "review/phase1-maintenance-release-integration-2026-11-24"
+          print("Approved Phase1 integrated label, PR identity, source SHA and ancestry: PASS")
+          PY
+
+      - name: Compile and run offline policy/static and CI-safety tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q ccpcerp
+          python3 -m unittest -v \
+            ccpcerp.ccpc_erp.test_phase1_maintenance_use \
+            ccpcerp.ccpc_erp.test_phase1_maintenance_wiring_static \
+            ccpcerp.ccpc_erp.test_phase1_release_scope \
+            ccpcerp.ccpc_erp.test_phase1_release_wiring_static \
+            ccpcerp.ccpc_erp.test_phase1_integrated_ci_static
+
+      - name: Install pinned-major Python and Node
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install disposable bench dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cron mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+          npm install -g yarn
+          python -m pip install frappe-bench
+          MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
+            -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+
+      - name: Initialize isolated Frappe v16 and ERPNext v16
+        shell: bash
+        run: |
+          set -euo pipefail
+          bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+            --python "$(command -v python)" "$BENCH_DIR"
+          cd "$BENCH_DIR"
+          bench set-config -g redis_cache redis://127.0.0.1:13000
+          bench set-config -g redis_queue redis://127.0.0.1:11000
+          bench set-config -g redis_socketio redis://127.0.0.1:11000
+          bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+          bench get-app ccpcerp "$GITHUB_WORKSPACE"
+          git -C apps/ccpcerp fetch --quiet --no-tags "$GITHUB_WORKSPACE" "$CCPC_PHASE1_TEST_SHA"
+          git -C apps/ccpcerp checkout --quiet --detach "$CCPC_PHASE1_TEST_SHA"
+          test "$(git -C apps/ccpcerp rev-parse HEAD)" = "$CCPC_PHASE1_TEST_SHA"
+          bench setup requirements --dev
+          echo "Source: ccpcerp@$CCPC_PHASE1_TEST_SHA"
+
+      - name: Create a fresh isolated MariaDB site and install only its apps
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
+            --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+            --admin-password "$CI_ADMIN_PASSWORD"
+          bench --site "$TEST_SITE" install-app erpnext
+          bench --site "$TEST_SITE" install-app ccpcerp
+          bench --site "$TEST_SITE" migrate
+          bench --site "$TEST_SITE" set-config allow_tests true
+
+      - name: Execute real signed-map routine / negative SLE and GL acceptance
+        env:
+          CCPC_ALLOW_MAINTENANCE_DB_PROBE: phase1-integrated-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.test_phase1_maintenance_integrated_real
+
+      - name: Record tested revision and limits
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Phase1 integrated — opt-in disposable MariaDB acceptance"
+            echo "Source PR #42 SHA: $CCPC_PHASE1_TEST_SHA"
+            echo "Runner: GitHub-hosted Ubuntu, ephemeral MariaDB 11.8, Redis 7, Frappe/ERPNext v16."
+            echo "Scope: signed synthetic Item Group/Department maps; routine issue SLE and GL;"
+            echo "capital/missing/wrong beneficiary/mixed-group/direct bypass denial; immutable request use."
+            echo "Synthetic fixture overrides exact pilot label constants only inside tests."
+            echo "A pass does not mean live CCPC master records, persistent DEVELOPMENT, or PRODUCTION were tested."
+            echo "No deployment, scheduled automation, production access, or real secrets."
+          } >> "$GITHUB_STEP_SUMMARY"
