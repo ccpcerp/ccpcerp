@@ -1,6 +1,6 @@
 # Owner-approved preparation only. No push, schedule, deployment or automatic
 # PR synchronization trigger. A maintainer explicitly applying the exact
-# 'ccpc-run-phase1-integrated-db' label to PR #42 is the opt-in to spend hosted runner minutes.
+# 'ccpc-run-phase1-integrated-db' label to this reviewed test PR is the opt-in to spend hosted runner minutes.
 # No self-hosted runners, real CCPC sites/credentials or shared Docker resources.
 name: CCPC Phase1 - manual integrated Bearings MariaDB acceptance
 
@@ -21,6 +21,7 @@ jobs:
   isolated-phase1_integrated-ledger:
     if: >-
       ${{ github.event.label.name == 'ccpc-run-phase1-integrated-db'
+          && github.run_attempt == 1
               && github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp'
           && github.head_ref == 'review/phase1-maintenance-integrated-tests-2026-11-24'
           && github.repository == 'ccpcerp/ccpcerp' }}
@@ -37,7 +38,7 @@ jobs:
       mariadb:
         image: mariadb:11.8
         env:
-          MARIADB_ROOT_PASSWORD: ci-phase1_integrated-${{ github.run_id }}-${{ github.run_attempt }}
+          MARIADB_ROOT_PASSWORD: ci-phase1-integrated-${{ github.run_id }}-${{ github.run_attempt }}
         ports:
           - 3306:3306
         options: >-
@@ -71,7 +72,7 @@ jobs:
           test "$GITHUB_BASE_REF" = "review/phase1-maintenance-release-integration-2026-11-24"
           test "$(git rev-parse HEAD)" = "$CCPC_PHASE1_TEST_SHA"
           test -z "$(git status --porcelain)"
-          git merge-base --is-ancestor 034afb116cf3fe0e3f9315b932eceba6dc961ce6 HEAD
+          git merge-base --is-ancestor e51c57efd8ea17b7193dfb37caab38f315f22e83 HEAD
           python3 - <<'PY'
           import json, os
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
@@ -169,7 +170,7 @@ jobs:
         run: |
           {
             echo "## Phase1 integrated — opt-in disposable MariaDB acceptance"
-            echo "Source PR #42 SHA: $CCPC_PHASE1_TEST_SHA"
+            echo "Reviewed integrated test SHA: $CCPC_PHASE1_TEST_SHA"
             echo "Runner: GitHub-hosted Ubuntu, ephemeral MariaDB 11.8, Redis 7, Frappe/ERPNext v16."
             echo "Scope: signed synthetic Item Group/Department maps; routine issue SLE and GL;"
             echo "capital/missing/wrong beneficiary/mixed-group/direct bypass denial; immutable request use."
