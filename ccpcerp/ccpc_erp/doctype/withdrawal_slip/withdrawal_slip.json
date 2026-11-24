@@ -27,6 +27,7 @@
   "physical_location",
   "purpose_section",
   "purpose",
+  "ccpc_material_use",
   "materials_section",
   "items",
   "stockroom_section",
@@ -158,6 +159,14 @@
    "fieldtype": "Small Text",
    "label": "Purpose / Reason",
    "reqd": 1
+  },
+  {
+   "fieldname": "ccpc_material_use",
+   "fieldtype": "Select",
+   "label": "Material Use (CCPC Bearings Pilot)",
+   "options": "\nRoutine Maintenance\nCapital Project / Improvement\nOther / Unclassified",
+   "description": "Required for same-Company CCPC Bearings issues. Select Routine Maintenance only for ordinary repairs; capital projects and other uses must use a separately approved accounting process. The server rejects unclassified or non-maintenance Bearings withdrawals.",
+   "depends_on": "eval:doc.company == 'Cagayan Corn Products Corporation'"
   },
   {
    "fieldname": "materials_section",

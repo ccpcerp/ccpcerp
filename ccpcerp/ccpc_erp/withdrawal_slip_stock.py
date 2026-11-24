@@ -22,6 +22,33 @@ from ccpcerp.ccpc_erp.phase1_release_scope import (
 	Phase1ScopeError,
 	require_same_company_issue,
 )
+from ccpcerp.ccpc_erp.phase1_maintenance_use import PILOT_COMPANY, PILOT_ITEM_GROUP
+
+
+def _reject_unlinked_pilot_bearings_issue(doc):
+	"""Block direct CCPC Bearings Material Issues outside the approved Slip route.
+
+	This checks canonical Item master groups, not the client's description.
+	Receipts, other Companies, and other Item Groups retain their normal path.
+	"""
+	if doc.get("company") != PILOT_COMPANY or doc.get("purpose") != "Material Issue":
+		return
+	codes = sorted({row.get("item_code") for row in doc.get("items") or [] if row.get("item_code")})
+	if not codes:
+		return
+	if len(codes) > 1000:
+		frappe.throw(_("Too many Item codes in a single Stock Entry."))
+	marks = ", ".join(["%s"] * len(codes))
+	rows = frappe.db.sql(
+		"SELECT name, item_group FROM `tabItem` WHERE name IN (" + marks + ") "
+		"ORDER BY name FOR UPDATE", tuple(codes), as_dict=True,
+	)
+	if any(row.item_group == PILOT_ITEM_GROUP for row in rows):
+		frappe.throw(_(
+			"CCPC Bearings Material Issues must originate from an approved "
+			"same-Company Withdrawal Slip with routine maintenance classification. "
+			"Capital and other uses require a separate approved accounting route."
+		))
 
 
 ISSUABLE_STATES = {"Stockroom Review"}
@@ -50,7 +77,7 @@ def _lock_withdrawal_slip(withdrawal_slip):
 	"""Serialize issue creation and submission on the same parent row."""
 	rows = frappe.db.sql(
 		"""SELECT status, received_by, company, requesting_company, source_warehouse, equipment, work_for_department,
-		owner, approving_supervisor
+		ccpc_material_use, owner, approving_supervisor
 		FROM `tabWithdrawal Slip` WHERE name = %s FOR UPDATE""",
 		(withdrawal_slip,),
 		as_dict=True,
@@ -116,7 +143,7 @@ def _get_issuable_slip(withdrawal_slip, locked):
 	slip.check_permission("write")
 	# A previous nonlocking read may have opened a REPEATABLE READ snapshot.
 	# Never issue from a stale Slip document after acquiring the row lock.
-	for fieldname in ("status", "received_by", "company", "requesting_company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
+	for fieldname in ("status", "received_by", "company", "requesting_company", "source_warehouse", "equipment", "work_for_department", "ccpc_material_use", "owner", "approving_supervisor"):
 		if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 			frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 	_assert_phase1_same_company(slip)
@@ -251,6 +278,7 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	if doc.docstatus not in (0, 1):
 		return
 	if not doc.get("withdrawal_slip"):
+		_reject_unlinked_pilot_bearings_issue(doc)
 		# An unlinked Stock Entry must not claim Withdrawal Slip item provenance.
 		# Otherwise Stock Entry Detail rows could misleadingly reference a Slip
 		# without the header-level permissions and quantity controls running.
@@ -268,7 +296,7 @@ def validate_withdrawal_slip_stock_entry(doc, method=None):
 	locked = _lock_withdrawal_slip(doc.withdrawal_slip) if method == "before_submit" else None
 	slip = frappe.get_doc("Withdrawal Slip", doc.withdrawal_slip)
 	if locked:
-		for fieldname in ("status", "received_by", "company", "requesting_company", "source_warehouse", "equipment", "work_for_department", "owner", "approving_supervisor"):
+		for fieldname in ("status", "received_by", "company", "requesting_company", "source_warehouse", "equipment", "work_for_department", "ccpc_material_use", "owner", "approving_supervisor"):
 			if (slip.get(fieldname) or None) != (locked.get(fieldname) or None):
 				frappe.throw(_("Withdrawal Slip changed during issuance. Please retry."))
 		_assert_independent_issuer(locked)

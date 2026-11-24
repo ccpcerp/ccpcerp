@@ -17,6 +17,7 @@ const request_intent_fields = [
 	"work_for_section",
 	"physical_location",
 	"purpose",
+	"ccpc_material_use",
 ];
 
 function can_edit_request_intent(frm) {
