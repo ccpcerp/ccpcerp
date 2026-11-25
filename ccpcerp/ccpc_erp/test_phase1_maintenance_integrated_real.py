@@ -190,16 +190,78 @@ class TestPhase1MaintenanceRealIntegration(ERPNextTestSuite):
             with self.subTest(material_use=use):
                 self._denied_without_ledger(self._slip(use), "Routine Maintenance")
 
-    def test_c_foreign_beneficiary_is_denied(self):
+    def test_c_cross_department_requires_signed_center_and_reports_real_beneficiary(self):
+        """Same Company maintenance can serve another Department, but not bypass Finance."""
         frappe.set_user("Administrator")
         dept = frappe.get_doc({
             "doctype": "Department",
-            "department_name": "Phase1 integrated Foreign Beneficiary " + frappe.generate_hash(length=8),
+            "department_name": "Phase1 integrated Wet Mill Beneficiary " + frappe.generate_hash(length=8),
             "company": ledger.COMPANY,
             "is_group": 0,
         }).insert(ignore_permissions=True)
+        slip = self._slip("Routine Maintenance", department=dept.name)
+        self.assertNotEqual(slip.department, slip.work_for_department)
+
+        # The existing signed Maintenance Center mapping must NOT be borrowed.
         self._denied_without_ledger(
-            self._slip("Routine Maintenance", department=dept.name), "Maintenance beneficiary"
+            slip, "unique approved Department Cost Center scope"
+        )
+
+        # Finance independently signs a scope for this beneficiary. The same
+        # shared Cost Center is valid; Department is the separate cost view.
+        center_revision = self._approve_signed("Center", dept.name, self.center)
+        frappe.set_user(ledger.ISSUER)
+        before = self._bin_qty()
+        result = issue_withdrawal_slip(slip.name)
+        self.assertEqual(result["submitted"], 1)
+        frappe.set_user("Administrator")
+        entry = frappe.get_doc("Stock Entry", result["name"])
+        self.assertEqual(entry.docstatus, 1)
+        self.assertEqual(entry.withdrawal_slip, slip.name)
+        self.assertEqual(entry.department, dept.name)
+        self.assertEqual(len(entry.items), 1)
+        row = entry.items[0]
+        self.assertEqual(row.department, dept.name)
+        self.assertEqual(row.ccpc_expense_mapping_revision, self.expense_revision)
+        self.assertEqual(row.ccpc_center_mapping_revision, center_revision)
+        self.assertEqual(row.cost_center, self.center)
+        self.assertEqual(row.expense_account, EXPENSE)
+        self.assertAlmostEqual(self._bin_qty(), before - 1)
+
+        voucher = {"voucher_type": "Stock Entry", "voucher_no": entry.name, "is_cancelled": 0}
+        sle = frappe.get_all("Stock Ledger Entry", filters=voucher,
+                             fields=["actual_qty", "stock_value_difference"])
+        self.assertTrue(sle)
+        self.assertAlmostEqual(sum(flt(r.actual_qty) for r in sle), -1)
+        gl = frappe.get_all("GL Entry", filters=voucher,
+                            fields=["account", "cost_center", "department", "debit", "credit"])
+        self.assertTrue(gl)
+        self.assertAlmostEqual(sum(flt(r.debit) for r in gl),
+                               sum(flt(r.credit) for r in gl), places=2)
+        expenses = [r for r in gl if r.account == EXPENSE and flt(r.debit) > 0]
+        self.assertTrue(expenses)
+        self.assertTrue(all(r.department == dept.name and r.cost_center == self.center
+                            for r in expenses))
+
+        # The operational Department consumption report is sourced from
+        # original Stock Ledger value, not derived from Cost Center totals.
+        from ccpcerp.ccpc_erp.report.ccpc_department_material_consumption import (
+            ccpc_department_material_consumption as consumption,
+        )
+        _columns, rows = consumption.execute({
+            "company": ledger.COMPANY,
+            "department": dept.name,
+            "from_date": nowdate(),
+            "to_date": nowdate(),
+        })
+        target = [r for r in rows if r["stock_entry"] == entry.name]
+        self.assertEqual(len(target), 1)
+        self.assertEqual(target[0]["beneficiary_department_at_issue"], dept.name)
+        self.assertEqual(target[0]["source_quality"], "OK")
+        self.assertAlmostEqual(flt(target[0]["issued_qty"]), 1)
+        self.assertAlmostEqual(
+            flt(target[0]["gross_sle_issue_value"]),
+            -sum(flt(r.stock_value_difference) for r in sle), places=2,
         )
 
     def test_d_mixed_group_slip_is_denied(self):
