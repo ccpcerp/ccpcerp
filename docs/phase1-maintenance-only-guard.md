@@ -1,5 +1,7 @@
 # Phase 1 CCPC Bearings maintenance-use safeguard — review only
 
+> **2026-11-25 REVIEW-BRANCH POLICY UPDATE:** This is the **historical Maintenance-only pilot proposal**. The owner's current requirement is to attribute routine material use to the **real same-Company beneficiary Department** (e.g. Wet Mill), not force all Bearings use onto Maintenance. The new, unmerged review candidate and its unchanged Finance mapping constraints are documented in [phase1-cross-department-routine-maintenance.md](phase1-cross-department-routine-maintenance.md). Statements below restricting eligible beneficiary to Maintenance are historical, **not** the proposed new behavior. No DEVELOPMENT/PRODUCTION deployment has occurred from this review candidate.
+
 **Branch:** `feature/phase1-maintenance-only-2026-11-21`, based on the reviewed Phase 1 release branch, not the default branch.
 
 **Status:** GitHub implementation for review. **Not merged, not pulled to DEVELOPMENT, not migrated or tested against a live MariaDB site.** No PRODUCTION operation is permitted without separate release authorization.
