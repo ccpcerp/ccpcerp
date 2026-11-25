@@ -3,6 +3,13 @@
 from pathlib import Path
 import ast
 import unittest
+from unittest.mock import patch
+
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import (
+    PHASE1_COMBINED_PR41_SITE,
+    is_reviewed_phase1_combined_pr41_site,
+    is_reviewed_withdrawal_disposable_site,
+)
 
 APP = Path(__file__).resolve().parents[1]
 FLOW = APP.parent / ".github/workflows/phase1-maintenance-integrated-manual.yml"
@@ -12,7 +19,7 @@ WORKER = Path(__file__).with_name("ci_phase1_integrated_concurrent_issue_worker.
 class TestIntegratedManualGate(unittest.TestCase):
     def test_manual_pr_label_only(self):
         t = FLOW.read_text(encoding="utf-8")
-        for required in ("types: [labeled]", "ccpc-run-phase1-integrated-db",
+        for required in ("types: [labeled]", "ccpc-run-phase1-combined-db", "github.event.pull_request.number == 44",
                          "github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp'",
                          "review/phase1-maintenance-integrated-tests-2026-11-24",
                          "review/phase1-maintenance-release-integration-2026-11-24",
@@ -59,6 +66,56 @@ class TestIntegratedManualGate(unittest.TestCase):
             self.assertIn(required, t)
         for forbidden in ("development.localhost", "ccpcerp.local", "pr42-only"):
             self.assertNotIn(forbidden, t)
+
+    def test_pr41_regressions_run_in_order_on_separate_site(self):
+        workflow = FLOW.read_text(encoding="utf-8")
+        self.assertIn(f"PR41_SITE: {PHASE1_COMBINED_PR41_SITE}", workflow)
+        self.assertIn('bench new-site "$PR41_SITE" --db-host 127.0.0.1', workflow)
+        self.assertIn('git merge-base --is-ancestor b599395f9c65cc6c6b8cc1b2750bc4559547161a HEAD', workflow)
+        self.assertEqual(workflow.count('bench --site "$PR41_SITE" run-tests'), 2)
+        self.assertEqual(workflow.count("steps.create_pr41_site.outcome == 'success'"), 2)
+        self.assertEqual(workflow.count("grep -q '^Ran 1 test in '"), 2)
+        self.assertEqual(workflow.count("grep -qx 'OK'"), 2)
+        cancel = workflow.index("--test test_cancelled_issue_excluded_and_reissue_reported_once")
+        http = workflow.index("--test test_zzz_real_wsgi_method_session_role_and_csrf_enforcement")
+        self.assertLess(cancel, http)
+        self.assertIn("CCPC_ALLOW_HTTP_PROBE: isolated-only", workflow[cancel:http])
+
+    def test_pr41_guard_does_not_expand_existing_withdrawal_authority(self):
+        valid = {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_REPOSITORY": "ccpcerp/ccpcerp",
+            "GITHUB_EVENT_NAME": "pull_request",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_REF": "refs/pull/44/merge",
+            "GITHUB_HEAD_REF": "review/phase1-maintenance-integrated-tests-2026-11-24",
+            "GITHUB_BASE_REF": "review/phase1-maintenance-release-integration-2026-11-24",
+            "GITHUB_WORKFLOW": "CCPC Phase1 - manual integrated Bearings MariaDB acceptance",
+            "GITHUB_RUN_ID": "42",
+            "CCPC_PHASE1_TEST_SHA": "b" * 40,
+            "CCPC_ALLOW_COMBINED_PR41_PROBE": "isolated-only",
+        }
+        options = {"db_host": "127.0.0.1", "db_type": "mariadb"}
+        with patch.dict("os.environ", valid, clear=True):
+            self.assertTrue(is_reviewed_phase1_combined_pr41_site(PHASE1_COMBINED_PR41_SITE, **options))
+            self.assertFalse(is_reviewed_withdrawal_disposable_site(PHASE1_COMBINED_PR41_SITE))
+            self.assertFalse(is_reviewed_phase1_combined_pr41_site("ci-phase1-integrated.localhost", **options))
+            self.assertFalse(is_reviewed_phase1_combined_pr41_site(
+                PHASE1_COMBINED_PR41_SITE, db_host="db.invalid", db_type="mariadb",
+            ))
+            self.assertFalse(is_reviewed_phase1_combined_pr41_site(
+                PHASE1_COMBINED_PR41_SITE, db_host="127.0.0.1", db_type="postgres",
+            ))
+        for key in valid:
+            with self.subTest(missing=key), patch.dict(
+                "os.environ", {k: v for k, v in valid.items() if k != key}, clear=True,
+            ):
+                self.assertFalse(is_reviewed_phase1_combined_pr41_site(PHASE1_COMBINED_PR41_SITE, **options))
+        for key, value in (("GITHUB_REF", "refs/pull/43/merge"), ("GITHUB_RUN_ATTEMPT", "2"),
+                           ("CCPC_PHASE1_TEST_SHA", "x" * 40)):
+            with self.subTest(wrong=key), patch.dict("os.environ", dict(valid, **{key: value}), clear=True):
+                self.assertFalse(is_reviewed_phase1_combined_pr41_site(PHASE1_COMBINED_PR41_SITE, **options))
+
 
 if __name__ == "__main__":
     unittest.main()

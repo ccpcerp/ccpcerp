@@ -5,6 +5,7 @@ This module is imported by tests and their spawned worker only. It is NOT a
 production permission bypass and does not authorize posting in real sites.
 """
 import os
+import re
 
 
 _CIRCLECI_BRANCH = "review/circleci-isolated-erpnext-phase2-2026-10-26"
@@ -58,6 +59,30 @@ def is_reviewed_withdrawal_disposable_site(site):
         old_approved_github_site
         or phase1_pr41_github_site
         or is_reviewed_circleci_disposable_site(site)
+    )
+
+
+PHASE1_COMBINED_PR41_SITE = "ci-phase1-integrated-pr41.localhost"
+
+
+def is_reviewed_phase1_combined_pr41_site(site, *, db_host, db_type):
+    """Authorize only the separately provisioned PR41 test site on the combined CI job."""
+    env = os.environ
+    return (
+        site == PHASE1_COMBINED_PR41_SITE
+        and db_host == "127.0.0.1"
+        and db_type == "mariadb"
+        and env.get("GITHUB_ACTIONS") == "true"
+        and env.get("GITHUB_REPOSITORY") == "ccpcerp/ccpcerp"
+        and env.get("GITHUB_EVENT_NAME") == "pull_request"
+        and env.get("GITHUB_RUN_ATTEMPT") == "1"
+        and env.get("GITHUB_REF") == "refs/pull/44/merge"
+        and env.get("GITHUB_HEAD_REF") == "review/phase1-maintenance-integrated-tests-2026-11-24"
+        and env.get("GITHUB_BASE_REF") == "review/phase1-maintenance-release-integration-2026-11-24"
+        and env.get("GITHUB_WORKFLOW") == "CCPC Phase1 - manual integrated Bearings MariaDB acceptance"
+        and bool(re.fullmatch(r"[1-9][0-9]*", env.get("GITHUB_RUN_ID", "")))
+        and bool(re.fullmatch(r"[0-9a-f]{40}", env.get("CCPC_PHASE1_TEST_SHA", "")))
+        and env.get("CCPC_ALLOW_COMBINED_PR41_PROBE") == "isolated-only"
     )
 
 

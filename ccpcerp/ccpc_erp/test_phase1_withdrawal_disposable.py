@@ -17,7 +17,10 @@ from ccpcerp.ccpc_erp import phase1_finance_onboarding as onboarding
 from ccpcerp.ccpc_erp import test_finance_withdrawal_billing_bridge_disposable as finance
 from ccpcerp.ccpc_erp import withdrawal_slip_stock as issuance
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
-from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_withdrawal_disposable_site
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import (
+    PHASE1_COMBINED_PR41_SITE,
+    is_reviewed_withdrawal_disposable_site,
+)
 from ccpcerp.ccpc_erp.doctype.withdrawal_slip import test_withdrawal_real_ledger_integration as ledger
 from ccpcerp.ccpc_erp.report.ccpc_department_material_consumption import (
     ccpc_department_material_consumption as report,
@@ -45,8 +48,15 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
         # own isolated container and is checked by the strict source-branch guard.
         private_socket_site = frappe.local.site == SITE and bool(frappe.conf.get("db_socket"))
         reviewed_github_site = is_reviewed_withdrawal_disposable_site(frappe.local.site)
+        combined = frappe.local.site == PHASE1_COMBINED_PR41_SITE
+        if combined and not (
+            ledger.is_combined_pr41_test_site()
+            and self._testMethodName == "test_cancelled_issue_excluded_and_reissue_reported_once"
+            and os.environ.get("CCPC_PHASE1_DISPOSABLE") == "1"
+        ):
+            raise RuntimeError("Only the reviewed cancellation/reissue regression may use the combined PR41 site")
         if (
-            not (private_socket_site or reviewed_github_site)
+            not (private_socket_site or reviewed_github_site or combined)
             or os.environ.get("CCPC_PHASE1_DISPOSABLE") != "1"
             or frappe.conf.get("db_type", "mariadb") != "mariadb"
         ):
@@ -54,6 +64,9 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
         super().setUp()
         self.addCleanup(frappe.set_user, "Administrator")
         self._set_up_stock()
+        self.material_use = "Routine Maintenance" if combined else None
+        if combined:
+            ledger.enable_synthetic_maintenance_policy(self)
         self._actor(SUPERVISOR, "Withdrawal Slip Requestor")
         self.center = frappe.db.get_value(
             "Cost Center", {"company": ledger.COMPANY, "is_group": 0, "disabled": 0}, "name"
@@ -74,6 +87,7 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
             "source_warehouse": ledger.WAREHOUSE,
             "physical_location": "Synthetic test bay",
             "purpose": "Phase 1 inventory and accounting acceptance",
+            **({"ccpc_material_use": self.material_use} if self.material_use else {}),
             "items": [{"item_code": self.item.name, "requested_qty": ledger.QTY_ISSUED}],
         }).insert()
         self.assertEqual(slip.status, "Draft")
@@ -435,6 +449,11 @@ class TestPhase1WithdrawalDisposable(ERPNextTestSuite):
         replacement = frappe.get_doc("Stock Entry", replacement_name)
         self.assertEqual(replacement.docstatus, 1)
         self.assertEqual(replacement.company, ledger.COMPANY)
+        if self.material_use:
+            self.assertEqual(slip.reload().ccpc_material_use, self.material_use)
+            for field in ("ccpc_expense_mapping_revision", "ccpc_center_mapping_revision"):
+                self.assertTrue(original.items[0].get(field))
+                self.assertEqual(replacement.items[0].get(field), original.items[0].get(field))
         self.assertEqual(self._bin_qty(), ledger.QTY_RECEIVED - ledger.QTY_ISSUED)
         self.assertEqual(
             frappe.db.count("Stock Entry", {"withdrawal_slip": slip.name, "docstatus": 1}),

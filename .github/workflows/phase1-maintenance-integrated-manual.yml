@@ -1,6 +1,6 @@
 # Owner-approved preparation only. No push, schedule, deployment or automatic
 # PR synchronization trigger. A maintainer explicitly applying the exact
-# 'ccpc-run-phase1-integrated-db' label to this reviewed test PR is the opt-in to spend hosted runner minutes.
+# 'ccpc-run-phase1-combined-db' label to this reviewed test PR is the opt-in to spend hosted runner minutes.
 # No self-hosted runners, real CCPC sites/credentials or shared Docker resources.
 name: CCPC Phase1 - manual integrated Bearings MariaDB acceptance
 
@@ -20,9 +20,10 @@ concurrency:
 jobs:
   isolated-phase1_integrated-ledger:
     if: >-
-      ${{ github.event.label.name == 'ccpc-run-phase1-integrated-db'
+      ${{ github.event.label.name == 'ccpc-run-phase1-combined-db'
           && github.run_attempt == 1
-              && github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp'
+          && github.event.pull_request.number == 44
+          && github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp'
           && github.head_ref == 'review/phase1-maintenance-integrated-tests-2026-11-24'
           && github.repository == 'ccpcerp/ccpcerp' }}
     runs-on: ubuntu-24.04
@@ -31,6 +32,7 @@ jobs:
       CI: "Yes"
       BENCH_DIR: ${{ github.workspace }}/../ccpc-phase1-integrated-frappe-bench
       TEST_SITE: ci-phase1-integrated.localhost
+      PR41_SITE: ci-phase1-integrated-pr41.localhost
       CCPC_PHASE1_TEST_SHA: ${{ github.event.pull_request.head.sha }}
       CI_DB_ROOT_PASSWORD: ci-phase1-integrated-${{ github.run_id }}-${{ github.run_attempt }}
       CI_ADMIN_PASSWORD: ci-phase1-integrated-admin-${{ github.run_id }}-${{ github.run_attempt }}
@@ -72,15 +74,15 @@ jobs:
           test "$GITHUB_BASE_REF" = "review/phase1-maintenance-release-integration-2026-11-24"
           test "$(git rev-parse HEAD)" = "$CCPC_PHASE1_TEST_SHA"
           test -z "$(git status --porcelain)"
-          git merge-base --is-ancestor e51c57efd8ea17b7193dfb37caab38f315f22e83 HEAD
+          git merge-base --is-ancestor b599395f9c65cc6c6b8cc1b2750bc4559547161a HEAD
           python3 - <<'PY'
           import json, os
           with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as handle:
               event = json.load(handle)
           pr = event["pull_request"]
           assert event["action"] == "labeled"
-          assert event["label"]["name"] == "ccpc-run-phase1-integrated-db"
-          assert isinstance(pr["number"], int) and pr["number"] > 0
+          assert event["label"]["name"] == "ccpc-run-phase1-combined-db"
+          assert pr["number"] == 44
           assert os.environ["GITHUB_REF"] == f"refs/pull/{pr['number']}/merge"
           assert pr["head"]["sha"] == os.environ["CCPC_PHASE1_TEST_SHA"]
           assert pr["head"]["repo"]["full_name"] == "ccpcerp/ccpcerp"
@@ -124,6 +126,7 @@ jobs:
             -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
 
       - name: Initialize isolated Frappe v16 and ERPNext v16
+        id: init_bench
         shell: bash
         run: |
           set -euo pipefail
@@ -140,6 +143,8 @@ jobs:
           test "$(git -C apps/ccpcerp rev-parse HEAD)" = "$CCPC_PHASE1_TEST_SHA"
           bench setup requirements --dev
           echo "Source: ccpcerp@$CCPC_PHASE1_TEST_SHA"
+          echo "Frappe: $(git -C apps/frappe rev-parse HEAD)"
+          echo "ERPNext: $(git -C apps/erpnext rev-parse HEAD)"
 
       - name: Create a fresh isolated MariaDB site and install only its apps
         shell: bash
@@ -164,6 +169,57 @@ jobs:
           bench --site "$TEST_SITE" run-tests \
             --module ccpcerp.ccpc_erp.test_phase1_maintenance_integrated_real
 
+      - name: Create a separate disposable site for the two PR41 regressions
+        id: create_pr41_site
+        if: ${{ !cancelled() && steps.init_bench.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          test "$PR41_SITE" = "ci-phase1-integrated-pr41.localhost"
+          bench new-site "$PR41_SITE" --db-host 127.0.0.1 --db-port 3306 \
+            --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+            --admin-password "$CI_ADMIN_PASSWORD"
+          bench --site "$PR41_SITE" install-app erpnext
+          bench --site "$PR41_SITE" install-app ccpcerp
+          bench --site "$PR41_SITE" migrate
+          bench --site "$PR41_SITE" set-config allow_tests true
+
+      # Run the transaction-rollback report test before the HTTP probe
+      # explicitly commits synthetic fixtures and login sessions.
+      - name: PR41 cancellation, reissue and Department consumption
+        if: ${{ !cancelled() && steps.create_pr41_site.outcome == 'success' }}
+        env:
+          CCPC_ALLOW_COMBINED_PR41_PROBE: isolated-only
+          CCPC_PHASE1_DISPOSABLE: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          log="$RUNNER_TEMP/ccpc-pr41-cancel.log"
+          PYTHON_COLORS=0 bench --site "$PR41_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.test_phase1_withdrawal_disposable \
+            --test test_cancelled_issue_excluded_and_reissue_reported_once 2>&1 | tee "$log"
+          grep -q '^Ran 1 test in ' "$log"
+          grep -qx 'OK' "$log"
+
+      - name: PR41 authenticated HTTP, post-ledger rollback, retry and replay
+        if: ${{ !cancelled() && steps.create_pr41_site.outcome == 'success' }}
+        env:
+          CCPC_ALLOW_COMBINED_PR41_PROBE: isolated-only
+          CCPC_ALLOW_COMMIT_PROBE: isolated-only
+          CCPC_ALLOW_HTTP_PROBE: isolated-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          log="$RUNNER_TEMP/ccpc-pr41-http.log"
+          PYTHON_COLORS=0 bench --site "$PR41_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.doctype.withdrawal_slip.test_withdrawal_real_ledger_integration \
+            --test test_zzz_real_wsgi_method_session_role_and_csrf_enforcement 2>&1 | tee "$log"
+          grep -q '^Ran 1 test in ' "$log"
+          grep -qx 'OK' "$log"
+
       - name: Record tested revision and limits
         if: always()
         shell: bash
@@ -174,6 +230,8 @@ jobs:
             echo "Runner: GitHub-hosted Ubuntu, ephemeral MariaDB 11.8, Redis 7, Frappe/ERPNext v16."
             echo "Scope: signed synthetic Item Group/Department maps; routine issue SLE and GL;"
             echo "capital/missing/wrong beneficiary/mixed-group/direct bypass denial; immutable request use."
+            echo "PR41: separate disposable site, cancellation/reissue report plus authenticated WSGI POST."
+            echo "Check both step outcomes; an unexecuted step is not a pass."
             echo "Synthetic fixture overrides exact pilot label constants only inside tests."
             echo "A pass does not mean live CCPC master records, persistent DEVELOPMENT, or PRODUCTION were tested."
             echo "No deployment, scheduled automation, production access, or real secrets."
