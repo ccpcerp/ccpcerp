@@ -24,7 +24,11 @@ from ccpcerp.ccpc_erp.doctype.withdrawal_slip.ci_concurrent_issue_worker import 
     _ci_concurrent_issue_worker,
 )
 from ccpcerp.ccpc_erp.withdrawal_slip_stock import issue_withdrawal_slip
-from ccpcerp.ccpc_erp.ci_disposable_site_guard import is_reviewed_withdrawal_disposable_site
+from ccpcerp.ccpc_erp.ci_disposable_site_guard import (
+    PHASE1_COMBINED_PR41_SITE,
+    is_reviewed_phase1_combined_pr41_site,
+    is_reviewed_withdrawal_disposable_site,
+)
 
 
 COMPANY = "_Test Company"
@@ -37,6 +41,30 @@ QTY_ISSUED = 1
 UNIT_RATE = 100
 
 
+HTTP_REGRESSION = "test_zzz_real_wsgi_method_session_role_and_csrf_enforcement"
+
+
+def is_combined_pr41_test_site():
+    return is_reviewed_phase1_combined_pr41_site(
+        getattr(frappe.local, "site", None),
+        db_host=frappe.conf.get("db_host"),
+        db_type=frappe.conf.get("db_type", "mariadb"),
+    )
+
+
+def enable_synthetic_maintenance_policy(test):
+    """Apply the actual maintenance gate to the existing ERPNext fixture labels."""
+    for symbol, value in (
+        ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_COMPANY", COMPANY),
+        ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_ITEM_GROUP", "_Test Item Group"),
+        ("ccpcerp.ccpc_erp.phase1_maintenance_use.PILOT_BENEFICIARY", test.department),
+        ("ccpcerp.ccpc_erp.withdrawal_slip_stock.PILOT_COMPANY", COMPANY),
+        ("ccpcerp.ccpc_erp.withdrawal_slip_stock.PILOT_ITEM_GROUP", "_Test Item Group"),
+    ):
+        override = patch(symbol, value)
+        override.start()
+        test.addCleanup(override.stop)
+
 
 class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
     """Real database/ledger assertion; fixture bypasses APPROVAL workflow only."""
@@ -45,10 +73,13 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Two methods below deliberately commit/roll back SQL. Block them at
         # FIRST contact, before loading or changing *any* ERPNext test records,
         # unless this is the specifically approved disposable Actions site.
+        site = getattr(frappe.local, "site", None)
+        combined = site == PHASE1_COMBINED_PR41_SITE
+        if combined and not (self._testMethodName == HTTP_REGRESSION and is_combined_pr41_test_site()):
+            raise RuntimeError("Only the reviewed HTTP regression may use the combined PR41 site")
         if self._testMethodName.startswith(("test_w_", "test_x_", "test_y_", "test_z_", "test_zz_", "test_zzz_", "test_zzzz_")):
-            site = getattr(frappe.local, "site", None)
             if not (
-                is_reviewed_withdrawal_disposable_site(site)
+                (combined or is_reviewed_withdrawal_disposable_site(site))
                 and os.environ.get("CCPC_ALLOW_COMMIT_PROBE") == "isolated-only"
                 and (not self._testMethodName.startswith(("test_w_", "test_x_"))
                      or os.environ.get("CCPC_ALLOW_ACCOUNTING_PROBE") == "isolated-only")
@@ -59,7 +90,11 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
             ):
                 raise RuntimeError("Transaction probes require an approved isolated CI runner and test site")
         self._set_up_stock()
-        self._set_up_review_slip()
+        if combined:
+            enable_synthetic_maintenance_policy(self)
+        slip = self._set_up_review_slip("Routine Maintenance" if combined else None)
+        self.slip_name = slip.name
+        self.slip_item_name = slip.items[0].name
 
     def _set_up_stock(self):
         # ERPNext's own test bootstrap records, not CCPC production business data.
@@ -187,7 +222,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         self.assertEqual(self.receipt.docstatus, 1)
         self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED, places=5)
 
-    def _set_up_review_slip(self):
+    def _set_up_review_slip(self, material_use):
         # A valid synthetic request is inserted as its actual preparer.
         frappe.set_user(PREPARER)
         slip = frappe.get_doc(
@@ -214,6 +249,8 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 ],
             }
         )
+        if material_use is not None:
+            slip.ccpc_material_use = material_use
         slip.insert(ignore_permissions=True)
         self.assertEqual(slip.owner, PREPARER)
         self.assertEqual(slip.approving_supervisor, PREPARER)
@@ -222,8 +259,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # Test fixture only: exercising the Stockroom endpoint, NOT proving
         # approval/workflow transitions. Keep intent/provenance immutable.
         frappe.db.set_value("Withdrawal Slip", slip.name, "status", "Stockroom Review")
-        self.slip_name = slip.name
-        self.slip_item_name = slip.items[0].name
+        return slip
 
     def tearDown(self):
         frappe.set_user("Administrator")
@@ -883,7 +919,8 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
 
         site = frappe.local.site
         sites_path = os.path.abspath(frappe.local.sites_path)
-        self.assertTrue(is_reviewed_withdrawal_disposable_site(site))
+        combined = is_combined_pr41_test_site()
+        self.assertTrue(combined or is_reviewed_withdrawal_disposable_site(site))
         self.assertFalse(frappe.conf.get("ignore_csrf"))
         path = "/api/method/ccpcerp.ccpc_erp.withdrawal_slip_stock.issue_withdrawal_slip"
         base_url = "http://" + site
@@ -895,7 +932,7 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
         # CircleCI's simulated SQL approvals. Exercise the real independent
         # Finance maker/checker signed-decision workflow, test-only, before
         # opening a fresh WSGI request/transaction.
-        if site == "ci-withdrawal.localhost" and os.environ.get("GITHUB_ACTIONS") == "true":
+        if combined or (site == "ci-withdrawal.localhost" and os.environ.get("GITHUB_ACTIONS") == "true"):
             from ccpcerp.ccpc_erp.test_finance_withdrawal_billing_bridge_disposable import (
                 CHECKER as FINANCE_CHECKER,
                 MAKER as FINANCE_MAKER,
@@ -927,6 +964,8 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                     "Approved",
                     f"Expected signed Finance approval for {doctype} on the disposable site",
                 )
+
+        unclassified = self._set_up_review_slip(None).name if combined else None
 
         # Site and test-item fixtures are committed ONLY on this ephemeral site
         # so the WSGI HTTP requests can see a legitimate Slip via fresh SQL.
@@ -964,13 +1003,13 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 client.set_cookie("sid", sid, domain=site)
             return client
 
-        def call(client, method, token=None):
+        def call(client, method, token=None, target=slip_name):
             request_headers = dict(headers)
             if token is not None:
                 request_headers["X-Frappe-CSRF-Token"] = token
             return getattr(client, method)(
                 path,
-                json={"withdrawal_slip": slip_name} if method == "post" else None,
+                json={"withdrawal_slip": target} if method == "post" else None,
                 base_url=base_url,
                 headers=request_headers,
             )
@@ -1009,6 +1048,37 @@ class TestWithdrawalRealLedgerIntegration(ERPNextTestSuite):
                 "CSRFTokenError",
                 "Wrong CSRF must fail specifically in Frappe's request-security layer",
             )
+
+            if unclassified:
+                from ccpcerp.ccpc_erp import bc_issue_runtime
+
+                init_test_context()
+                sle_filters = {"item_code": item_name}
+                gl_filters = {"company": COMPANY}
+                before = (
+                    frappe.db.count("Stock Ledger Entry", sle_filters),
+                    frappe.db.count("GL Entry", gl_filters),
+                )
+                with patch.object(bc_issue_runtime, "require_maintenance_pilot_use",
+                                  wraps=bc_issue_runtime.require_maintenance_pilot_use) as gate:
+                    response = call(issuer, "post", issuer_token, target=unclassified)
+                self.assertNotEqual(response.status_code, 200)
+                self.assertEqual((response.get_json() or {}).get("exc_type"), "MappingPolicyError")
+                gate.assert_called_once()
+                company, beneficiary, groups, material_use = gate.call_args.args
+                self.assertEqual((company, beneficiary, groups),
+                                 (COMPANY, self.department, ("_Test Item Group",)))
+                self.assertIn(material_use, (None, ""))
+                init_test_context()
+                self.assertFalse(frappe.db.exists("Stock Entry", {"withdrawal_slip": unclassified}))
+                self.assertEqual(
+                    frappe.db.get_value("Withdrawal Slip", unclassified, "status"), "Stockroom Review",
+                )
+                self.assertAlmostEqual(self._bin_qty(), QTY_RECEIVED, places=5)
+                self.assertEqual((
+                    frappe.db.count("Stock Ledger Entry", sle_filters),
+                    frappe.db.count("GL Entry", gl_filters),
+                ), before)
 
             # A genuine POST must roll back its whole transaction when an
             # installed hook raises AFTER native Stock Ledger / Expense GL

@@ -26,11 +26,22 @@ class TestPhase1MaintenanceUse(unittest.TestCase):
                 with self.assertRaisesRegex(MaintenanceUseError, "Routine Maintenance"):
                     self._check((PILOT_ITEM_GROUP,), value)
 
-    def test_foreign_beneficiary_fails_even_when_marked_maintenance(self):
-        for value in ("Glucose Plant - RMC", "Wet Mill Plant - CCPC",
-                      None, ""):
+    def test_different_beneficiary_departments_are_supported(self):
+        # The caller must have already verified the real active Company-scoped
+        # Department and signed Center mapping against the locked DB masters.
+        for value in (PILOT_BENEFICIARY, "Wet Mill Plant - CCPC",
+                      "Cogen Plant Department - CCPC"):
             with self.subTest(beneficiary=value):
-                with self.assertRaisesRegex(MaintenanceUseError, "Maintenance beneficiary"):
+                self.assertTrue(self._check(
+                    (PILOT_ITEM_GROUP,), ROUTINE_MAINTENANCE,
+                    beneficiary=value,
+                ))
+
+    def test_missing_or_noncanonical_beneficiary_is_denied(self):
+        for value in (None, "", " ", " Wet Mill Plant - CCPC",
+                      "Wet Mill Plant - CCPC ", 17):
+            with self.subTest(beneficiary=value):
+                with self.assertRaisesRegex(MaintenanceUseError, "beneficiary Department"):
                     self._check((PILOT_ITEM_GROUP,), ROUTINE_MAINTENANCE,
                                 beneficiary=value)
 

@@ -93,6 +93,32 @@ class TestPhase1MaintenanceWiring(unittest.TestCase):
             fn = _named(path, name)
             self.assertEqual(len(_calls(fn, "resolve_locked_original_issue")), 1, name)
 
+    def test_cross_department_resolution_retains_locked_company_and_finance_gates(self):
+        # The pure maintenance policy cannot establish Department membership.
+        # Runtime must obtain validated beneficiary and Company-scoped masters.
+        runtime = (BASE / "bc_issue_runtime.py").read_text(encoding="utf-8")
+        resolver = _named(BASE / "bc_issue_runtime.py", "resolve_locked_original_issue")
+        scoped = ast.get_source_segment(runtime, resolver) or ""
+        for required in (
+            "beneficiary = resolve_beneficiary_department(slip)",
+            "lines = _locked_source_lines(slip, beneficiary)",
+            "require_maintenance_pilot_use(",
+            "beneficiary_department=%s",
+            "A unique approved Department Cost Center scope is required.",
+            "scope_row.selector_kind == \"Department Only\"",
+            "_assert_approval_provenance(row, slip.company)",
+        ):
+            self.assertIn(required, scoped)
+        beneficiary_source = (BASE / "withdrawal_issue_beneficiary.py").read_text(encoding="utf-8")
+        for required in ("equipment_department", "explicit != equipment_department",
+                         "validate_department_company(", "require_eligible=True"):
+            self.assertIn(required, beneficiary_source)
+        locked_source = (BASE / "bc_issue_locked_source.py").read_text(encoding="utf-8")
+        for required in ('FROM `tabDepartment`', 'FOR UPDATE',
+                         'dept[0].get("company") != company',
+                         '_non_group_enabled(dept[0], ("is_group", "disabled"'):
+            self.assertIn(required, locked_source)
+
     def test_unlinked_ccpc_bearings_direct_issue_is_rejected(self):
         path = BASE / "withdrawal_slip_stock.py"
         validator = _named(path, "validate_withdrawal_slip_stock_entry")
