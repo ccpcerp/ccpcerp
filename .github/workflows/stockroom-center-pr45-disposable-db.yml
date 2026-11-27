@@ -12,6 +12,10 @@ on:
       - ccpcerp/ccpc_erp/ci_stockroom_center_pr45_site_guard.py
       - ccpcerp/ccpc_erp/test_stockroom_center_pr45_guard_static.py
       - ccpcerp/ccpc_erp/test_finance_lifecycle_disposable_integration.py
+      - ccpcerp/ccpc_erp/finance_doctype_security.py
+      - ccpcerp/ccpc_erp/test_finance_doctype_security_static.py
+      - ccpcerp/hooks.py
+      - ccpcerp/setup.py
       - ccpcerp/ccpc_erp/bc_issue_runtime.py
       - ccpcerp/ccpc_erp/bc_finance_evidence.py
       - ccpcerp/ccpc_erp/bc_mapping_workflow.py
@@ -106,6 +110,7 @@ jobs:
           set -euo pipefail
           python3 -I -B ccpcerp/ccpc_erp/test_stockroom_center_pr45_guard_static.py -v
           python3 -I -B ccpcerp/ccpc_erp/test_stockroom_center_proposal_static.py -v
+          python3 -I -B ccpcerp/ccpc_erp/test_finance_doctype_security_static.py -v
           python3 - <<'PY'
           import ast
           from pathlib import Path
@@ -113,6 +118,8 @@ jobs:
               'ci_stockroom_center_pr45_site_guard.py',
               'test_stockroom_center_pr45_guard_static.py',
               'test_finance_lifecycle_disposable_integration.py',
+              'finance_doctype_security.py',
+              'test_finance_doctype_security_static.py',
               'phase1_finance_onboarding.py',
               'bc_issue_runtime.py',
           ):
