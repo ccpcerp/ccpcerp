@@ -21,6 +21,10 @@ from ccpcerp.ccpc_erp.bc_mapping_workflow import (
     approve_mapping, get_mapping_review, propose_mapping,
 )
 from ccpcerp.ccpc_erp.bc_finance_evidence import sign_mapping_decision
+from ccpcerp.ccpc_erp.phase1_finance_onboarding import (
+    get_pilot_context, get_pilot_coverage, propose_pilot_mapping,
+    search_pilot_master, sign_and_approve_initial_mapping,
+)
 from ccpcerp.ccpc_erp.bc_finance_lifecycle_events import (
     decide_mapping_retirement,
     get_retirement_request_review,
@@ -300,6 +304,112 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         )
         self.assertEqual(approved["state"], "Approved")
         self.assertEqual(frappe.db.count(USE, {"decision": signed["name"]}), 1)
+
+
+    def test_i_stockroom_center_draft_only_and_independent_finance_approval(self):
+        """Real disposable SQL/API test. Scoped constants are patched only in CI."""
+        stockroom = "ccpc-finance-ci-stockroom-maker@invalid.test"
+        self._actor(stockroom, "CCPC Mapping Preparer")
+        if not frappe.db.exists("Role", "Stockroom Personnel"):
+            frappe.get_doc({
+                "doctype": "Role", "role_name": "Stockroom Personnel",
+            }).insert(ignore_permissions=True)
+        user = frappe.get_doc("User", stockroom)
+        user.append("roles", {"role": "Stockroom Personnel"})
+        user.save(ignore_permissions=True)
+
+        dept = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": "CCPC Finance CI Stockroom " + self._testMethodName,
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True).name
+        center = frappe.db.get_value("Cost Center", {
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+        }, "name")
+        self.assertTrue(center)
+        before_sle = frappe.db.count("Stock Ledger Entry", {"company": COMPANY})
+        before_gl = frappe.db.count("GL Entry", {"company": COMPANY})
+        from ccpcerp.ccpc_erp import bc_issue_runtime
+
+        # The permanent policy remains restricted to CCPC / Main - CCPC.
+        # Synthetic fixture _Test Company and its leaf are substituted ONLY
+        # inside this disposable test's context, not the actual application.
+        with (
+            patch.object(bc_issue_runtime, "STOCKROOM_CENTER_PROPOSAL_COMPANY", COMPANY),
+            patch.object(bc_issue_runtime, "STOCKROOM_CENTER_PROPOSAL_VALUE", center),
+        ):
+            frappe.set_user(stockroom)
+            access = get_pilot_context()
+            self.assertIn(COMPANY, access["companies"])
+            self.assertEqual(access["allowed_kinds"], ["Center"])
+            self.assertTrue(access["can_propose"])
+            self.assertFalse(access["can_review"])
+            self.assertIn(center, search_pilot_master(
+                "Center", COMPANY, "value", "",
+            ))
+            with self.assertRaises(MappingPolicyError):
+                propose_mapping("Expense", COMPANY, self.group, self.account)
+            with self.assertRaises(frappe.ValidationError):
+                propose_pilot_mapping("Expense", COMPANY, self.group, self.account)
+            with self.assertRaises(MappingPolicyError):
+                propose_mapping("Center", COMPANY, dept, "NOT THE SHARED CENTER")
+            with self.assertRaises(frappe.ValidationError):
+                get_pilot_coverage("Expense", COMPANY, self.group)
+
+            coverage = get_pilot_coverage("Center", COMPANY, dept)
+            self.assertFalse(coverage["active"])
+            self.assertFalse(coverage["draft"])
+            draft = propose_pilot_mapping("Center", COMPANY, dept, center)
+            self.assertEqual(draft["state"], "Draft")
+            revision = draft["name"]
+            self.assertEqual(frappe.db.get_value(
+                "CCPC Center Mapping Revision", revision, "approval_state"), "Draft")
+            scope = frappe.db.get_value("CCPC Center Mapping Revision", revision,
+                                        "mapping_scope")
+            selector = frappe.db.get_value("CCPC Center Mapping Scope", scope,
+                                           ["selector_kind", "selector_key"],
+                                           as_dict=True)
+            self.assertEqual(selector.selector_kind, "Department Only")
+            self.assertEqual(selector.selector_key, "DEPARTMENT_ONLY")
+            with self.assertRaises(frappe.ValidationError):
+                sign_and_approve_initial_mapping("Center", revision, "forged")
+
+            frappe.set_user(CHECKER)
+            reviewed = get_mapping_review("Center", revision)
+            self.assertEqual(reviewed["owner"], stockroom)
+            self.assertEqual(reviewed["value"], center)
+            approval = sign_and_approve_initial_mapping(
+                "Center", revision, reviewed["modified"],
+            )
+            self.assertEqual(approval["state"], "Approved")
+            self.assertEqual(frappe.db.count(USE, {
+                "decision": frappe.db.get_value(
+                    "CCPC Center Mapping Revision", revision, "approval_reference"),
+            }), 1)
+            self.assertTrue(frappe.db.exists("Version", approval["version"]))
+            self.assertEqual(frappe.db.count("Stock Ledger Entry", {
+                "company": COMPANY,
+            }), before_sle)
+            self.assertEqual(frappe.db.count("GL Entry", {
+                "company": COMPANY,
+            }), before_gl)
+
+            frappe.set_user(stockroom)
+            active = get_pilot_coverage("Center", COMPANY, dept)
+            self.assertEqual(active["active"]["value"], center)
+            self.assertEqual(active["active"]["revision"], revision)
+            self.assertFalse(active["draft"])
+
+            # Having both Stockroom and Checker roles does NOT create a shortcut.
+            frappe.set_user("Administrator")
+            user = frappe.get_doc("User", stockroom)
+            user.append("roles", {"role": "CCPC Accounting Mapping Approver"})
+            user.save(ignore_permissions=True)
+            frappe.set_user(stockroom)
+            with self.assertRaises(frappe.ValidationError):
+                get_pilot_context()
+            with self.assertRaises(MappingPolicyError):
+                propose_mapping("Center", COMPANY, dept, center)
 
     def test_h_rejection_audit_failure_rolls_back_event_and_state(self):
         revision = self._draft()
