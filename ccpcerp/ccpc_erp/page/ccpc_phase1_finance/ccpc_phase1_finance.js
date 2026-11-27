@@ -63,14 +63,19 @@ frappe.pages["ccpc-phase1-finance"].on_page_load = async function (wrapper) {
   const source_field = suggestions("source", "Item Group");
   const source = source_field.input;
   const value_field = access.can_propose ? suggestions("value", "Expense Account") : null;
-  company.add(kind).on("change", () => {
-    source_field.reset();
-    value_field?.reset();
+  const update_source_labels = () => {
     const expense = kind.val() === "Expense";
     source_field.caption.text(expense ? __("Item Group") : __("Beneficiary Department"));
     value_field?.caption.text(expense ? __("Expense Account") : __("Cost Center"));
+  };
+  company.add(kind).on("change", () => {
+    source_field.reset();
+    value_field?.reset();
+    update_source_labels();
     result.empty();
   });
+  // Stockroom users start with Center as their only allowed kind, not Expense.
+  update_source_labels();
 
   const facts = (parent, fields) => {
     const list = $("<dl></dl>").appendTo(parent);
