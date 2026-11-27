@@ -15,6 +15,10 @@ from frappe.utils import now_datetime
 from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import (
     assert_finance_disposable_site,
 )
+from ccpcerp.ccpc_erp.ci_stockroom_center_pr45_site_guard import (
+    assert_stockroom_pr45_disposable_site,
+    is_reviewed_stockroom_pr45_disposable_site,
+)
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
 from ccpcerp.ccpc_erp.bc_issue_runtime import _effective_mapping_end, _utc
 from ccpcerp.ccpc_erp.bc_mapping_workflow import (
@@ -46,8 +50,16 @@ RETIRE_EVENT = "CCPC Mapping Retirement Event"
 
 class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
     def setUp(self):
-        # This is FIRST: no fixtures, database writes or role changes before guard.
-        assert_finance_disposable_site(getattr(frappe.local, "site", None))
+        # FIRST, before fixtures or record writes: preserve the original
+        # CircleCI Finance gate. The sole Stockroom Center test additionally
+        # accepts its separate exact GitHub PR45 disposable event/site guard.
+        site = getattr(frappe.local, "site", None)
+        if (self._testMethodName
+                == "test_i_stockroom_center_draft_only_and_independent_finance_approval"
+                and is_reviewed_stockroom_pr45_disposable_site(site)):
+            assert_stockroom_pr45_disposable_site(site)
+        else:
+            assert_finance_disposable_site(site)
         super().setUp()
         frappe.set_user("Administrator")
         self.load_test_records("Stock Entry")
