@@ -12,8 +12,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent
 SECURITY = ROOT / "finance_doctype_security.py"
-SETUP = ROOT.parents[1] / "setup.py"
-HOOKS = ROOT.parents[1] / "hooks.py"
+SETUP = ROOT.parent / "setup.py"
+HOOKS = ROOT.parent / "hooks.py"
 
 
 def security_namespace(fake_frappe):
