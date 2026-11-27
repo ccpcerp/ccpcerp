@@ -15,12 +15,20 @@ from frappe.utils import now_datetime
 from ccpcerp.ccpc_erp.ci_finance_lifecycle_site_guard import (
     assert_finance_disposable_site,
 )
+from ccpcerp.ccpc_erp.ci_stockroom_center_pr45_site_guard import (
+    assert_stockroom_pr45_disposable_site,
+    is_reviewed_stockroom_pr45_disposable_site,
+)
 from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
 from ccpcerp.ccpc_erp.bc_issue_runtime import _effective_mapping_end, _utc
 from ccpcerp.ccpc_erp.bc_mapping_workflow import (
     approve_mapping, get_mapping_review, propose_mapping,
 )
 from ccpcerp.ccpc_erp.bc_finance_evidence import sign_mapping_decision
+from ccpcerp.ccpc_erp.phase1_finance_onboarding import (
+    get_pilot_context, get_pilot_coverage, propose_pilot_mapping,
+    search_pilot_master, sign_and_approve_initial_mapping,
+)
 from ccpcerp.ccpc_erp.bc_finance_lifecycle_events import (
     decide_mapping_retirement,
     get_retirement_request_review,
@@ -42,8 +50,16 @@ RETIRE_EVENT = "CCPC Mapping Retirement Event"
 
 class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
     def setUp(self):
-        # This is FIRST: no fixtures, database writes or role changes before guard.
-        assert_finance_disposable_site(getattr(frappe.local, "site", None))
+        # FIRST, before fixtures or record writes: preserve the original
+        # CircleCI Finance gate. The sole Stockroom Center test additionally
+        # accepts its separate exact GitHub PR45 disposable event/site guard.
+        site = getattr(frappe.local, "site", None)
+        if (self._testMethodName
+                == "test_i_stockroom_center_draft_only_and_independent_finance_approval"
+                and is_reviewed_stockroom_pr45_disposable_site(site)):
+            assert_stockroom_pr45_disposable_site(site)
+        else:
+            assert_finance_disposable_site(site)
         super().setUp()
         frappe.set_user("Administrator")
         self.load_test_records("Stock Entry")
@@ -64,7 +80,21 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         self._actor(CHECKER, "CCPC Accounting Mapping Approver")
         for name in (DECISION, USE, REJECT, RETIRE_REQ, RETIRE_EVENT):
             self.assertTrue(frappe.db.table_exists(name), name)
-            self.assertEqual(frappe.get_meta(name).permissions, [])
+            permissions = frappe.get_meta(name).permissions
+            # Retain the strict zero-permission gate. If Frappe has added a
+            # DocPerm during install/test setup, show only the role and
+            # permission bits, never user identities or document records.
+            details = [
+                {key: row.get(key) for key in (
+                    "role", "read", "write", "create", "delete",
+                    "submit", "cancel", "amend", "export", "report", "share",
+                )}
+                for row in permissions
+            ]
+            self.assertEqual(
+                permissions, [],
+                f"Unexpected effective DocPerm on protected {name}: {details}",
+            )
 
     def tearDown(self):
         frappe.set_user("Administrator")
@@ -300,6 +330,158 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         )
         self.assertEqual(approved["state"], "Approved")
         self.assertEqual(frappe.db.count(USE, {"decision": signed["name"]}), 1)
+
+
+    def test_i_stockroom_center_draft_only_and_independent_finance_approval(self):
+        """Real disposable SQL/API test. Scoped constants are patched only in CI."""
+        from ccpcerp.ccpc_erp.finance_doctype_security import PROTECTED_FINANCE_DOCTYPES
+
+        # Validate actual post-install/post-migrate Frappe metadata, not only
+        # the committed JSON. No System Manager/Custom DocPerm may survive.
+        self.assertEqual(len(PROTECTED_FINANCE_DOCTYPES), 9)
+        for protected in PROTECTED_FINANCE_DOCTYPES:
+            with self.subTest(protected=protected):
+                self.assertEqual(frappe.get_meta(protected).permissions, [])
+                self.assertFalse(frappe.db.exists("Custom DocPerm", {"parent": protected}))
+
+        stockroom = "ccpc-finance-ci-stockroom-maker@invalid.test"
+        self._actor(stockroom, "CCPC Mapping Preparer")
+        if not frappe.db.exists("Role", "Stockroom Personnel"):
+            frappe.get_doc({
+                "doctype": "Role", "role_name": "Stockroom Personnel",
+            }).insert(ignore_permissions=True)
+        user = frappe.get_doc("User", stockroom)
+        user.append("roles", {"role": "Stockroom Personnel"})
+        user.save(ignore_permissions=True)
+
+        dept = frappe.get_doc({
+            "doctype": "Department",
+            "department_name": "CCPC Finance CI Stockroom " + self._testMethodName,
+            "company": COMPANY, "is_group": 0,
+        }).insert(ignore_permissions=True).name
+        center = frappe.db.get_value("Cost Center", {
+            "company": COMPANY, "is_group": 0, "disabled": 0,
+        }, "name")
+        self.assertTrue(center)
+        before_sle = frappe.db.count("Stock Ledger Entry", {"company": COMPANY})
+        before_gl = frappe.db.count("GL Entry", {"company": COMPANY})
+        from ccpcerp.ccpc_erp import bc_issue_runtime, phase1_finance_onboarding
+
+        # The permanent policy remains restricted to CCPC / Main - CCPC.
+        # Synthetic fixture _Test Company and its leaf are substituted ONLY
+        # inside this disposable test's context, not the actual application.
+        # The onboarding module imports these constants by value.
+        with (
+            patch.object(bc_issue_runtime, "STOCKROOM_CENTER_PROPOSAL_COMPANY", COMPANY),
+            patch.object(bc_issue_runtime, "STOCKROOM_CENTER_PROPOSAL_VALUE", center),
+            patch.object(phase1_finance_onboarding, "STOCKROOM_CENTER_PROPOSAL_COMPANY", COMPANY),
+            patch.object(phase1_finance_onboarding, "STOCKROOM_CENTER_PROPOSAL_VALUE", center),
+        ):
+            frappe.set_user(stockroom)
+            access = get_pilot_context()
+            self.assertIn(COMPANY, access["companies"])
+            self.assertEqual(access["allowed_kinds"], ["Center"])
+            self.assertTrue(access["can_propose"])
+            self.assertFalse(access["can_review"])
+            self.assertIn(center, search_pilot_master(
+                "Center", COMPANY, "value", "",
+            ))
+            with self.assertRaises(MappingPolicyError):
+                propose_mapping("Expense", COMPANY, self.group, self.account)
+            with self.assertRaises(frappe.ValidationError):
+                propose_pilot_mapping("Expense", COMPANY, self.group, self.account)
+            with self.assertRaises(MappingPolicyError):
+                propose_mapping("Center", COMPANY, dept, "NOT THE SHARED CENTER")
+            with self.assertRaises(frappe.ValidationError):
+                get_pilot_coverage("Expense", COMPANY, self.group)
+
+            coverage = get_pilot_coverage("Center", COMPANY, dept)
+            self.assertFalse(coverage["active"])
+            self.assertFalse(coverage["draft"])
+            draft = propose_pilot_mapping("Center", COMPANY, dept, center)
+            self.assertEqual(draft["state"], "Draft")
+            revision = draft["name"]
+            self.assertEqual(frappe.db.get_value(
+                "CCPC Center Mapping Revision", revision, "approval_state"), "Draft")
+            scope = frappe.db.get_value("CCPC Center Mapping Revision", revision,
+                                        "mapping_scope")
+            selector = frappe.db.get_value("CCPC Center Mapping Scope", scope,
+                                           ["selector_kind", "selector_key"],
+                                           as_dict=True)
+            self.assertEqual(selector.selector_kind, "Department Only")
+            self.assertEqual(selector.selector_key, "DEPARTMENT_ONLY")
+            with self.assertRaises(frappe.ValidationError):
+                sign_and_approve_initial_mapping("Center", revision, "forged")
+
+            frappe.set_user(CHECKER)
+            reviewed = get_mapping_review("Center", revision)
+            self.assertEqual(reviewed["owner"], stockroom)
+            self.assertEqual(reviewed["value"], center)
+            approval = sign_and_approve_initial_mapping(
+                "Center", revision, reviewed["modified"],
+            )
+            self.assertEqual(approval["state"], "Approved")
+            self.assertEqual(frappe.db.count(USE, {
+                "decision": frappe.db.get_value(
+                    "CCPC Center Mapping Revision", revision, "approval_reference"),
+            }), 1)
+            self.assertTrue(frappe.db.exists("Version", approval["version"]))
+            self.assertEqual(frappe.db.count("Stock Ledger Entry", {
+                "company": COMPANY,
+            }), before_sle)
+            self.assertEqual(frappe.db.count("GL Entry", {
+                "company": COMPANY,
+            }), before_gl)
+
+            frappe.set_user(stockroom)
+            active = get_pilot_coverage("Center", COMPANY, dept)
+            self.assertEqual(active["active"]["value"], center)
+            self.assertEqual(active["active"]["revision"], revision)
+            self.assertFalse(active["draft"])
+
+            # A real System Manager must have no ordinary DocType/document
+            # access to signed decisions, scopes, revisions or audit events.
+            # The Controller's authorized API is the ONLY review path.
+            system_manager = "ccpc-finance-ci-system-manager@invalid.test"
+            frappe.set_user("Administrator")
+            self._actor(system_manager, "System Manager")
+            frappe.set_user(system_manager)
+            for protected in PROTECTED_FINANCE_DOCTYPES:
+                with self.subTest(system_manager_denied=protected):
+                    for ptype in ("read", "write", "create", "delete",
+                                  "export", "report", "share"):
+                        self.assertFalse(frappe.has_permission(
+                            protected, ptype=ptype, user=system_manager,
+                        ), protected + ":" + ptype)
+                    try:
+                        listed = frappe.get_list(protected, fields=["name"], limit=3)
+                    except frappe.PermissionError:
+                        pass
+                    else:
+                        self.assertEqual(listed, [])
+            decision = frappe.db.get_value(
+                "CCPC Center Mapping Revision", revision, "approval_reference",
+            )
+            event_doc = frappe.get_doc(DECISION, decision)
+            self.assertFalse(frappe.has_permission(
+                DECISION, ptype="read", doc=event_doc, user=system_manager,
+            ))
+            self.assertFalse(frappe.has_permission(
+                "CCPC Center Mapping Revision", ptype="read",
+                doc=frappe.get_doc("CCPC Center Mapping Revision", revision),
+                user=system_manager,
+            ))
+
+            # Having both Stockroom and Checker roles does NOT create a shortcut.
+            frappe.set_user("Administrator")
+            user = frappe.get_doc("User", stockroom)
+            user.append("roles", {"role": "CCPC Accounting Mapping Approver"})
+            user.save(ignore_permissions=True)
+            frappe.set_user(stockroom)
+            with self.assertRaises(frappe.ValidationError):
+                get_pilot_context()
+            with self.assertRaises(MappingPolicyError):
+                propose_mapping("Center", COMPANY, dept, center)
 
     def test_h_rejection_audit_failure_rolls_back_event_and_state(self):
         revision = self._draft()

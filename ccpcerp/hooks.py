@@ -203,7 +203,10 @@ app_include_js = "/assets/ccpcerp/js/workspace_approval_shortcuts.js"
 # ------------
 
 # before_install = "ccpcerp.install.before_install"
-# after_install = "ccpcerp.install.after_install"
+# Protected Finance DocTypes receive a default System Manager DocPerm from
+# Frappe v16 unless it is explicitly audited and removed after DocType sync.
+# This hook performs NO user-role assignments or financial data writes.
+after_install = "ccpcerp.ccpc_erp.finance_doctype_security.harden_finance_mapping_doctype_permissions"
 
 # Roles are defined before Page JSON sync (and before app installation),
 # but no named user, source DocPerm or Company permission is ever assigned.
@@ -249,12 +252,26 @@ boot_session = "ccpcerp.ccpc_erp.desktop_visibility.filter_boot_desktop_icons"
 
 # notification_config = "ccpcerp.notifications.get_notification_config"
 
+# All nine Finance evidence/scope/revision DocTypes are internal only. Even
+# before an install/migrate cleanup, regular list and document access is denied.
+_finance_internal_doctypes = (
+	"CCPC Expense Mapping Scope", "CCPC Expense Mapping Revision",
+	"CCPC Center Mapping Scope", "CCPC Center Mapping Revision",
+	"CCPC Accounting Mapping Decision", "CCPC Mapping Decision Use",
+	"CCPC Mapping Rejection Event", "CCPC Mapping Retirement Request",
+	"CCPC Mapping Retirement Event",
+)
+
 permission_query_conditions = {
 	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.get_mrs_permission_query_conditions",
+	**{doctype: "ccpcerp.ccpc_erp.finance_doctype_security.deny_protected_finance_list_access"
+	   for doctype in _finance_internal_doctypes},
 }
 
 has_permission = {
 	"MRS": "ccpcerp.ccpc_erp.mrs_permissions.has_mrs_permission",
+	**{doctype: "ccpcerp.ccpc_erp.finance_doctype_security.deny_protected_finance_document_access"
+	   for doctype in _finance_internal_doctypes},
 }
 
 

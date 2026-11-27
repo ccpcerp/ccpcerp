@@ -1,0 +1,213 @@
+# Owner-approved test-only PR45 disposable Frappe/MariaDB acceptance.
+# No schedule, deployment, DEVELOPMENT/PRODUCTION access or real CCPC secrets.
+name: CCPC Stockroom Center PR45 - disposable Finance DB
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches:
+      - review/phase1-maintenance-integrated-tests-2026-11-24
+    paths:
+      - .github/workflows/stockroom-center-pr45-disposable-db.yml
+      - ccpcerp/ccpc_erp/ci_stockroom_center_pr45_site_guard.py
+      - ccpcerp/ccpc_erp/test_stockroom_center_pr45_guard_static.py
+      - ccpcerp/ccpc_erp/test_finance_lifecycle_disposable_integration.py
+      - ccpcerp/ccpc_erp/finance_doctype_security.py
+      - ccpcerp/ccpc_erp/test_finance_doctype_security_static.py
+      - ccpcerp/hooks.py
+      - ccpcerp/setup.py
+      - ccpcerp/ccpc_erp/bc_issue_runtime.py
+      - ccpcerp/ccpc_erp/bc_finance_evidence.py
+      - ccpcerp/ccpc_erp/bc_mapping_workflow.py
+      - ccpcerp/ccpc_erp/phase1_finance_onboarding.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccpc-pr45-disposable-db-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-stockroom-center-db:
+    if: >-
+      github.repository == 'ccpcerp/ccpcerp' &&
+      github.event.pull_request.number == 45 &&
+      github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' &&
+      github.head_ref == 'review/stockroom-center-proposer-2026-11-27' &&
+      github.base_ref == 'review/phase1-maintenance-integrated-tests-2026-11-24' &&
+      github.run_attempt == 1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    env:
+      CI: "true"
+      BENCH_DIR: ${{ github.workspace }}/../ccpc-pr45-disposable-bench
+      TEST_SITE: ci-stockroom-center-pr45.localhost
+      CCPC_STOCKROOM_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+      CI_DB_ROOT_PASSWORD: ci-stockroom-pr45-${{ github.run_id }}-${{ github.run_attempt }}
+      CI_ADMIN_PASSWORD: ci-admin-pr45-${{ github.run_id }}-${{ github.run_attempt }}
+
+    services:
+      mariadb:
+        image: mariadb:11.8
+        env:
+          MARIADB_ROOT_PASSWORD: ci-stockroom-pr45-${{ github.run_id }}-${{ github.run_attempt }}
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+      redis-cache:
+        image: redis:7-alpine
+        ports:
+          - 13000:6379
+      redis-queue:
+        image: redis:7-alpine
+        ports:
+          - 11000:6379
+
+    steps:
+      - name: Checkout exact same-repo PR45 head with no retained Git credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify exact event, signed source ancestry and checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "pull_request"
+          test "$GITHUB_REPOSITORY" = "ccpcerp/ccpcerp"
+          test "$GITHUB_REF" = "refs/pull/45/merge"
+          test "$GITHUB_HEAD_REF" = "review/stockroom-center-proposer-2026-11-27"
+          test "$GITHUB_BASE_REF" = "review/phase1-maintenance-integrated-tests-2026-11-24"
+          test "$GITHUB_RUN_ATTEMPT" = "1"
+          test "$TEST_SITE" = "ci-stockroom-center-pr45.localhost"
+          test "$(git rev-parse HEAD)" = "$CCPC_STOCKROOM_PR_HEAD"
+          test -z "$(git status --porcelain)"
+          git merge-base --is-ancestor e5c6f4c7f8f2121b26198bc2ff94d7be42c948b5 HEAD
+          python3 - <<'PY'
+          import json, os
+          with open(os.environ["GITHUB_EVENT_PATH"], encoding="utf-8") as file:
+              event = json.load(file)
+          pr = event["pull_request"]
+          assert event["action"] == "synchronize"
+          assert pr["number"] == 45 and pr["draft"] is True
+          assert pr["head"]["repo"]["full_name"] == "ccpcerp/ccpcerp"
+          assert pr["base"]["repo"]["full_name"] == "ccpcerp/ccpcerp"
+          assert pr["head"]["ref"] == "review/stockroom-center-proposer-2026-11-27"
+          assert pr["base"]["ref"] == "review/phase1-maintenance-integrated-tests-2026-11-24"
+          assert pr["head"]["sha"] == os.environ["CCPC_STOCKROOM_PR_HEAD"]
+          print("Verified exact draft PR45 source/event ancestry and disposable site.")
+          PY
+
+      - name: Run Frappe-free Stockroom security, CI site guard and source checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -B ccpcerp/ccpc_erp/test_stockroom_center_pr45_guard_static.py -v
+          python3 -I -B ccpcerp/ccpc_erp/test_stockroom_center_proposal_static.py -v
+          python3 -I -B ccpcerp/ccpc_erp/test_finance_doctype_security_static.py -v
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for source in (
+              'ci_stockroom_center_pr45_site_guard.py',
+              'test_stockroom_center_pr45_guard_static.py',
+              'test_finance_lifecycle_disposable_integration.py',
+              'finance_doctype_security.py',
+              'test_finance_doctype_security_static.py',
+              'phase1_finance_onboarding.py',
+              'bc_issue_runtime.py',
+          ):
+              f = Path('ccpcerp/ccpc_erp') / source
+              ast.parse(f.read_text(), filename=str(f))
+              print('PASS AST', f)
+          PY
+
+      - name: Set up Python 3.14 and Node.js 24
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install temporary runner prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cron mariadb-client libmariadb-dev libmariadb-dev-compat pkg-config
+          npm install -g yarn
+          python -m pip install frappe-bench
+          MYSQL_PWD="$CI_DB_ROOT_PASSWORD" mariadb --host=127.0.0.1 --user=root \
+            -e "SET GLOBAL character_set_server = 'utf8mb4'; SET GLOBAL collation_server = 'utf8mb4_unicode_ci';"
+
+      - name: Initialize entirely independent Frappe/ERPNext v16 bench
+        shell: bash
+        run: |
+          set -euo pipefail
+          bench init --frappe-branch version-16 --skip-assets --skip-redis-config-generation \
+            --python "$(command -v python)" "$BENCH_DIR"
+          cd "$BENCH_DIR"
+          bench set-config -g redis_cache redis://127.0.0.1:13000
+          bench set-config -g redis_queue redis://127.0.0.1:11000
+          bench set-config -g redis_socketio redis://127.0.0.1:11000
+          bench get-app --branch version-16 erpnext https://github.com/frappe/erpnext
+          bench get-app ccpcerp "$GITHUB_WORKSPACE"
+          git -C apps/ccpcerp fetch --quiet --no-tags "$GITHUB_WORKSPACE" "$CCPC_STOCKROOM_PR_HEAD"
+          git -C apps/ccpcerp checkout --quiet --detach "$CCPC_STOCKROOM_PR_HEAD"
+          test "$(git -C apps/ccpcerp rev-parse HEAD)" = "$CCPC_STOCKROOM_PR_HEAD"
+          bench setup requirements --dev
+          echo "Disposable CI app HEAD $CCPC_STOCKROOM_PR_HEAD"
+
+      - name: Create and initialize ONLY the synthetic CI Frappe/MariaDB site
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          test "$TEST_SITE" = "ci-stockroom-center-pr45.localhost"
+          bench new-site "$TEST_SITE" --db-host 127.0.0.1 --db-port 3306 \
+            --db-root-username root --db-root-password "$CI_DB_ROOT_PASSWORD" \
+            --admin-password "$CI_ADMIN_PASSWORD"
+          bench --site "$TEST_SITE" install-app erpnext
+          bench --site "$TEST_SITE" install-app ccpcerp
+          bench --site "$TEST_SITE" migrate
+          bench --site "$TEST_SITE" set-config allow_tests true
+
+      - name: Test ONE real Stockroom Draft and independently signed Controller mapping
+        env:
+          CCPC_ALLOW_STOCKROOM_PR45_DB_TEST: disposable-only
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$BENCH_DIR"
+          test "$TEST_SITE" = "ci-stockroom-center-pr45.localhost"
+          log="$RUNNER_TEMP/ccpc-pr45-stockroom-finance-db.log"
+          PYTHON_COLORS=0 bench --site "$TEST_SITE" run-tests \
+            --module ccpcerp.ccpc_erp.test_finance_lifecycle_disposable_integration \
+            --test test_i_stockroom_center_draft_only_and_independent_finance_approval 2>&1 | tee "$log"
+          grep -q '^Ran 1 test in ' "$log"
+          grep -qx 'OK' "$log"
+          echo "PASS: exactly one guarded disposable Frappe/MariaDB Finance test."
+
+      - name: Record exact CI acceptance scope and deployment hold
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## PR45 disposable Finance test"
+            echo "Reviewed app HEAD: $CCPC_STOCKROOM_PR_HEAD"
+            echo "Site: $TEST_SITE (GitHub-hosted isolated runner only)"
+            echo "Test: one Staff Stockroom Center Draft and independent Finance signature."
+            echo "Guard: exact PR45 synchronize event, head SHA, named disposable CI site."
+            echo "Does not access real Finance users, DEVELOPMENT/PRODUCTION or customer data."
+            echo "Passing does not authorize DEV deployment, master mapping or stock/GL posting."
+          } >> "$GITHUB_STEP_SUMMARY"

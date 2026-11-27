@@ -522,6 +522,10 @@ def backfill_ccpc_personnel_company():
 
 
 def after_migrate():
+	# Fail closed on unexpected installed Finance role permissions BEFORE
+	# any other app migration task writes business/master configuration.
+	from ccpcerp.ccpc_erp.finance_doctype_security import harden_finance_mapping_doctype_permissions
+	harden_finance_mapping_doctype_permissions()
 	ensure_withdrawal_section_foundation()
 	migrate_equipment_area_to_section()
 	backfill_ccpc_personnel_company()

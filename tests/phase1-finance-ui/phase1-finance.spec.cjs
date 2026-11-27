@@ -18,10 +18,10 @@ const KINDS = [
   { value: 'Center', source: 'Beneficiary Department', proposal: 'Cost Center' },
 ];
 
-async function mountFinancePage(page, { canPropose, canReview }) {
+async function mountFinancePage(page, { canPropose, canReview, companies = COMPANIES, allowedKinds }) {
   await page.setContent('<!doctype html><html lang="en"><body><div id="fixture"></div></body></html>');
   await page.addScriptTag({ path: jqueryScript });
-  await page.evaluate(({ companies, canPropose, canReview }) => {
+  await page.evaluate(({ companies, canPropose, canReview, allowedKinds }) => {
     window.__ = (value) => value;
     window.__financeApiCalls = [];
     window.frappe = {
@@ -46,11 +46,12 @@ async function mountFinancePage(page, { canPropose, canReview }) {
             companies,
             can_propose: canPropose,
             can_review: canReview,
+            allowed_kinds: allowedKinds,
           },
         };
       },
     };
-  }, { companies: COMPANIES, canPropose, canReview });
+  }, { companies, canPropose, canReview, allowedKinds });
   await page.addScriptTag({ path: pageScript });
   await page.evaluate(async () => {
     await window.frappe.pages['ccpc-phase1-finance'].on_page_load(
@@ -121,3 +122,22 @@ for (const actor of [
     await assertNoBusinessApiCalls(page);
   });
 }
+
+test('Stockroom preparer: only CCPC Cost Center choice and correct initial captions', async ({ page }) => {
+  await mountFinancePage(page, {
+    canPropose: true,
+    canReview: false,
+    companies: [COMPANIES[0]],
+    allowedKinds: ['Center'],
+  });
+  const company = page.locator('#ccpc-pilot-company');
+  const kind = page.locator('#ccpc-pilot-kind');
+  expect(await company.locator('option').allTextContents()).toEqual([COMPANIES[0]]);
+  expect(await kind.locator('option').allTextContents()).toEqual(['Cost Center']);
+  await expect(kind).toHaveValue('Center');
+  await expect(page.locator('label[for="ccpc-pilot-source"]')).toHaveText('Beneficiary Department');
+  await expect(page.locator('label[for="ccpc-pilot-value"]')).toHaveText('Cost Center');
+  await expect(page.getByRole('button', { name: 'Propose mapping' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign and approve' })).toHaveCount(0);
+  await assertNoBusinessApiCalls(page);
+});

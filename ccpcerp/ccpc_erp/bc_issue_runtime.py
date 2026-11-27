@@ -69,13 +69,15 @@ def _required_fields():
             _require(meta.has_field(name), "Missing B/C provenance field: " + doctype + "." + name)
 
 
-def _real_authority(user, role, company):
-    """Require actual enabled User, Role membership, and explicit Company grant.
+# Stage A: only original, CCPC Department-scoped Center proposals can be
+# prepared by Stockroom. Approval, retirement, Expense and issuance checks
+# continue to use the unchanged strict _real_authority policy.
+STOCKROOM_CENTER_PROPOSAL_COMPANY = "Cagayan Corn Products Corporation"
+STOCKROOM_CENTER_PROPOSAL_VALUE = "Main - CCPC"
 
-    This does NOT replace verifying the historical approval decision/fingerprint
-    in the future mapping approval service. No System Manager or Administrator
-    override; never trust submitted JSON role/Company claims.
-    """
+
+def _finance_role_company_authority(user, role, company):
+    """Shared locked prerequisites; grants neither approval nor posting."""
     _canonical(user, "Mapping actor")
     _require(user not in ("Administrator", "Guest"), "Named Finance mapping actors are required.")
     enabled = frappe.db.sql("SELECT enabled FROM `tabUser` WHERE name=%s FOR UPDATE",
@@ -95,12 +97,43 @@ def _real_authority(user, role, company):
         (user, company), as_dict=True,
     )
     _require(bool(granted), "Mapping actor lacks explicit Company-scoped permission.")
-    stockroom = frappe.db.sql(
+
+
+def _has_locked_mapping_role(user, role):
+    rows = frappe.db.sql(
         "SELECT name FROM `tabHas Role` WHERE parenttype='User' AND parent=%s "
-        "AND role='Stockroom Personnel' ORDER BY name FOR UPDATE",
-        (user,), as_dict=True,
+        "AND role=%s ORDER BY name FOR UPDATE",
+        (user, role), as_dict=True,
     )
-    _require(not stockroom, "Stockroom personnel cannot authorize financial mapping revisions.")
+    return bool(rows)
+
+
+def _real_authority(user, role, company):
+    """Strict Finance authority for every action except scoped Center proposals.
+
+    No Administrator, Guest, System Manager or Stockroom override.
+    """
+    _finance_role_company_authority(user, role, company)
+    _require(not _has_locked_mapping_role(user, "Stockroom Personnel"),
+             "Stockroom personnel cannot authorize financial mapping revisions.")
+
+
+def _center_proposal_maker_authority(user, kind, company, value=None):
+    """Permit Stockroom only for CCPC/Main Center Draft proposals.
+
+    This must be called both at Draft creation and when a separate Controller
+    signs/approves that exact Draft. None means *context/search only*; callers
+    creating or approving a Draft MUST pass the actual saved Cost Center value.
+    """
+    if not _has_locked_mapping_role(user, "Stockroom Personnel"):
+        return _real_authority(user, "CCPC Mapping Preparer", company)
+    _require(kind == "Center" and company == STOCKROOM_CENTER_PROPOSAL_COMPANY,
+             "Stockroom may prepare only CCPC Cost Center proposals.")
+    _require(value is None or value == STOCKROOM_CENTER_PROPOSAL_VALUE,
+             "Stockroom proposals require the approved shared Cost Center candidate.")
+    _finance_role_company_authority(user, "CCPC Mapping Preparer", company)
+    _require(not _has_locked_mapping_role(user, "CCPC Accounting Mapping Approver"),
+             "Stockroom cannot be a Finance mapping approver.")
 
 
 def _assert_approval_provenance(revision, company):

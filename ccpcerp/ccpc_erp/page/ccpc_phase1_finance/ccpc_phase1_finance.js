@@ -32,8 +32,9 @@ frappe.pages["ccpc-phase1-finance"].on_page_load = async function (wrapper) {
   access.companies.forEach(name => add_option(company, name, name));
   const kind = $("<select></select>");
   add_field("ccpc-pilot-kind", "Mapping type", kind);
-  add_option(kind, "Expense", __("Expense Account"));
-  add_option(kind, "Center", __("Cost Center"));
+  const allowedKinds = access.allowed_kinds || ["Expense", "Center"];
+  if (allowedKinds.includes("Expense")) add_option(kind, "Expense", __("Expense Account"));
+  if (allowedKinds.includes("Center")) add_option(kind, "Center", __("Cost Center"));
 
   const result = $("<div class='mt-4'></div>").attr("aria-live", "polite");
   const scope = () => ({ company: company.val(), kind: kind.val(), source: source.val() });
@@ -62,14 +63,19 @@ frappe.pages["ccpc-phase1-finance"].on_page_load = async function (wrapper) {
   const source_field = suggestions("source", "Item Group");
   const source = source_field.input;
   const value_field = access.can_propose ? suggestions("value", "Expense Account") : null;
-  company.add(kind).on("change", () => {
-    source_field.reset();
-    value_field?.reset();
+  const update_source_labels = () => {
     const expense = kind.val() === "Expense";
     source_field.caption.text(expense ? __("Item Group") : __("Beneficiary Department"));
     value_field?.caption.text(expense ? __("Expense Account") : __("Cost Center"));
+  };
+  company.add(kind).on("change", () => {
+    source_field.reset();
+    value_field?.reset();
+    update_source_labels();
     result.empty();
   });
+  // Stockroom users start with Center as their only allowed kind, not Expense.
+  update_source_labels();
 
   const facts = (parent, fields) => {
     const list = $("<dl></dl>").appendTo(parent);
