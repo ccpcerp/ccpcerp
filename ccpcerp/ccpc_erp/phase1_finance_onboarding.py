@@ -14,6 +14,9 @@ from ccpcerp.ccpc_erp.bc_issue_runtime import (
     _effective_mapping_end,
     _lock_revisions,
     _real_authority,
+    _center_proposal_maker_authority,
+    STOCKROOM_CENTER_PROPOSAL_COMPANY,
+    STOCKROOM_CENTER_PROPOSAL_VALUE,
     _require,
     _utc,
 )
@@ -49,14 +52,28 @@ def _actor_roles():
              "An enabled named Finance mapping user is required.")
     assigned = set(frappe.get_all("Has Role", filters={"parenttype": "User", "parent": user}, pluck="role"))
     roles = assigned.intersection((PREPARER, CHECKER))
-    _require(roles and "Stockroom Personnel" not in assigned, "An explicit Finance mapping role is required.")
+    _require(bool(roles), "An explicit Finance mapping role is required.")
+    if "Stockroom Personnel" in assigned:
+        _require(roles == {PREPARER},
+                 "Stockroom may prepare Cost Center proposals only, not approve mappings.")
     return roles
 
 
-def _authorize(company):
+def _stockroom_actor():
+    """Use the authenticated User's stored roles, never a client claim."""
+    return bool(frappe.get_all(
+        "Has Role", filters={"parenttype": "User", "parent": frappe.session.user,
+                             "role": "Stockroom Personnel"}, pluck="name",
+    ))
+
+
+def _authorize(company, kind):
     roles = _actor_roles()
     _company_lock(company)
-    _real_authority(frappe.session.user, PREPARER if PREPARER in roles else CHECKER, company)
+    if _stockroom_actor():
+        _center_proposal_maker_authority(frappe.session.user, kind, company)
+    else:
+        _real_authority(frappe.session.user, PREPARER if PREPARER in roles else CHECKER, company)
     return roles
 
 
@@ -68,14 +85,18 @@ def get_pilot_context():
         "applicable_for": ["is", "not set"],
     }, pluck="for_value")
     existing = frappe.get_all("Company", filters={"name": ["in", companies]}, pluck="name", limit=0) if companies else []
-    return {"companies": sorted(set(existing).intersection(companies)),
-            "can_propose": PREPARER in roles, "can_review": CHECKER in roles}
+    visible = sorted(set(existing).intersection(companies))
+    if _stockroom_actor():
+        visible = [name for name in visible if name == STOCKROOM_CENTER_PROPOSAL_COMPANY]
+    return {"companies": visible,
+            "can_propose": PREPARER in roles, "can_review": CHECKER in roles,
+            "allowed_kinds": ["Center"] if _stockroom_actor() else ["Expense", "Center"]}
 
 
 @_finance_post
 def search_pilot_master(kind, company, field, text=""):
     _, _, _, _, source_type, value_type = _kind(kind)
-    roles = _authorize(company)
+    roles = _authorize(company, kind)
     _require(field in ("source", "value"), "Unknown mapping field.")
     _require(field == "source" or PREPARER in roles, "Only Finance preparers can select a proposed mapping value.")
     _require(isinstance(text, str) and len(text) <= 140, "Search text is too long.")
@@ -85,13 +106,18 @@ def search_pilot_master(kind, company, field, text=""):
         filters.update(company=company, disabled=0)
     if doctype == "Account":
         filters["root_type"] = "Expense"
+    if _stockroom_actor() and field == "value":
+        # A Stockroom maker may propose only the existing CCPC shared Center.
+        if text.casefold() not in STOCKROOM_CENTER_PROPOSAL_VALUE.casefold():
+            return []
+        filters["name"] = STOCKROOM_CENTER_PROPOSAL_VALUE
     return frappe.get_all(doctype, filters=filters, pluck="name", order_by="name asc", limit=20)
 
 
 @_finance_post
 def get_pilot_coverage(kind, company, source):
     scope_type, revision_type, _, value_field, _, value_type = _kind(kind)
-    _authorize(company)
+    _authorize(company, kind)
     _canonical(source, "Mapping source")
     scope = _lock_scopes(kind, company, source)
     if not scope:
@@ -121,7 +147,8 @@ def get_pilot_coverage(kind, company, source):
 @_finance_post
 def propose_pilot_mapping(kind, company, source, value):
     """Use the initial proposal workflow with activation at approval."""
-    _require(PREPARER in _authorize(company), "Only Finance preparers can propose a pilot mapping.")
+    _require(PREPARER in _authorize(company, kind), "Only authorized preparers can propose a pilot mapping.")
+    _center_proposal_maker_authority(frappe.session.user, kind, company, value)
     coverage = get_pilot_coverage(kind, company, source)
     _require(not coverage["active"], "This scope already has an active mapping. Use the Finance change workflow.")
     return propose_mapping(kind, company, source, value)
