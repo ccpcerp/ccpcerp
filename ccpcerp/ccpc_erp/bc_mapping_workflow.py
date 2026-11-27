@@ -15,7 +15,7 @@ import frappe
 from frappe.utils import now_datetime
 
 from ccpcerp.ccpc_erp.bc_issue_runtime import (
-    _canonical, _master, _real_authority, _utc, _require,
+    _canonical, _master, _real_authority, _center_proposal_maker_authority, _utc, _require,
 )
 from ccpcerp.ccpc_erp.bc_mapping_policy import (
     MappingPolicyError, assert_independent_review, intervals_overlap,
@@ -116,7 +116,7 @@ def propose_mapping(kind, company, source, value, effective_from=None, effective
     value = _canonical(value, "Proposed finance account or center")
     preparer = _canonical(frappe.session.user, "Preparer")
     _company_lock(company)
-    _real_authority(preparer, "CCPC Mapping Preparer", company)
+    _center_proposal_maker_authority(preparer, kind, company, value)
     _scope_values(kind, company, source)
     _master_validated(master_dt, value, company)
     start = _utc(effective_from)
@@ -212,7 +212,7 @@ def approve_mapping(kind, revision, expected_modified, approval_reference):
     _require(not doc.supersedes and not doc.revocation_reason,
              "Lifecycle drafts require independent change approval, not initial approval.")
     maker, checker = assert_independent_review(doc.owner, checker)
-    _real_authority(maker, "CCPC Mapping Preparer", company)
+    _center_proposal_maker_authority(maker, kind, company, doc[value_field])
     _master_validated(master_dt, doc[value_field], company)
     from ccpcerp.ccpc_erp.bc_finance_evidence import verify_decision, consume_decision
     signed = verify_decision(approval_reference, kind, "Approve", company, scope, doc, checker, value_field)
