@@ -80,7 +80,21 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         self._actor(CHECKER, "CCPC Accounting Mapping Approver")
         for name in (DECISION, USE, REJECT, RETIRE_REQ, RETIRE_EVENT):
             self.assertTrue(frappe.db.table_exists(name), name)
-            self.assertEqual(frappe.get_meta(name).permissions, [])
+            permissions = frappe.get_meta(name).permissions
+            # Retain the strict zero-permission gate. If Frappe has added a
+            # DocPerm during install/test setup, show only the role and
+            # permission bits, never user identities or document records.
+            details = [
+                {key: row.get(key) for key in (
+                    "role", "read", "write", "create", "delete",
+                    "submit", "cancel", "amend", "export", "report", "share",
+                )}
+                for row in permissions
+            ]
+            self.assertEqual(
+                permissions, [],
+                f"Unexpected effective DocPerm on protected {name}: {details}",
+            )
 
     def tearDown(self):
         frappe.set_user("Administrator")
