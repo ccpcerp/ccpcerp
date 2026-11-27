@@ -32,8 +32,9 @@ frappe.pages["ccpc-phase1-finance"].on_page_load = async function (wrapper) {
   access.companies.forEach(name => add_option(company, name, name));
   const kind = $("<select></select>");
   add_field("ccpc-pilot-kind", "Mapping type", kind);
-  add_option(kind, "Expense", __("Expense Account"));
-  add_option(kind, "Center", __("Cost Center"));
+  const allowedKinds = access.allowed_kinds || ["Expense", "Center"];
+  if (allowedKinds.includes("Expense")) add_option(kind, "Expense", __("Expense Account"));
+  if (allowedKinds.includes("Center")) add_option(kind, "Center", __("Cost Center"));
 
   const result = $("<div class='mt-4'></div>").attr("aria-live", "polite");
   const scope = () => ({ company: company.val(), kind: kind.val(), source: source.val() });
