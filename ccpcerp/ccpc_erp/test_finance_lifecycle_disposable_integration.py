@@ -329,14 +329,17 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
         self.assertTrue(center)
         before_sle = frappe.db.count("Stock Ledger Entry", {"company": COMPANY})
         before_gl = frappe.db.count("GL Entry", {"company": COMPANY})
-        from ccpcerp.ccpc_erp import bc_issue_runtime
+        from ccpcerp.ccpc_erp import bc_issue_runtime, phase1_finance_onboarding
 
         # The permanent policy remains restricted to CCPC / Main - CCPC.
         # Synthetic fixture _Test Company and its leaf are substituted ONLY
         # inside this disposable test's context, not the actual application.
+        # The onboarding module imports these constants by value.
         with (
             patch.object(bc_issue_runtime, "STOCKROOM_CENTER_PROPOSAL_COMPANY", COMPANY),
             patch.object(bc_issue_runtime, "STOCKROOM_CENTER_PROPOSAL_VALUE", center),
+            patch.object(phase1_finance_onboarding, "STOCKROOM_CENTER_PROPOSAL_COMPANY", COMPANY),
+            patch.object(phase1_finance_onboarding, "STOCKROOM_CENTER_PROPOSAL_VALUE", center),
         ):
             frappe.set_user(stockroom)
             access = get_pilot_context()
