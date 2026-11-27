@@ -1,0 +1,129 @@
+# Owner-approved PR #45 test-only gate. GitHub-hosted runner; no CCPC site,
+# Company database, production secrets, deployments, cron or self-hosted runner.
+name: CCPC Stockroom Center Proposal - PR45 isolated checks
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches:
+      - review/phase1-maintenance-integrated-tests-2026-11-24
+    paths:
+      - .github/workflows/stockroom-center-proposal-pr45-ui-review.yml
+      - ccpcerp/ccpc_erp/bc_issue_runtime.py
+      - ccpcerp/ccpc_erp/bc_mapping_workflow.py
+      - ccpcerp/ccpc_erp/bc_finance_evidence.py
+      - ccpcerp/ccpc_erp/bc_mapping_lifecycle.py
+      - ccpcerp/ccpc_erp/phase1_finance_onboarding.py
+      - ccpcerp/ccpc_erp/page/ccpc_phase1_finance/ccpc_phase1_finance.js
+      - ccpcerp/ccpc_erp/test_stockroom_center_proposal_static.py
+      - tests/phase1-finance-ui/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ccpc-stockroom-center-pr45-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  isolated-policy-and-browser:
+    if: >-
+      github.repository == 'ccpcerp/ccpcerp' &&
+      github.event.pull_request.number == 45 &&
+      github.event.pull_request.head.repo.full_name == 'ccpcerp/ccpcerp' &&
+      github.head_ref == 'review/stockroom-center-proposer-2026-11-27'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    env:
+      CI: "true"
+    steps:
+      - name: Checkout exact authorized PR head without retained credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify reviewed source and branch ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "ccpcerp/ccpcerp"
+          test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+          git merge-base --is-ancestor e5c6f4c7f8f2121b26198bc2ff94d7be42c948b5 HEAD
+          echo "Verified PR #45 review HEAD: $(git rev-parse HEAD)"
+
+      - name: Compile restricted Finance Python sources without importing Frappe
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import ast
+          from pathlib import Path
+          for name in (
+              'bc_issue_runtime.py', 'bc_mapping_workflow.py',
+              'bc_finance_evidence.py', 'bc_mapping_lifecycle.py',
+              'phase1_finance_onboarding.py',
+              'test_stockroom_center_proposal_static.py',
+          ):
+              target = Path('ccpcerp/ccpc_erp') / name
+              ast.parse(target.read_text(encoding='utf-8'), filename=str(target))
+              print('PASS syntax:', target)
+          PY
+
+      - name: Run original 16 Frappe-free authorization and wiring tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -I -B ccpcerp/ccpc_erp/test_stockroom_center_proposal_static.py -v
+
+      - name: Set up isolated Node.js (no DEVELOPMENT server installation)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tests/phase1-finance-ui/package-lock.json
+
+      - name: Check Page and Playwright fixture syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check ccpcerp/ccpc_erp/page/ccpc_phase1_finance/ccpc_phase1_finance.js
+          node --check tests/phase1-finance-ui/phase1-finance.spec.cjs
+          node --check tests/phase1-finance-ui/phase1-finance.live.spec.cjs
+          node --check tests/phase1-finance-ui/playwright.config.cjs
+
+      - name: Install locked browser-test dependencies only
+        working-directory: tests/phase1-finance-ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Install disposable Chromium and GitHub runner OS dependencies
+        working-directory: tests/phase1-finance-ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx --no-install playwright install --with-deps chromium
+
+      - name: Run only isolated Playwright fixture tests (exclude @live)
+        working-directory: tests/phase1-finance-ui
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test
+
+      - name: Record explicit test and deployment boundaries
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '## CCPC PR45: isolated Stockroom Cost Center proposal checks'
+            echo "GitHub event: $GITHUB_EVENT_NAME"
+            echo "Commit tested: ${{ github.event.pull_request.head.sha }}"
+            echo 'Gates: Python AST, Frappe-free policy tests, Node syntax, local Chromium UI fixtures.'
+            echo 'No Frappe, MariaDB, ERPNext sign-in, DEVELOPMENT or PRODUCTION access.'
+            echo 'No live mapping proposal/approval, role grants, accounting entries or stock issue.'
+            echo 'Disposable MariaDB approval integration remains a separate unpassed gate.'
+          } >> "$GITHUB_STEP_SUMMARY"
