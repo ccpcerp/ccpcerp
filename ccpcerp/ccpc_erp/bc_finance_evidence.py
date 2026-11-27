@@ -6,7 +6,9 @@ import json
 import frappe
 from frappe.utils import now_datetime
 
-from ccpcerp.ccpc_erp.bc_issue_runtime import _canonical, _require, _real_authority, _utc
+from ccpcerp.ccpc_erp.bc_issue_runtime import (
+    _canonical, _require, _real_authority, _center_proposal_maker_authority, _utc,
+)
 from ccpcerp.ccpc_erp.bc_mapping_lifecycle import _locate
 from ccpcerp.ccpc_erp.bc_mapping_policy import assert_independent_review
 from ccpcerp.ccpc_erp.bc_mapping_workflow import _master_validated
@@ -117,7 +119,7 @@ def sign_mapping_decision(kind, revision, expected_modified, action, request_nam
                  and not row.approved_by and not request_name,
                  "Only an original untouched Draft may be approved.")
         assert_independent_review(row.owner, checker)
-        _real_authority(row.owner, "CCPC Mapping Preparer", company)
+        _center_proposal_maker_authority(row.owner, kind, company, row[field])
         _master_validated(master, row[field], company)
     else:
         _require(row.approval_state == "Approved" and row.effective_until is None
