@@ -334,6 +334,16 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
 
     def test_i_stockroom_center_draft_only_and_independent_finance_approval(self):
         """Real disposable SQL/API test. Scoped constants are patched only in CI."""
+        from ccpcerp.ccpc_erp.finance_doctype_security import PROTECTED_FINANCE_DOCTYPES
+
+        # Validate actual post-install/post-migrate Frappe metadata, not only
+        # the committed JSON. No System Manager/Custom DocPerm may survive.
+        self.assertEqual(len(PROTECTED_FINANCE_DOCTYPES), 9)
+        for protected in PROTECTED_FINANCE_DOCTYPES:
+            with self.subTest(protected=protected):
+                self.assertEqual(frappe.get_meta(protected).permissions, [])
+                self.assertFalse(frappe.db.exists("Custom DocPerm", {"parent": protected}))
+
         stockroom = "ccpc-finance-ci-stockroom-maker@invalid.test"
         self._actor(stockroom, "CCPC Mapping Preparer")
         if not frappe.db.exists("Role", "Stockroom Personnel"):
@@ -428,6 +438,39 @@ class TestFinanceLifecycleDisposableIntegration(ERPNextTestSuite):
             self.assertEqual(active["active"]["value"], center)
             self.assertEqual(active["active"]["revision"], revision)
             self.assertFalse(active["draft"])
+
+            # A real System Manager must have no ordinary DocType/document
+            # access to signed decisions, scopes, revisions or audit events.
+            # The Controller's authorized API is the ONLY review path.
+            system_manager = "ccpc-finance-ci-system-manager@invalid.test"
+            frappe.set_user("Administrator")
+            self._actor(system_manager, "System Manager")
+            frappe.set_user(system_manager)
+            for protected in PROTECTED_FINANCE_DOCTYPES:
+                with self.subTest(system_manager_denied=protected):
+                    for ptype in ("read", "write", "create", "delete",
+                                  "export", "report", "share"):
+                        self.assertFalse(frappe.has_permission(
+                            protected, ptype=ptype, user=system_manager,
+                        ), protected + ":" + ptype)
+                    try:
+                        listed = frappe.get_list(protected, fields=["name"], limit=3)
+                    except frappe.PermissionError:
+                        pass
+                    else:
+                        self.assertEqual(listed, [])
+            decision = frappe.db.get_value(
+                "CCPC Center Mapping Revision", revision, "approval_reference",
+            )
+            event_doc = frappe.get_doc(DECISION, decision)
+            self.assertFalse(frappe.has_permission(
+                DECISION, ptype="read", doc=event_doc, user=system_manager,
+            ))
+            self.assertFalse(frappe.has_permission(
+                "CCPC Center Mapping Revision", ptype="read",
+                doc=frappe.get_doc("CCPC Center Mapping Revision", revision),
+                user=system_manager,
+            ))
 
             # Having both Stockroom and Checker roles does NOT create a shortcut.
             frappe.set_user("Administrator")
