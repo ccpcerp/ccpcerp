@@ -55,10 +55,12 @@ class TestStockroomPR45DisposableGuard(unittest.TestCase):
             "CCPC_ALLOW_STOCKROOM_PR45_DB_TEST": "disposable-only",
         }
 
-    def check(self, site=None, env=None):
+    _DEFAULT_SITE = object()
+
+    def check(self, site=_DEFAULT_SITE, env=None):
         with patch.dict(os.environ, self.env if env is None else env, clear=True):
             return guard.is_reviewed_stockroom_pr45_disposable_site(
-                guard.SITE if site is None else site
+                guard.SITE if site is self._DEFAULT_SITE else site
             )
 
     def test_exact_synthetic_pr_event_and_site(self):
