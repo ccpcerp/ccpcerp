@@ -21,7 +21,7 @@ from ccpcerp.ccpc_erp.bc_mapping_policy import (
 # Unknown Companies do NOT receive an implicit or cross-company fallback.
 COMPANY_DEFAULT_COST_CENTERS = {
     "Cagayan Corn Products Corporation": "Main - CCPC",
-    "Ricor Mill Corporation": "Main - RMC",
+    "Ricor Mills Corporation": "Main - RMC",
 }
 
 
