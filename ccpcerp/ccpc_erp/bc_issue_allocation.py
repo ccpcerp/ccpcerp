@@ -1,11 +1,10 @@
 # Copyright (c) 2026, CCPC and contributors
 """Inert B/C original-issue allocation validator for controlled server evidence.
 
-IMPORTANT: This module does NOT fetch or approve mappings, authenticate users,
-lock ERPNext rows, write a Stock Entry or authorize posting. Its callers MUST
-supply authenticated, company-scoped, approved and database-locked evidence.
-Existing CCPC mapping revision DocTypes are Draft-only and remain so.
-This pure validator deliberately has no hook into Withdrawal Slip issuance.
+IMPORTANT: This pure module does NOT fetch or approve mappings, authenticate
+users, lock ERPNext rows, write a Stock Entry or authorize posting. The live
+caller must supply signed Department/Expense evidence or a locked validated
+Company default. This validator itself has no database or posting side effects.
 """
 
 from dataclasses import dataclass
