@@ -313,6 +313,14 @@ def resolve_locked_original_issue(slip, entry):
     """
     _required_fields()
     _canonical(slip.company, "Issue Company")
+    # Company is the first financial policy lock: Finance proposal/approval
+    # paths also lock Company before any mapping scope or revision rows.
+    companies = frappe.db.sql(
+        "SELECT name, cost_center FROM `tabCompany` WHERE name=%s FOR UPDATE",
+        (slip.company,), as_dict=True,
+    )
+    _require(len(companies) == 1 and companies[0].name == slip.company,
+             "Original issue Company must exist.")
     beneficiary = resolve_beneficiary_department(slip)
     lines = _locked_source_lines(slip, beneficiary)
     # Locked source Item Groups, not HTTP inputs or editable Stock Entry rows.
@@ -364,16 +372,11 @@ def resolve_locked_original_issue(slip, entry):
     _require(len(all_center_scopes) <= 1, "Multiple Department Cost Center scopes require Finance review.")
     company_center_default = None
     if not all_center_scopes:
-        # Lock Company settings and the leaf master for both creation and
-        # before_submit. Neither HTTP caller nor an Item default can choose it.
+        # Company was locked before mapping scopes; lock the leaf now, too.
+        # Neither HTTP caller nor an Item default can choose this Center.
         expected_center = COMPANY_DEFAULT_COST_CENTERS.get(slip.company)
         _require(bool(expected_center), "This Company has no authorized default Cost Center policy.")
-        companies = frappe.db.sql(
-            "SELECT name, cost_center FROM `tabCompany` WHERE name=%s FOR UPDATE",
-            (slip.company,), as_dict=True,
-        )
-        _require(len(companies) == 1 and companies[0].name == slip.company
-                 and companies[0].cost_center == expected_center,
+        _require(companies[0].cost_center == expected_center,
                  "Company default Cost Center is not the authorized CCPC/RMC main Center.")
         center = _master("Cost Center", expected_center)
         _require(center.company == slip.company and not center.is_group and not center.disabled,
