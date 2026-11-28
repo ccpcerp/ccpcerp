@@ -1375,6 +1375,16 @@ def ensure_withdrawal_slip_stock_entry_fields():
 					"no_copy": 1,
 					"hidden": 1,
 				},
+				{
+					"fieldname": "ccpc_center_assignment_source",
+					"label": "Cost Center Assignment Source at Issue",
+					"fieldtype": "Select",
+					"options": "Company Default\nSigned Department Revision",
+					"insert_after": "ccpc_center_mapping_revision",
+					"read_only": 1,
+					"no_copy": 1,
+					"hidden": 1,
+				},
 			],
 		}
 	)
