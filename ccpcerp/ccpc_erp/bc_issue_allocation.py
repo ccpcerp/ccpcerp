@@ -18,6 +18,13 @@ from ccpcerp.ccpc_erp.bc_mapping_policy import (
     select_center_revision,
 )
 
+# Company-approved shared Cost Centers; site Company.cost_center must also match.
+# Unknown Companies do NOT receive an implicit or cross-company fallback.
+COMPANY_DEFAULT_COST_CENTERS = {
+    "Cagayan Corn Products Corporation": "Main - CCPC",
+    "Ricor Mill Corporation": "Main - RMC",
+}
+
 
 @dataclass(frozen=True)
 class IssueLine:
@@ -64,6 +71,16 @@ class CenterEvidence:
 
 
 @dataclass(frozen=True)
+class CompanyCenterDefaultEvidence:
+    """Locked Company.cost_center plus locked, same-Company leaf Cost Center."""
+    company: str
+    cost_center: str
+    center_company: str
+    center_is_group: bool
+    center_disabled: bool
+
+
+@dataclass(frozen=True)
 class IssueRowAllocation:
     source_row: str
     item_code: str
@@ -71,9 +88,10 @@ class IssueRowAllocation:
     expense_account: str
     cost_center: str
     expense_revision: str
-    center_revision: str
+    center_revision: str | None
     company: str
     beneficiary_department: str
+    center_source: str = "Signed Department Revision"
 
 
 def _named(value, label):
@@ -116,6 +134,7 @@ def _validate_center_master(evidence, company):
 def resolve_original_issue_allocation(
     *, company, beneficiary_department, posting_at, lines,
     expense_evidence, center_evidence, selected_center_revision=None,
+    company_center_default=None,
 ):
     """Validate synthetic **server-verified** B/C evidence, returning immutable row intents.
 
@@ -147,17 +166,36 @@ def resolve_original_issue_allocation(
         seen_source_rows.add(line.source_row)
         rows.append(line)
 
-    # Wrong-company/Department scopes may be present in a server-side candidate
-    # collection but can NEVER become matching options for this transaction.
+    # The live resolver supplies a default ONLY when there is no Department
+    # mapping scope. Never use a Company default to bypass an expired, pending,
+    # conflicting or invalid Department-specific signed revision.
     matching_centers = [e for e in center_evidence if isinstance(e, CenterEvidence)
                         and e.company == company and e.beneficiary_department == beneficiary_department]
     selected_centers = [e for e in matching_centers if _is_effective_signed(e, posting_at)]
-    for e in selected_centers:
-        _validate_center_master(e, company)
-    center_revision = select_center_revision(
-        [(e.revision, e.selector_mode) for e in selected_centers], selected_center_revision,
-    )
-    chosen_center = next(e for e in selected_centers if e.revision == center_revision)
+    if company_center_default is not None:
+        if selected_center_revision or matching_centers:
+            raise MappingPolicyError("Company default cannot override a Department Center selection.")
+        evidence = company_center_default
+        if not isinstance(evidence, CompanyCenterDefaultEvidence):
+            raise MappingPolicyError("Company Cost Center default needs locked server evidence.")
+        expected_center = COMPANY_DEFAULT_COST_CENTERS.get(company)
+        if (not expected_center or evidence.company != company
+                or evidence.cost_center != expected_center
+                or evidence.center_company != company
+                or evidence.center_is_group is not False
+                or evidence.center_disabled is not False):
+            raise MappingPolicyError("Company default Cost Center is missing, mismatched, grouped or disabled.")
+        chosen_value = evidence.cost_center
+        center_revision = None
+        center_source = "Company Default"
+    else:
+        for e in selected_centers:
+            _validate_center_master(e, company)
+        center_revision = select_center_revision(
+            [(e.revision, e.selector_mode) for e in selected_centers], selected_center_revision,
+        )
+        chosen_value = next(e.cost_center for e in selected_centers if e.revision == center_revision)
+        center_source = "Signed Department Revision"
 
     allocations = []
     for line in rows:
@@ -170,9 +208,10 @@ def resolve_original_issue_allocation(
         _validate_expense_master(expense, company)
         allocations.append(IssueRowAllocation(
             source_row=line.source_row, item_code=line.item_code, item_group=line.item_group,
-            expense_account=expense.expense_account, cost_center=chosen_center.cost_center,
-            expense_revision=expense.revision, center_revision=chosen_center.revision,
+            expense_account=expense.expense_account, cost_center=chosen_value,
+            expense_revision=expense.revision, center_revision=center_revision,
             company=company, beneficiary_department=beneficiary_department,
+            center_source=center_source,
         ))
     return tuple(allocations)
 
