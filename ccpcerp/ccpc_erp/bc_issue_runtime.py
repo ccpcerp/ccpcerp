@@ -1,9 +1,10 @@
 # Copyright (c) 2026, CCPC and contributors
 """Server-side B/C evidence resolver for original Withdrawal Slip Material Issue.
 
-Review-only code. It does NOT approve financial mappings or change permissions.
-Current mapping revisions are intentionally Draft-only: real issues fail closed
-until an independently reviewed approval workflow and signed map intake exist.
+Does not approve financial mappings or change permissions. Original issue
+evidence is resolved from signed Item Group Expense mappings and either
+signed Department Cost Center evidence or verified Company.cost_center policy.
+No issuance is authorized by this module without upstream transaction guards.
 
 Requires an existing authenticated/permissioned issue transaction, with the
 Withdrawal Slip header already locked. All queries operate in that transaction.
