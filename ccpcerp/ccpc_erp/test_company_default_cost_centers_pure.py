@@ -21,7 +21,7 @@ from ccpcerp.ccpc_erp.bc_mapping_policy import MappingPolicyError
 
 NOW = datetime(2026, 11, 29, 4, 0, tzinfo=timezone.utc)
 CCPC = "Cagayan Corn Products Corporation"
-RMC = "Ricor Mill Corporation"
+RMC = "Ricor Mills Corporation"
 
 
 def expense(company):
@@ -79,6 +79,9 @@ class CompanyDefaultCenterPolicyTests(unittest.TestCase):
     def test_reject_wrong_company_or_unlisted_company(self):
         with self.assertRaises(MappingPolicyError):
             allocate(CCPC, "Wet Mill Plant - CCPC", company_default(RMC, "Main - RMC"))
+        with self.assertRaises(MappingPolicyError):
+            allocate("Ricor Mill Corporation", "RMC Production Department",
+                     company_default("Ricor Mill Corporation", "Main - RMC"))
         with self.assertRaises(MappingPolicyError):
             allocate("Unknown Company", "Unknown Dept",
                      company_default("Unknown Company", "Main - UNKNOWN"))
