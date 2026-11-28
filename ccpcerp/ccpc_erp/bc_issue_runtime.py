@@ -16,7 +16,8 @@ from frappe import _
 from frappe.utils import get_datetime, get_system_timezone, now_datetime, nowdate, nowtime
 
 from ccpcerp.ccpc_erp.bc_issue_allocation import (
-    ExpenseEvidence, CenterEvidence, resolve_original_issue_allocation,
+    ExpenseEvidence, CenterEvidence, CompanyCenterDefaultEvidence,
+    COMPANY_DEFAULT_COST_CENTERS, resolve_original_issue_allocation,
     prepare_original_issue_accounting_rows, assert_original_issue_rows_equal,
 )
 from ccpcerp.ccpc_erp.bc_issue_locked_source import read_locked_issue_item_groups
@@ -60,7 +61,7 @@ def _required_fields():
     for doctype, fields in {
         "Stock Entry Detail": (
             "ccpc_expense_mapping_revision", "ccpc_center_mapping_revision",
-            "ccpc_item_group_at_issue",
+            "ccpc_item_group_at_issue", "ccpc_center_assignment_source",
         ),
         "Stock Entry": ("withdrawal_slip",),
     }.items():
@@ -304,9 +305,10 @@ def stamp_original_issue_posting(entry):
 def resolve_locked_original_issue(slip, entry):
     """Return provenanced B/C intents from real locked server masters, never HTTP.
 
-    For now G3 deliberately supports exactly one Department-only Cost Center.
-    Explicit-choice scopes require additional audited selector work and are
-    denied rather than silently picking a default.
+    Prefer existing independently signed Department-scoped Center evidence.
+    When the beneficiary has no Center mapping scope, use only the exact
+    Company.cost_center master approved in the CCPC/RMC policy allowlist.
+    Never bypass a conflicting or inactive Department-specific scope.
     """
     _required_fields()
     _canonical(slip.company, "Issue Company")
@@ -358,35 +360,58 @@ def resolve_locked_original_issue(slip, entry):
         "WHERE company=%s AND beneficiary_department=%s ORDER BY name FOR UPDATE",
         (slip.company, beneficiary), as_dict=True,
     )
-    _require(len(all_center_scopes) == 1, "A unique approved Department Cost Center scope is required.")
-    scope_row = all_center_scopes[0]
-    _require(scope_row.selector_kind == "Department Only" and
-             scope_row.selector_key == "DEPARTMENT_ONLY",
-             "Explicit Cost Center selection is not activated.")
-    records = _lock_revisions("CCPC Center Mapping Revision", scope_row.name)
-    for row in records:
-        _require(row.mapping_scope == scope_row.name, "Center revision scope mismatch.")
-        if row.approval_state != "Approved":
-            continue
-        computed_end = _effective_mapping_end("Center", slip.company, scope_row.name, row)
-        if not is_effective_after_approval(
-            _utc(row.effective_from), computed_end,
-            _utc(row.approved_at), posting,
-        ):
-            continue
-        _assert_approval_provenance(row, slip.company)
-        center = _master("Cost Center", row.cost_center)
-        centers.append(CenterEvidence(
-            revision=row.name, company=slip.company, beneficiary_department=beneficiary,
-            cost_center=center.name, center_company=center.company,
-            center_is_group=bool(center.is_group), center_disabled=bool(center.disabled),
-            selector_mode="Department Only", approval_state=row.approval_state,
-            prepared_by=row.owner, approved_by=row.approved_by, approved_at=_utc(row.approved_at),
-            effective_from=_utc(row.effective_from), effective_until=computed_end,
-        ))
+    _require(len(all_center_scopes) <= 1, "Multiple Department Cost Center scopes require Finance review.")
+    company_center_default = None
+    if not all_center_scopes:
+        # Lock Company settings and the leaf master for both creation and
+        # before_submit. Neither HTTP caller nor an Item default can choose it.
+        expected_center = COMPANY_DEFAULT_COST_CENTERS.get(slip.company)
+        _require(bool(expected_center), "This Company has no authorized default Cost Center policy.")
+        companies = frappe.db.sql(
+            "SELECT name, cost_center FROM `tabCompany` WHERE name=%s FOR UPDATE",
+            (slip.company,), as_dict=True,
+        )
+        _require(len(companies) == 1 and companies[0].name == slip.company
+                 and companies[0].cost_center == expected_center,
+                 "Company default Cost Center is not the authorized CCPC/RMC main Center.")
+        center = _master("Cost Center", expected_center)
+        _require(center.company == slip.company and not center.is_group and not center.disabled,
+                 "Company default Cost Center must be an enabled Company-owned leaf.")
+        company_center_default = CompanyCenterDefaultEvidence(
+            company=slip.company, cost_center=expected_center,
+            center_company=center.company, center_is_group=bool(center.is_group),
+            center_disabled=bool(center.disabled),
+        )
+    else:
+        scope_row = all_center_scopes[0]
+        _require(scope_row.selector_kind == "Department Only" and
+                 scope_row.selector_key == "DEPARTMENT_ONLY",
+                 "Explicit Cost Center selection is not activated.")
+        records = _lock_revisions("CCPC Center Mapping Revision", scope_row.name)
+        for row in records:
+            _require(row.mapping_scope == scope_row.name, "Center revision scope mismatch.")
+            if row.approval_state != "Approved":
+                continue
+            computed_end = _effective_mapping_end("Center", slip.company, scope_row.name, row)
+            if not is_effective_after_approval(
+                _utc(row.effective_from), computed_end,
+                _utc(row.approved_at), posting,
+            ):
+                continue
+            _assert_approval_provenance(row, slip.company)
+            center = _master("Cost Center", row.cost_center)
+            centers.append(CenterEvidence(
+                revision=row.name, company=slip.company, beneficiary_department=beneficiary,
+                cost_center=center.name, center_company=center.company,
+                center_is_group=bool(center.is_group), center_disabled=bool(center.disabled),
+                selector_mode="Department Only", approval_state=row.approval_state,
+                prepared_by=row.owner, approved_by=row.approved_by, approved_at=_utc(row.approved_at),
+                effective_from=_utc(row.effective_from), effective_until=computed_end,
+            ))
     allocations = resolve_original_issue_allocation(
         company=slip.company, beneficiary_department=beneficiary, posting_at=posting,
         lines=lines, expense_evidence=expenses, center_evidence=centers,
+        company_center_default=company_center_default,
     )
     # A server-stamped voucher can wait on Finance locks while a future
     # replacement or retirement crosses its cutoff. Do not post an old
@@ -396,6 +421,10 @@ def resolve_locked_original_issue(slip, entry):
     selected = {e.revision: e for e in expenses + centers}
     for allocation in allocations:
         for name in (allocation.expense_revision, allocation.center_revision):
+            if name is None:
+                _require(allocation.center_source == "Company Default",
+                         "Unsigned Center is not a verified Company default.")
+                continue
             evidence = selected[name]
             _require(is_effective_after_approval(
                 evidence.effective_from, evidence.effective_until,
@@ -421,6 +450,7 @@ def assign_original_issue_b_c(entry, slip):
         row.cost_center = values["cost_center"]
         row.ccpc_expense_mapping_revision = a.expense_revision
         row.ccpc_center_mapping_revision = a.center_revision
+        row.ccpc_center_assignment_source = a.center_source
         row.ccpc_item_group_at_issue = a.item_group
 
 
@@ -439,7 +469,8 @@ def validate_original_issue_b_c(entry, slip):
         expected = by_source.get(row.get("withdrawal_slip_item"))
         _require(expected is not None and
                  row.get("ccpc_expense_mapping_revision") == expected.expense_revision and
-                 row.get("ccpc_center_mapping_revision") == expected.center_revision and
+                 (row.get("ccpc_center_mapping_revision") or None) == expected.center_revision and
+                 row.get("ccpc_center_assignment_source") == expected.center_source and
                  row.get("ccpc_item_group_at_issue") == expected.item_group,
                  "Original issued expense/category/Center revision provenance was changed.")
     assert_original_issue_rows_equal(allocations, source)
